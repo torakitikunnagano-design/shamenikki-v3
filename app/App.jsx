@@ -1005,7 +1005,10 @@ function TitlePage({ casts }) {
 // 第2段階：キャスト別教育管理
 // ============================================================
 function CastPage({ casts, setCasts, scores }) {
-  const [selected, setSelected] = useState(null);
+  const [modal, setModal] = useState(null); // モーダル表示中のキャスト
+  const [modalId, setModalId] = useState("");
+  const [modalPass, setModalPass] = useState("");
+  const [modalSaved, setModalSaved] = useState(false);
   const [newName, setNewName] = useState("");
   const [newStart, setNewStart] = useState("");
   const [tab, setTab] = useState("list");
@@ -1016,16 +1019,76 @@ function CastPage({ casts, setCasts, scores }) {
 
   function addCast() {
     if (!newName.trim()) return;
-    setCasts([...casts, { name: newName.trim(), is_active: true, work_start: newStart, strong: "未分析", weak: "未分析" }]);
+    setCasts([...casts, { name: newName.trim(), is_active: true, work_start: newStart, strong: "未分析", weak: "未分析", heaven_id: "", heaven_pass: "" }]);
     setNewName(""); setNewStart("");
   }
 
-  const castScores = selected ? scores.filter((s) => s.cast_name === selected.name) : [];
-  const avg = castScores.length ? Math.round(castScores.reduce((a, b) => a + (b.score || 0), 0) / castScores.length) : 0;
+  function openModal(c) {
+    setModal(c);
+    setModalId(c.heaven_id || "");
+    setModalPass(c.heaven_pass || "");
+    setModalSaved(false);
+  }
+
+  function saveModal() {
+    setCasts(casts.map((x) => x.name === modal.name ? { ...x, heaven_id: modalId, heaven_pass: modalPass } : x));
+    setModalSaved(true);
+    setTimeout(() => setModal(null), 1000);
+  }
 
   return (
     <div style={{ display: "grid", gap: "16px" }}>
       <Header title="キャスト別教育管理" sub="第2段階：得意・苦手分析と成長サポート" color={C.green} />
+
+      {/* モーダル */}
+      {modal && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "white", borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+              <div>
+                <p style={{ fontWeight: "bold", fontSize: "18px", color: C.text }}>{modal.name}</p>
+                <p style={{ color: C.pink, fontSize: "12px", marginTop: "2px" }}>🌸 ヘブンネット ログイン情報</p>
+              </div>
+              <button onClick={() => setModal(null)} style={{ background: "none", border: "none", fontSize: "24px", cursor: "pointer", color: C.muted }}>×</button>
+            </div>
+
+            <div style={{ display: "grid", gap: "14px" }}>
+              <Field label="ヘブンID">
+                <input
+                  value={modalId}
+                  onChange={(e) => setModalId(e.target.value)}
+                  placeholder="例：66033247"
+                  style={inp}
+                  inputMode="numeric"
+                />
+              </Field>
+              <Field label="パスワード">
+                <input
+                  type="password"
+                  value={modalPass}
+                  onChange={(e) => setModalPass(e.target.value)}
+                  placeholder="パスワードを入力"
+                  style={inp}
+                />
+              </Field>
+
+              <div style={{ padding: "10px", borderRadius: "10px", background: `${C.yellow}11`, border: `1px solid ${C.yellow}33` }}>
+                <p style={{ fontSize: "11px", color: C.muted }}>🔒 ID/パスはこのアプリ内にのみ保存されます</p>
+              </div>
+
+              {modalSaved ? (
+                <div style={{ padding: "14px", borderRadius: "12px", background: `${C.green}15`, border: `1px solid ${C.green}44`, textAlign: "center" }}>
+                  <p style={{ color: C.green, fontWeight: "bold" }}>✅ 保存しました！</p>
+                </div>
+              ) : (
+                <button onClick={saveModal} style={{ padding: "14px", borderRadius: "14px", border: "none", background: `linear-gradient(135deg, ${C.pink}, ${C.purple})`, color: "white", fontWeight: "bold", fontSize: "15px", cursor: "pointer", boxShadow: `0 4px 14px ${C.pink}55` }}>
+                  💾 保存する
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: "8px" }}>
         {["list", "add"].map((t) => (
@@ -1046,71 +1109,26 @@ function CastPage({ casts, setCasts, scores }) {
       {tab === "list" && (
         <div style={{ display: "grid", gap: "10px" }}>
           {casts.map((c) => (
-            <div key={c.name}>
-              <div onClick={() => setSelected(selected?.name === c.name ? null : c)} style={{ ...card, borderColor: c.is_active ? `${C.green}33` : C.border, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <p style={{ fontWeight: "bold", fontSize: "15px" }}>{c.name}</p>
-                  <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
-                    <Tag label={`得意：${c.strong}`} color={C.green} />
-                    <Tag label={`苦手：${c.weak}`} color={C.yellow} />
-                  </div>
+            <div key={c.name} style={{ ...card, borderColor: c.is_active ? `${C.green}33` : C.border, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontWeight: "bold", fontSize: "15px" }}>{c.name}</p>
+                <div style={{ display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" }}>
+                  <Tag label={`得意：${c.strong}`} color={C.green} />
+                  <Tag label={`苦手：${c.weak}`} color={C.yellow} />
+                  {c.heaven_id ? <Tag label="ヘブン✓" color={C.pink} /> : <Tag label="ヘブン未設定" color={C.muted} />}
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "8px" }}>
-                  <span style={{ color: c.is_active ? C.green : C.muted, fontSize: "12px" }}>{c.is_active ? "在籍中" : "停止中"}</span>
-                  <button onClick={(e) => { e.stopPropagation(); toggle(c.name); }} style={{ padding: "6px 12px", borderRadius: "6px", border: "none", background: c.is_active ? "rgba(255,68,102,0.15)" : `${C.green}22`, color: c.is_active ? C.red : C.green, fontWeight: "bold", cursor: "pointer", fontSize: "11px" }}>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "8px", marginLeft: "10px" }}>
+                <span style={{ color: c.is_active ? C.green : C.muted, fontSize: "12px" }}>{c.is_active ? "在籍中" : "停止中"}</span>
+                <div style={{ display: "flex", gap: "6px" }}>
+                  <button onClick={() => openModal(c)} style={{ padding: "6px 10px", borderRadius: "6px", border: "none", background: `${C.pink}22`, color: C.pink, fontWeight: "bold", cursor: "pointer", fontSize: "11px" }}>
+                    🌸 ID設定
+                  </button>
+                  <button onClick={() => toggle(c.name)} style={{ padding: "6px 10px", borderRadius: "6px", border: "none", background: c.is_active ? "rgba(255,68,102,0.15)" : `${C.green}22`, color: c.is_active ? C.red : C.green, fontWeight: "bold", cursor: "pointer", fontSize: "11px" }}>
                     {c.is_active ? "停止" : "再開"}
                   </button>
                 </div>
               </div>
-
-              {/* 詳細パネル */}
-              {selected?.name === c.name && (
-                <div style={{ ...card, marginTop: "8px", borderColor: `${C.green}33`, background: `${C.green}08` }}>
-                  <p style={{ color: C.green, fontSize: "12px", fontWeight: "bold", marginBottom: "12px" }}>成長データ</p>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "16px" }}>
-                    <Stat label="投稿数" value={`${castScores.length}件`} color={C.accent} />
-                    <Stat label="平均点" value={`${avg}点`} color={avg >= 70 ? C.green : C.yellow} />
-                    <Stat label="出勤時間" value={c.work_start || "未設定"} color={C.muted} />
-                  </div>
-
-                  {/* ヘブンID/パス登録 */}
-                  <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "14px", marginTop: "4px", display: "grid", gap: "10px" }}>
-                    <p style={{ fontSize: "12px", color: C.yellow, fontWeight: "bold" }}>🌸 ヘブンネット ログイン情報</p>
-                    <Field label="ヘブンID">
-                      <input
-                        value={c.heaven_id || ""}
-                        onChange={(e) => setCasts(casts.map((x) => x.name === c.name ? { ...x, heaven_id: e.target.value } : x))}
-                        placeholder="例：66033247"
-                        style={inp}
-                      />
-                    </Field>
-                    <Field label="パスワード">
-                      <input
-                        type="password"
-                        value={c.heaven_pass || ""}
-                        onChange={(e) => setCasts(casts.map((x) => x.name === c.name ? { ...x, heaven_pass: e.target.value } : x))}
-                        placeholder="パスワードを入力"
-                        style={inp}
-                      />
-                    </Field>
-                    <div style={{ padding: "10px", borderRadius: "8px", background: `${C.yellow}11`, border: `1px solid ${C.yellow}33` }}>
-                      <p style={{ fontSize: "11px", color: C.muted }}>🔒 ID/パスはこのアプリ内にのみ保存されます。フェーズ2でVPS連携後、自動投稿が有効になります。</p>
-                    </div>
-                  </div>
-
-                  {castScores.length > 0 && (
-                    <div style={{ marginTop: "14px" }}>
-                      <p style={{ fontSize: "12px", color: C.muted, marginBottom: "8px" }}>最近の投稿</p>
-                      {castScores.slice(0, 3).map((s) => (
-                        <div key={s.id} style={{ padding: "8px", background: "#fff5f9", borderRadius: "8px", marginBottom: "6px", display: "flex", justifyContent: "space-between" }}>
-                          <p style={{ fontSize: "13px", color: C.text }}>{s.diary.slice(0, 25)}...</p>
-                          <span style={{ color: s.score >= 70 ? C.green : C.yellow, fontWeight: "bold", fontSize: "13px" }}>{s.score}点</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           ))}
         </div>
