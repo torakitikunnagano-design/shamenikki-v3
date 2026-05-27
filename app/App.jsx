@@ -453,11 +453,11 @@ function ShindanPage({ casts, setCasts, loggedInCast }) {
     const typeGuess = calcType(answers);
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "gpt-4o",
           max_tokens: 800,
           messages: [{
             role: "user",
@@ -492,7 +492,7 @@ ${QUESTIONS.map((q) => `・${q.text} → ${answers[q.id] || "未回答"}`).join(
         })
       });
       const data = await res.json();
-      const text = data.content?.[0]?.text || "";
+      const text = data.choices?.[0]?.message?.content || "";
       setResult({ type: typeGuess, detail: text });
 
       // キャストデータにタイプを保存
@@ -675,11 +675,11 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
     setPostedTime(autoTimeStr);
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "gpt-4o",
           max_tokens: 1000,
           messages: [{
             role: "user",
@@ -727,7 +727,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
         })
       });
       const data = await res.json();
-      const text = data.content?.[0]?.text || "結果を取得できませんでした";
+      const text = data.choices?.[0]?.message?.content || "結果を取得できませんでした";
       const scoreMatch = text.match(/(\d+)点/);
       const sc = scoreMatch ? Number(scoreMatch[1]) : 50;
       setResult(text);
@@ -834,7 +834,7 @@ function HeavenPostButton({ castName, diary, result, casts, postedTime }) {
       // VPS経由でヘブンに自動投稿
       const res = await fetch(`${VPS_URL}/post`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
         body: JSON.stringify({
           heavenId: cast.heaven_id,
           heavenPass: cast.heaven_pass,
@@ -933,11 +933,11 @@ function TitlePage({ casts }) {
     if (!title.trim()) return alert("タイトルを入力してください");
     setLoading(true); setResult(null);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "gpt-4o",
           max_tokens: 800,
           messages: [{
             role: "user",
@@ -968,7 +968,7 @@ function TitlePage({ casts }) {
         })
       });
       const data = await res.json();
-      setResult(data.content?.[0]?.text || "エラー");
+      setResult(data.choices?.[0]?.message?.content || "エラー");
     } catch { setResult("エラーが発生しました"); }
     setLoading(false);
   }
@@ -1231,11 +1231,11 @@ function ImagePage({ casts, loggedInCast }) {
     if (!imageDesc.trim()) return alert("画像の説明を入力してください");
     setLoading(true); setResult(null);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "gpt-4o",
           max_tokens: 800,
           messages: [{
             role: "user",
@@ -1265,7 +1265,7 @@ NG例と改善例
         })
       });
       const data = await res.json();
-      setResult(data.content?.[0]?.text || "エラー");
+      setResult(data.choices?.[0]?.message?.content || "エラー");
     } catch { setResult("エラーが発生しました"); }
     setLoading(false);
   }
