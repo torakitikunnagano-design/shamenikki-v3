@@ -2,11 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 
-// Google Fontsをロード
-const fontLink = document.createElement("link");
-fontLink.rel = "stylesheet";
-fontLink.href = "https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap";
-document.head.appendChild(fontLink);
+// Google Fontsをロード（クライアント側のみ - useEffect内で実行）
 
 // ============================================================
 // カラー・スタイル定数（ポップ女子向け）
@@ -79,6 +75,14 @@ const initScores = [
 const ADMIN_PASSWORD = "1234"; // ← ここで管理パスワードを変更できます
 
 function App() {
+  // Google Fontsをクライアント側で読み込む
+  useEffect(() => {
+    const fontLink = document.createElement("link");
+    fontLink.rel = "stylesheet";
+    fontLink.href = "https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap";
+    document.head.appendChild(fontLink);
+  }, []);
+
   const [mode, setMode] = useState("cast"); // "cast" | "admin"
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [passInput, setPassInput] = useState("");
