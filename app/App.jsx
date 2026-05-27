@@ -44,7 +44,7 @@ const inp = {
   color: C.text,
   fontSize: "14px",
   outline: "none",
-  boxSizing: "border-box" as const,
+  boxSizing: "border-box",
 };
 
 // ============================================================
