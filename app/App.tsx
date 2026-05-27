@@ -171,7 +171,7 @@ function App() {
             </Field>
             {passError && <p style={{ color: C.red, fontSize: "13px", marginTop: "6px" }}>❌ パスワードが違います</p>}
             <div style={{ marginTop: "14px" }}>
-              <Btn onClick={tryUnlock} label="ログイン 🔓" color={C.purple} />
+              <Btn onClick={tryUnlock} loading={false} label="ログイン 🔓" color={C.purple} />
             </div>
           </div>
           <button onClick={() => setMode("cast")} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "13px" }}>
@@ -513,7 +513,7 @@ ${QUESTIONS.map((q) => `・${q.text} → ${answers[q.id] || "未回答"}`).join(
           正直に答えるほど、より精度の高いアドバイスができます💕
         </p>
         <div style={{ marginTop: "14px" }}>
-          <Btn onClick={() => setStep("questions")} label="診断スタート 💎" color={C.pink} />
+          <Btn onClick={() => setStep("questions")} loading={false} label="診断スタート 💎" color={C.pink} />
         </div>
       </div>
     </div>
@@ -580,7 +580,7 @@ ${QUESTIONS.map((q) => `・${q.text} → ${answers[q.id] || "未回答"}`).join(
         </Field>
 
         <div style={{ marginTop: "14px" }}>
-          <Btn onClick={analyzeAndSave} label="診断結果を見る ✨" color={C.pink} loading={!disclose} />
+          <Btn onClick={analyzeAndSave} loading={!disclose} label="診断結果を見る ✨" color={C.pink} />
         </div>
         {!disclose && <p style={{ textAlign: "center", color: C.muted, fontSize: "12px", marginTop: "8px" }}>開示するかどうかを選んでください</p>}
       </div>
@@ -616,7 +616,7 @@ ${QUESTIONS.map((q) => `・${q.text} → ${answers[q.id] || "未回答"}`).join(
               <p style={{ fontSize: "13px", color: C.pink }}>💎 投稿を重ねると複合タイプが解放されるかも...</p>
             </div>
 
-            <Btn onClick={() => { setStep("select"); setAnswers({}); setCurrentQ(0); setNote(""); setDisclose(null); setResult(null); }} label="もう一度診断する" color={C.muted} />
+            <Btn onClick={() => { setStep("select"); setAnswers({}); setCurrentQ(0); setNote(""); setDisclose(null); setResult(null); }} loading={false} label="もう一度診断する" color={C.muted} />
           </>
         ) : null}
       </div>
@@ -1035,7 +1035,7 @@ function CastPage({ casts, setCasts, scores }) {
         <div style={{ ...card, display: "grid", gap: "12px" }}>
           <Field label="キャスト名"><input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="名前を入力" style={inp} /></Field>
           <Field label="出勤開始時間"><input type="time" value={newStart} onChange={(e) => setNewStart(e.target.value)} style={inp} /></Field>
-          <Btn onClick={addCast} label="追加する" color={C.green} />
+          <Btn onClick={addCast} loading={false} label="追加する" color={C.green} />
         </div>
       )}
 
@@ -1361,7 +1361,7 @@ function SettingsPage({ settings, setSettings }) {
           </p>
         </div>
 
-        <Btn onClick={save} label="保存する" />
+        <Btn onClick={save} loading={false} label="保存する" />
       </div>
     </div>
   );
