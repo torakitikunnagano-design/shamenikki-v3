@@ -76,17 +76,22 @@ const ADMIN_PASSWORD = "1234";
 // localStorage 永続化フック
 // ============================================================
 function useLocalStorage(key, initialValue) {
-  const [value, setValue] = useState(() => {
-    if (typeof window === "undefined") return initialValue;
-    try {
-      const stored = localStorage.getItem(key);
-      return stored ? JSON.parse(stored) : initialValue;
-    } catch {
-      return initialValue;
-    }
-  });
+  const [value, setValue] = useState(initialValue);
+  const initialized = useRef(false);
 
   useEffect(() => {
+    if (!initialized.current) {
+      // 初回マウント時: localStorageから読み込む
+      initialized.current = true;
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored !== null) {
+          setValue(JSON.parse(stored));
+          return; // 読み込み後は書き込まずに終了
+        }
+      } catch {}
+    }
+    // 初回以降: localStorageへ書き込む
     try {
       localStorage.setItem(key, JSON.stringify(value));
     } catch {}
