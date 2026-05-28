@@ -320,19 +320,17 @@ function ModeBtn({ active, onClick, label }) {
 function CastLoginScreen({ casts, onLogin }) {
   const [heavenId, setHeavenId]     = useState("");
   const [heavenPass, setHeavenPass] = useState("");
-  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError]           = useState("");
   const [loading, setLoading]       = useState(false);
 
-  // マウント時: 保存済みデータでフォームを初期化
+  // マウント時: 保存済み認証情報をフォームに自動表示
   useEffect(() => {
     try {
       const saved = localStorage.getItem(AUTO_LOGIN_KEY);
       if (saved) {
-        const { heavenId: id, heavenPass: pass, autoLogin: flag } = JSON.parse(saved);
+        const { heavenId: id, heavenPass: pass } = JSON.parse(saved);
         if (id)   setHeavenId(id);
         if (pass) setHeavenPass(pass);
-        if (flag) setRememberMe(true);
       }
     } catch {}
   }, []);
@@ -344,17 +342,13 @@ function CastLoginScreen({ casts, onLogin }) {
     setTimeout(() => {
       setLoading(false);
       if (matched) {
-        // キャスト名・認証情報・フラグをまとめて保存
-        if (rememberMe) {
-          localStorage.setItem(AUTO_LOGIN_KEY, JSON.stringify({
-            castName: matched.name,
-            heavenId,
-            heavenPass,
-            autoLogin: true,
-          }));
-        } else {
-          localStorage.removeItem(AUTO_LOGIN_KEY);
-        }
+        // ログイン成功: 常にID・パス・キャスト名を保存
+        localStorage.setItem(AUTO_LOGIN_KEY, JSON.stringify({
+          castName: matched.name,
+          heavenId,
+          heavenPass,
+          autoLogin: true,
+        }));
         onLogin(matched.name);
       } else {
         setError("IDまたはパスワードが一致しません");
@@ -364,12 +358,11 @@ function CastLoginScreen({ casts, onLogin }) {
 
   function clearSavedLogin() {
     localStorage.removeItem(AUTO_LOGIN_KEY);
-    setRememberMe(false);
     setHeavenId("");
     setHeavenPass("");
   }
 
-  const hasSaved = rememberMe && heavenId;
+  const hasSaved = !!heavenId;
 
   return (
     <div style={{ padding: "40px 16px", maxWidth: "400px", margin: "0 auto", display: "grid", gap: "24px" }}>
@@ -381,11 +374,11 @@ function CastLoginScreen({ casts, onLogin }) {
 
       <div style={{ ...card, display: "grid", gap: "16px" }}>
 
-        {/* 自動ログイン設定済みバナー */}
+        {/* 保存済み情報バナー */}
         {hasSaved && (
-          <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.green}12`, border: `1.5px solid ${C.green}40`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: "12px", color: C.green, fontWeight: "700" }}>✓ 自動ログイン設定済み</span>
-            <button onClick={clearSavedLogin} style={{ background: "none", border: "none", color: C.muted, fontSize: "11px", cursor: "pointer", textDecoration: "underline" }}>解除する</button>
+          <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.accent}10`, border: `1.5px solid ${C.accent}30`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: "12px", color: C.accent, fontWeight: "700" }}>💕 ID・パスワードが入力済みです</span>
+            <button onClick={clearSavedLogin} style={{ background: "none", border: "none", color: C.muted, fontSize: "11px", cursor: "pointer", textDecoration: "underline" }}>消去</button>
           </div>
         )}
 
@@ -409,17 +402,6 @@ function CastLoginScreen({ casts, onLogin }) {
           />
         </Field>
 
-        {/* 自動ログインチェックボックス */}
-        <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", userSelect: "none" }}>
-          <input
-            type="checkbox"
-            checked={rememberMe}
-            onChange={(e) => setRememberMe(e.target.checked)}
-            style={{ width: "18px", height: "18px", accentColor: C.accent, cursor: "pointer", flexShrink: 0 }}
-          />
-          <span style={{ fontSize: "13px", color: C.sub, fontWeight: "500" }}>次回から自動ログイン</span>
-        </label>
-
         {error && (
           <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.red}12`, border: `1.5px solid ${C.red}40` }}>
             <p style={{ color: C.red, fontSize: "13px", margin: 0 }}>{error}</p>
@@ -429,7 +411,7 @@ function CastLoginScreen({ casts, onLogin }) {
         <Btn onClick={handleLogin} loading={loading} label={loading ? "確認中..." : "ログイン"} color={C.accent} />
 
         <p style={{ fontSize: "11px", color: C.muted, textAlign: "center", lineHeight: "1.6", margin: 0 }}>
-          🔒 入力情報はこのアプリ内のみで使用されます
+          🔒 ID・パスワードはこのアプリ内にのみ保存されます
         </p>
       </div>
     </div>
