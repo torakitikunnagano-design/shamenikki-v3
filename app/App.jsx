@@ -324,14 +324,14 @@ function CastLoginScreen({ casts, onLogin }) {
   const [error, setError]           = useState("");
   const [loading, setLoading]       = useState(false);
 
-  // マウント時にlocalStorageからID・パスワードを読み込んでinputの初期値に設定
+  // マウント時にlocalStorageからIDだけ読み込んでinputの初期値に設定
   useEffect(() => {
     try {
       const saved = localStorage.getItem(CREDS_KEY);
       if (saved) {
         const creds = JSON.parse(saved);
         setHeavenId(creds.heavenId || "");
-        setHeavenPass(creds.heavenPass || "");
+        // パスワードは復元しない（毎回入力）
       }
     } catch {}
   }, []); // マウント時のみ実行
@@ -343,9 +343,8 @@ function CastLoginScreen({ casts, onLogin }) {
     setTimeout(() => {
       setLoading(false);
       if (matched) {
-        // ログイン成功: ID・パスワードをlocalStorageに保存
-        localStorage.setItem(CREDS_KEY, JSON.stringify({ heavenId, heavenPass }));
-        // App自動ログイン用にキャスト名も保存
+        // ログイン成功: IDのみlocalStorageに保存（パスワードは保存しない）
+        localStorage.setItem(CREDS_KEY, JSON.stringify({ heavenId }));
         localStorage.setItem(AUTO_LOGIN_KEY, JSON.stringify({
           castName: matched.name,
           heavenId,
@@ -359,14 +358,13 @@ function CastLoginScreen({ casts, onLogin }) {
     }, 800);
   }
 
-  function clearSavedLogin() {
+  function clearSavedId() {
     localStorage.removeItem(CREDS_KEY);
     localStorage.removeItem(AUTO_LOGIN_KEY);
     setHeavenId("");
-    setHeavenPass("");
   }
 
-  const hasSaved = !!heavenId;
+  const hasSavedId = !!heavenId;
 
   return (
     <div style={{ padding: "40px 16px", maxWidth: "400px", margin: "0 auto", display: "grid", gap: "24px" }}>
@@ -378,29 +376,34 @@ function CastLoginScreen({ casts, onLogin }) {
 
       <div style={{ ...card, display: "grid", gap: "16px" }}>
 
-        {/* 保存済み情報バナー */}
-        {hasSaved && (
-          <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.accent}10`, border: `1.5px solid ${C.accent}30`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: "12px", color: C.accent, fontWeight: "700" }}>💕 ID・パスワードが入力済みです</span>
-            <button onClick={clearSavedLogin} style={{ background: "none", border: "none", color: C.muted, fontSize: "11px", cursor: "pointer", textDecoration: "underline" }}>消去</button>
-          </div>
-        )}
-
         <Field label="ヘブンネットID">
-          <input
-            value={heavenId}
-            onChange={(e) => { setHeavenId(e.target.value); setError(""); }}
-            placeholder="例：66033247"
-            style={{ ...inp, borderColor: error ? C.red : C.border }}
-            inputMode="numeric"
-          />
+          <div style={{ position: "relative" }}>
+            <input
+              value={heavenId}
+              onChange={(e) => { setHeavenId(e.target.value); setError(""); }}
+              placeholder="例：66033247"
+              style={{ ...inp, borderColor: error ? C.red : C.border, paddingRight: hasSavedId ? "52px" : undefined }}
+              inputMode="numeric"
+            />
+            {/* IDを記憶する：保存済みなら入力欄内に表示 */}
+            {hasSavedId && (
+              <button
+                onClick={clearSavedId}
+                style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: `${C.accent}18`, border: `1px solid ${C.accent}40`, borderRadius: "6px", padding: "2px 7px", fontSize: "10px", color: C.accent, cursor: "pointer", whiteSpace: "nowrap", fontWeight: "700" }}
+              >消去</button>
+            )}
+          </div>
+          {hasSavedId && (
+            <p style={{ fontSize: "11px", color: C.green, margin: "4px 0 0", fontWeight: "600" }}>✓ IDを記憶しています</p>
+          )}
         </Field>
+
         <Field label="パスワード">
           <input
             type="password"
             value={heavenPass}
             onChange={(e) => { setHeavenPass(e.target.value); setError(""); }}
-            placeholder="パスワードを入力"
+            placeholder="パスワードを毎回入力してください"
             style={{ ...inp, borderColor: error ? C.red : C.border }}
             onKeyDown={(e) => e.key === "Enter" && handleLogin()}
           />
@@ -415,7 +418,7 @@ function CastLoginScreen({ casts, onLogin }) {
         <Btn onClick={handleLogin} loading={loading} label={loading ? "確認中..." : "ログイン"} color={C.accent} />
 
         <p style={{ fontSize: "11px", color: C.muted, textAlign: "center", lineHeight: "1.6", margin: 0 }}>
-          🔒 ID・パスワードはこのアプリ内にのみ保存されます
+          🔒 IDはこのアプリ内にのみ保存されます
         </p>
       </div>
     </div>
