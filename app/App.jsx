@@ -792,7 +792,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
                 <img
                   src={imagePreviewUrl}
                   alt="プレビュー"
-                  style={{ width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "14px", border: `1.5px solid ${C.border}`, display: "block", background: "#f8f0f6" }}
+                  style={{ width: "100%", height: "auto", borderRadius: "14px", border: `1.5px solid ${C.border}`, display: "block" }}
                 />
                 <button
                   type="button"
