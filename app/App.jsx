@@ -673,7 +673,6 @@ function ShindanPage({ casts, setCasts, loggedInCast }) {
 function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
   const castName = loggedInCast || "";
   const [diary, setDiary] = useState("");
-  const [hasImage, setHasImage] = useState(false);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
   const fileInputRef = useRef(null);
@@ -736,7 +735,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
         body: JSON.stringify({
           model: "gpt-4o", max_tokens: 1000,
-          messages: [{ role: "user", content: `あなたはエンタメ業界のブログコンサルタントです。スタッフのブログ記事を分析・採点してください。\n\n【投稿ルール】\n最低文字数：${settings.min_text_length}文字 / 今回：${charCount}文字 / 不足：${charShort}文字\n画像必須：${settings.image_required ? "あり" : "なし"} / 画像：${hasImage ? "あり" : "なし"}\n\n必ず以下のフォーマットで返答してください：\n\n総合点：○○点\n\n投稿ルールチェック\n・文字数判定：達成 or 文字数不足\n・画像判定：達成 or 画像不足\n\n改善提案\n・\n・\n\n良い点\n・\n・\n\n改善点\n・\n・\n\n改善タイトル案\n・\n・\n\nキャラクター分析\n・\n\n【スタッフ名】${castName}\n【ブログ本文】${diary}` }]
+          messages: [{ role: "user", content: `あなたはエンタメ業界のブログコンサルタントです。スタッフのブログ記事を分析・採点してください。\n\n【投稿ルール】\n最低文字数：${settings.min_text_length}文字 / 今回：${charCount}文字 / 不足：${charShort}文字\n画像必須：${settings.image_required ? "あり" : "なし"} / 画像：${imageFile ? "あり" : "なし"}\n\n必ず以下のフォーマットで返答してください：\n\n総合点：○○点\n\n投稿ルールチェック\n・文字数判定：達成 or 文字数不足\n・画像判定：達成 or 画像不足\n\n改善提案\n・\n・\n\n良い点\n・\n・\n\n改善点\n・\n・\n\n改善タイトル案\n・\n・\n\nキャラクター分析\n・\n\n【スタッフ名】${castName}\n【ブログ本文】${diary}` }]
         })
       });
       const data = await res.json();
@@ -744,7 +743,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
       const scoreMatch = text.match(/(\d+)点/);
       const sc = scoreMatch ? Number(scoreMatch[1]) : 50;
       setResult(text); setRating(getRating(sc));
-      setScores((prev) => [{ id: Date.now(), cast_name: castName, diary, result: text, posted_at: autoPostedAtISO, has_image: hasImage, score: sc }, ...prev]);
+      setScores((prev) => [{ id: Date.now(), cast_name: castName, diary, result: text, posted_at: autoPostedAtISO, has_image: !!imageFile, score: sc }, ...prev]);
     } catch { setResult("エラーが発生しました。もう一度お試しください。"); }
     setLoading(false);
   }
@@ -771,7 +770,6 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
           <textarea value={diary} onChange={(e) => setDiary(e.target.value)} placeholder="写メ日記本文を入力..." style={{ ...inp, minHeight: "160px", resize: "vertical" }} />
         </Field>
 
-        <Toggle checked={hasImage} onChange={(v) => { setHasImage(v); if (!v) clearImage(); }} label="画像あり（採点基準）" />
 
         {/* 画像アップロード */}
         <div>
@@ -792,7 +790,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
                 <img
                   src={imagePreviewUrl}
                   alt="プレビュー"
-                  style={{ width: "100%", maxHeight: "300px", objectFit: "cover", borderRadius: "12px", border: `1.5px solid ${C.border}`, display: "block" }}
+                  style={{ width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "12px", border: `1.5px solid ${C.border}`, display: "block", background: "#fdf0f8" }}
                 />
                 <button
                   type="button"
@@ -1322,7 +1320,7 @@ function ImagePage({ casts, loggedInCast }) {
               <img
                 src={previewUrl}
                 alt="選択した画像"
-                style={{ width: "100%", maxHeight: "280px", objectFit: "cover", borderRadius: "14px", border: `1.5px solid ${C.border}`, display: "block" }}
+                style={{ width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "12px", border: `1.5px solid ${C.border}`, display: "block", background: "#fdf0f8" }}
               />
               <button
                 type="button"
