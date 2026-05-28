@@ -921,7 +921,7 @@ function HeavenPostButton({ castName, diary, result, casts, postedTime, imageFil
         {imagePreviewUrl && (
           <div style={{ marginTop: "12px" }}>
             <p style={{ fontSize: "11px", color: C.muted, marginBottom: "6px" }}>添付画像</p>
-            <img src={imagePreviewUrl} alt="添付" style={{ width: "100%", maxHeight: "140px", objectFit: "cover", borderRadius: "10px", border: `1.5px solid ${C.border}`, display: "block" }} />
+            <img src={imagePreviewUrl} alt="添付" style={{ width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "10px", border: `1.5px solid ${C.border}`, display: "block", background: "#fdf0f8" }} />
           </div>
         )}
       </div>
