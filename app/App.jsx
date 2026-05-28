@@ -611,6 +611,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
   const [hasImage, setHasImage] = useState(false);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
+  const fileInputRef = useRef(null);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [rating, setRating] = useState(null);
@@ -707,24 +708,63 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
 
         <Toggle checked={hasImage} onChange={(v) => { setHasImage(v); if (!v) clearImage(); }} label="画像あり（採点基準）" />
 
+        {/* 画像アップロード */}
         <div>
           <p style={{ fontSize: "11px", color: C.sub, marginBottom: "8px", fontWeight: "700", letterSpacing: "0.06em" }}>投稿画像（ヘブン自動投稿用）</p>
+
+          {/* hidden file input — ref経由でトリガー */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageSelect}
+            style={{ display: "none" }}
+          />
+
           {imagePreviewUrl ? (
-            <div style={{ position: "relative" }}>
-              <img src={imagePreviewUrl} alt="プレビュー" style={{ width: "100%", maxHeight: "220px", objectFit: "cover", borderRadius: "14px", border: `1.5px solid ${C.border}`, display: "block" }} />
-              <button onClick={clearImage} style={{ position: "absolute", top: "8px", right: "8px", background: "rgba(255,255,255,0.92)", border: "none", borderRadius: "50%", width: "30px", height: "30px", cursor: "pointer", fontSize: "16px", fontWeight: "700", color: C.text, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>×</button>
-              <div style={{ marginTop: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
-                <span style={{ fontSize: "12px", color: C.green, fontWeight: "700" }}>✓</span>
-                <span style={{ fontSize: "12px", color: C.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{imageFile?.name}</span>
+            <div>
+              <div style={{ position: "relative" }}>
+                <img
+                  src={imagePreviewUrl}
+                  alt="プレビュー"
+                  style={{ width: "100%", maxHeight: "220px", objectFit: "cover", borderRadius: "14px", border: `1.5px solid ${C.border}`, display: "block" }}
+                />
+                <button
+                  type="button"
+                  onClick={clearImage}
+                  style={{ position: "absolute", top: "8px", right: "8px", background: "rgba(255,255,255,0.92)", border: "none", borderRadius: "50%", width: "30px", height: "30px", cursor: "pointer", fontSize: "16px", fontWeight: "700", color: C.text, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}
+                >×</button>
+              </div>
+              <div style={{ marginTop: "8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: "12px", color: C.green, fontWeight: "700" }}>✓ {imageFile?.name}</span>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{ background: "none", border: `1.5px solid ${C.border}`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.muted, cursor: "pointer" }}
+                >変更</button>
               </div>
             </div>
           ) : (
-            <label style={{ display: "block", padding: "22px 16px", border: `2px dashed ${C.border}`, borderRadius: "14px", textAlign: "center", cursor: "pointer", background: `${C.accent}05` }}>
-              <input type="file" accept="image/*" onChange={handleImageSelect} style={{ display: "none" }} />
-              <span style={{ fontSize: "28px", display: "block", marginBottom: "6px" }}>📷</span>
-              <span style={{ fontSize: "13px", color: C.muted, fontWeight: "600" }}>タップして画像を選択</span>
-              <span style={{ fontSize: "11px", color: C.muted, display: "block", marginTop: "4px" }}>JPG / PNG / HEIC</span>
-            </label>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                width: "100%",
+                padding: "24px 16px",
+                border: `2px dashed ${C.accent}60`,
+                borderRadius: "14px",
+                background: "white",
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <span style={{ fontSize: "32px" }}>📷</span>
+              <span style={{ fontSize: "14px", color: C.accent, fontWeight: "700" }}>画像を選択する</span>
+              <span style={{ fontSize: "11px", color: C.muted }}>JPG / PNG / HEIC</span>
+            </button>
           )}
         </div>
 
