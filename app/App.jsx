@@ -1221,53 +1221,143 @@ function GuaranteePage({ casts, scores, settings }) {
 // ============================================================
 function ImagePage({ casts, loggedInCast }) {
   const castName = loggedInCast || "";
-  const [imageDesc, setImageDesc] = useState("");
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [imageFile, setImageFile]       = useState(null);
+  const [previewUrl, setPreviewUrl]     = useState(null);
+  const [result, setResult]             = useState(null);
+  const [loading, setLoading]           = useState(false);
+  const fileInputRef = useRef(null);
 
-  const criteria = ["雰囲気・印象", "構図・見せ方", "清潔感・魅力度", "TOPとの一致度"];
+  useEffect(() => {
+    return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
+  }, [previewUrl]);
+
+  function handleImageSelect(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setImageFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+    setResult(null);
+  }
+
+  function clearImage() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setImageFile(null);
+    setPreviewUrl(null);
+    setResult(null);
+  }
+
+  // FileをBase64 data URLに変換
+  function toBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
 
   async function analyze() {
-    if (!imageDesc.trim()) return alert("画像の説明を入力してください");
+    if (!imageFile) return alert("画像を選択してください");
     setLoading(true); setResult(null);
     try {
+      const base64 = await toBase64(imageFile);
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`,
+        },
         body: JSON.stringify({
-          model: "gpt-4o", max_tokens: 800,
-          messages: [{ role: "user", content: `風俗店の写メ日記画像を分析してください。\n\nキャスト：${castName || "未設定"}\n画像の説明：${imageDesc}\n\n以下のフォーマットで返答してください：\n\n画像総合評価：○○点\n\n各項目評価\n・雰囲気・印象：○○点 / コメント\n・構図・見せ方：○○点 / コメント\n・清潔感・魅力度：○○点 / コメント\n・TOPとの一致度：○○点 / コメント\n\n改善提案\n・\n・\n\nNG例と改善例\n・NG：\n・OK：` }]
-        })
+          model: "gpt-4o",
+          max_tokens: 1000,
+          messages: [{
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: { url: base64 },
+              },
+              {
+                type: "text",
+                text: `あなたはエンタメ業界の写メ日記画像コンサルタントです。アップロードされた画像を直接見て分析してください。\n\nキャスト名：${castName || "未設定"}\n\n以下のフォーマットで返答してください：\n\n画像総合評価：○○点\n\n各項目評価\n・雰囲気・印象：○○点 / コメント\n・構図・見せ方：○○点 / コメント\n・清潔感・魅力度：○○点 / コメント\n・写メ日記映え：○○点 / コメント\n\n良い点\n・\n・\n\n改善提案\n・\n・\n\nこの画像を使った写メ日記タイトル案\n・\n・`,
+              },
+            ],
+          }],
+        }),
       });
       const data = await res.json();
-      setResult(data.choices?.[0]?.message?.content || "エラー");
-    } catch { setResult("エラーが発生しました"); }
+      setResult(data.choices?.[0]?.message?.content || "結果を取得できませんでした");
+    } catch { setResult("エラーが発生しました。もう一度お試しください。"); }
     setLoading(false);
   }
 
+  const criteria = ["雰囲気・印象", "構図・見せ方", "清潔感・魅力度", "写メ日記映え"];
+
   return (
     <div style={{ display: "grid", gap: "16px" }}>
-      <Header title="画像指導" sub="構図・雰囲気・魅力度の分析" color={C.pink} />
+      <Header title="画像指導" sub="GPT-4o visionで画像を直接分析" color={C.pink} />
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: "10px" }}>
         {criteria.map((c) => (
-          <div key={c} style={{ ...card, padding: "14px", textAlign: "center", background: `linear-gradient(135deg, ${C.accent}08, ${C.accent2}05)` }}>
+          <div key={c} style={{ ...card, padding: "14px", textAlign: "center", background: `linear-gradient(135deg, ${C.pink}08, ${C.accent2}05)` }}>
             <p style={{ fontSize: "12px", color: C.sub, margin: 0, fontWeight: "600" }}>{c}</p>
           </div>
         ))}
       </div>
 
       <div style={{ ...card, display: "grid", gap: "16px" }}>
-        <Field label="画像の説明（どんな写真か）">
-          <textarea value={imageDesc} onChange={(e) => setImageDesc(e.target.value)} placeholder="例：自撮り、笑顔、カフェ風の背景、白いワンピース着用..." style={{ ...inp, minHeight: "100px" }} />
-        </Field>
-        <Btn onClick={analyze} loading={loading} label="画像を分析する" color={C.pink} />
+        {/* hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleImageSelect}
+          style={{ display: "none" }}
+        />
+
+        {previewUrl ? (
+          <div>
+            <div style={{ position: "relative" }}>
+              <img
+                src={previewUrl}
+                alt="選択した画像"
+                style={{ width: "100%", maxHeight: "280px", objectFit: "cover", borderRadius: "14px", border: `1.5px solid ${C.border}`, display: "block" }}
+              />
+              <button
+                type="button"
+                onClick={clearImage}
+                style={{ position: "absolute", top: "8px", right: "8px", background: "rgba(255,255,255,0.92)", border: "none", borderRadius: "50%", width: "30px", height: "30px", cursor: "pointer", fontSize: "16px", fontWeight: "700", color: C.text, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}
+              >×</button>
+            </div>
+            <div style={{ marginTop: "8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: "12px", color: C.green, fontWeight: "700" }}>✓ {imageFile?.name}</span>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                style={{ background: "none", border: `1.5px solid ${C.border}`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.muted, cursor: "pointer" }}
+              >変更</button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            style={{ width: "100%", padding: "28px 16px", border: `2px dashed ${C.pink}60`, borderRadius: "14px", background: "white", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}
+          >
+            <span style={{ fontSize: "36px" }}>📸</span>
+            <span style={{ fontSize: "14px", color: C.pink, fontWeight: "700" }}>画像を選択する</span>
+            <span style={{ fontSize: "11px", color: C.muted }}>JPG / PNG / HEIC</span>
+          </button>
+        )}
+
+        <Btn onClick={analyze} loading={loading} label={loading ? "AIが分析中..." : "画像をAIで分析する"} color={C.pink} />
       </div>
 
       {result && (
         <div style={{ ...card }}>
-          <p style={{ color: C.pink, fontSize: "11px", fontWeight: "700", marginBottom: "12px", letterSpacing: "0.08em" }}>分析結果</p>
-          <p style={{ whiteSpace: "pre-wrap", lineHeight: "1.8", fontSize: "14px", color: C.sub, margin: 0 }}>{result}</p>
+          <p style={{ color: C.pink, fontSize: "11px", fontWeight: "700", marginBottom: "12px", letterSpacing: "0.08em" }}>AI分析結果</p>
+          <p style={{ whiteSpace: "pre-wrap", lineHeight: "1.9", fontSize: "14px", color: C.sub, margin: 0 }}>{result}</p>
         </div>
       )}
     </div>
