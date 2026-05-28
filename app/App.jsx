@@ -73,6 +73,29 @@ const initScores = [
 const ADMIN_PASSWORD = "1234";
 
 // ============================================================
+// localStorage 永続化フック
+// ============================================================
+function useLocalStorage(key, initialValue) {
+  const [value, setValue] = useState(() => {
+    if (typeof window === "undefined") return initialValue;
+    try {
+      const stored = localStorage.getItem(key);
+      return stored ? JSON.parse(stored) : initialValue;
+    } catch {
+      return initialValue;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {}
+  }, [key, value]);
+
+  return [value, setValue];
+}
+
+// ============================================================
 // メインアプリ
 // ============================================================
 function App() {
@@ -89,9 +112,9 @@ function App() {
   const [passError, setPassError] = useState(false);
   const [castPage, setCastPage] = useState("shindan");
   const [adminPage, setAdminPage] = useState("guarantee");
-  const [casts, setCasts] = useState(initCasts);
-  const [scores, setScores] = useState(initScores);
-  const [settings, setSettings] = useState(initSettings);
+  const [casts, setCasts] = useLocalStorage("shamenikki_casts", initCasts);
+  const [scores, setScores] = useLocalStorage("shamenikki_scores", initScores);
+  const [settings, setSettings] = useLocalStorage("shamenikki_settings", initSettings);
   const [loggedInCast, setLoggedInCast] = useState(null);
 
   function tryUnlock() {
