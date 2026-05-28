@@ -609,10 +609,31 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
   const castName = loggedInCast || "";
   const [diary, setDiary] = useState("");
   const [hasImage, setHasImage] = useState(false);
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [rating, setRating] = useState(null);
   const [postedTime, setPostedTime] = useState(null);
+
+  useEffect(() => {
+    return () => { if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl); };
+  }, [imagePreviewUrl]);
+
+  function handleImageSelect(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setImageFile(file);
+    setImagePreviewUrl(URL.createObjectURL(file));
+    setHasImage(true);
+  }
+
+  function clearImage() {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setImageFile(null);
+    setImagePreviewUrl(null);
+  }
 
   const charCount = diary.length;
   const charShort = Math.max(settings.min_text_length - charCount, 0);
@@ -684,7 +705,28 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
           <textarea value={diary} onChange={(e) => setDiary(e.target.value)} placeholder="写メ日記本文を入力..." style={{ ...inp, minHeight: "160px", resize: "vertical" }} />
         </Field>
 
-        <Toggle checked={hasImage} onChange={setHasImage} label="画像あり" />
+        <Toggle checked={hasImage} onChange={(v) => { setHasImage(v); if (!v) clearImage(); }} label="画像あり（採点基準）" />
+
+        <div>
+          <p style={{ fontSize: "11px", color: C.sub, marginBottom: "8px", fontWeight: "700", letterSpacing: "0.06em" }}>投稿画像（ヘブン自動投稿用）</p>
+          {imagePreviewUrl ? (
+            <div style={{ position: "relative" }}>
+              <img src={imagePreviewUrl} alt="プレビュー" style={{ width: "100%", maxHeight: "220px", objectFit: "cover", borderRadius: "14px", border: `1.5px solid ${C.border}`, display: "block" }} />
+              <button onClick={clearImage} style={{ position: "absolute", top: "8px", right: "8px", background: "rgba(255,255,255,0.92)", border: "none", borderRadius: "50%", width: "30px", height: "30px", cursor: "pointer", fontSize: "16px", fontWeight: "700", color: C.text, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>×</button>
+              <div style={{ marginTop: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ fontSize: "12px", color: C.green, fontWeight: "700" }}>✓</span>
+                <span style={{ fontSize: "12px", color: C.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{imageFile?.name}</span>
+              </div>
+            </div>
+          ) : (
+            <label style={{ display: "block", padding: "22px 16px", border: `2px dashed ${C.border}`, borderRadius: "14px", textAlign: "center", cursor: "pointer", background: `${C.accent}05` }}>
+              <input type="file" accept="image/*" onChange={handleImageSelect} style={{ display: "none" }} />
+              <span style={{ fontSize: "28px", display: "block", marginBottom: "6px" }}>📷</span>
+              <span style={{ fontSize: "13px", color: C.muted, fontWeight: "600" }}>タップして画像を選択</span>
+              <span style={{ fontSize: "11px", color: C.muted, display: "block", marginTop: "4px" }}>JPG / PNG / HEIC</span>
+            </label>
+          )}
+        </div>
 
         <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.green}12`, border: `1.5px solid ${C.green}30`, display: "flex", alignItems: "center", gap: "8px" }}>
           <span style={{ fontSize: "13px", color: C.muted }}>🔒 投稿時刻は送信した瞬間に自動記録されます</span>
@@ -715,7 +757,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
             );
           })}
 
-          <HeavenPostButton castName={castName} diary={diary} result={result} casts={casts} postedTime={postedTime} />
+          <HeavenPostButton castName={castName} diary={diary} result={result} casts={casts} postedTime={postedTime} imageFile={imageFile} imagePreviewUrl={imagePreviewUrl} />
         </div>
       )}
     </div>
@@ -725,7 +767,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
 // ============================================================
 // ヘブン投稿
 // ============================================================
-function HeavenPostButton({ castName, diary, result, casts, postedTime }) {
+function HeavenPostButton({ castName, diary, result, casts, postedTime, imageFile, imagePreviewUrl }) {
   const [posting, setPosting] = useState(false);
   const [posted, setPosted] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -744,10 +786,17 @@ function HeavenPostButton({ castName, diary, result, casts, postedTime }) {
   async function handlePost() {
     setShowConfirm(false); setPosting(true);
     try {
+      const formData = new FormData();
+      formData.append("heavenId", cast.heaven_id);
+      formData.append("heavenPass", cast.heaven_pass);
+      formData.append("title", suggestedTitle);
+      formData.append("body", diary);
+      if (imageFile) formData.append("image", imageFile);
+
       const res = await fetch(`${VPS_URL}/post`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
-        body: JSON.stringify({ heavenId: cast.heaven_id, heavenPass: cast.heaven_pass, title: suggestedTitle, body: diary }),
+        headers: { "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
+        body: formData,
       });
       const data = await res.json();
       if (data.success) { setPosted(true); setPostError(null); }
@@ -766,6 +815,12 @@ function HeavenPostButton({ castName, diary, result, casts, postedTime }) {
         <p style={{ fontSize: "14px", fontWeight: "700", marginBottom: "12px", color: C.text }}>{suggestedTitle || "タイトルを手動で入力してください"}</p>
         <p style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>本文</p>
         <p style={{ fontSize: "13px", color: C.sub, whiteSpace: "pre-wrap", maxHeight: "80px", overflow: "hidden", margin: 0 }}>{diary}</p>
+        {imagePreviewUrl && (
+          <div style={{ marginTop: "12px" }}>
+            <p style={{ fontSize: "11px", color: C.muted, marginBottom: "6px" }}>添付画像</p>
+            <img src={imagePreviewUrl} alt="添付" style={{ width: "100%", maxHeight: "140px", objectFit: "cover", borderRadius: "10px", border: `1.5px solid ${C.border}`, display: "block" }} />
+          </div>
+        )}
       </div>
 
       {!hasCredentials && (
