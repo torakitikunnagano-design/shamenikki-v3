@@ -298,11 +298,41 @@ function ModeBtn({ active, onClick, label }) {
 // ============================================================
 // キャストログイン
 // ============================================================
+const AUTO_LOGIN_KEY = "shamenikki_autologin";
+
 function CastLoginScreen({ casts, onLogin }) {
-  const [heavenId, setHeavenId] = useState("");
+  const [heavenId, setHeavenId]     = useState("");
   const [heavenPass, setHeavenPass] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [error, setError]           = useState("");
+  const [loading, setLoading]       = useState(false);
+  const attempted = useRef(false);
+
+  // マウント時: 保存済み認証情報を読み込む
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(AUTO_LOGIN_KEY);
+      if (saved) {
+        const { heavenId: id, heavenPass: pass } = JSON.parse(saved);
+        setHeavenId(id || "");
+        setHeavenPass(pass || "");
+        setRememberMe(true);
+      }
+    } catch {}
+  }, []);
+
+  // 保存済み認証情報があればキャストデータ読み込み後に自動ログイン
+  useEffect(() => {
+    if (attempted.current) return;
+    if (!rememberMe || !heavenId || !heavenPass) return;
+    const matched = casts.find(
+      (c) => c.heaven_id === heavenId && c.heaven_pass === heavenPass && c.is_active
+    );
+    if (matched) {
+      attempted.current = true;
+      onLogin(matched.name);
+    }
+  }, [casts, heavenId, heavenPass, rememberMe, onLogin]);
 
   function handleLogin() {
     if (!heavenId || !heavenPass) { setError("IDとパスワードを入力してください"); return; }
@@ -310,10 +340,28 @@ function CastLoginScreen({ casts, onLogin }) {
     const matched = casts.find((c) => c.heaven_id === heavenId && c.heaven_pass === heavenPass && c.is_active);
     setTimeout(() => {
       setLoading(false);
-      if (matched) onLogin(matched.name);
-      else setError("IDまたはパスワードが一致しません");
+      if (matched) {
+        if (rememberMe) {
+          localStorage.setItem(AUTO_LOGIN_KEY, JSON.stringify({ heavenId, heavenPass }));
+        } else {
+          localStorage.removeItem(AUTO_LOGIN_KEY);
+        }
+        onLogin(matched.name);
+      } else {
+        setError("IDまたはパスワードが一致しません");
+      }
     }, 800);
   }
+
+  function clearSavedLogin() {
+    localStorage.removeItem(AUTO_LOGIN_KEY);
+    setRememberMe(false);
+    setHeavenId("");
+    setHeavenPass("");
+    attempted.current = false;
+  }
+
+  const hasSaved = rememberMe && heavenId;
 
   return (
     <div style={{ padding: "40px 16px", maxWidth: "400px", margin: "0 auto", display: "grid", gap: "24px" }}>
@@ -324,6 +372,15 @@ function CastLoginScreen({ casts, onLogin }) {
       </div>
 
       <div style={{ ...card, display: "grid", gap: "16px" }}>
+
+        {/* 自動ログイン設定済みバナー */}
+        {hasSaved && (
+          <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.green}12`, border: `1.5px solid ${C.green}40`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: "12px", color: C.green, fontWeight: "700" }}>✓ 自動ログイン設定済み</span>
+            <button onClick={clearSavedLogin} style={{ background: "none", border: "none", color: C.muted, fontSize: "11px", cursor: "pointer", textDecoration: "underline" }}>解除する</button>
+          </div>
+        )}
+
         <Field label="ヘブンネットID">
           <input
             value={heavenId}
@@ -343,6 +400,17 @@ function CastLoginScreen({ casts, onLogin }) {
             onKeyDown={(e) => e.key === "Enter" && handleLogin()}
           />
         </Field>
+
+        {/* 自動ログインチェックボックス */}
+        <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", userSelect: "none" }}>
+          <input
+            type="checkbox"
+            checked={rememberMe}
+            onChange={(e) => setRememberMe(e.target.checked)}
+            style={{ width: "18px", height: "18px", accentColor: C.accent, cursor: "pointer", flexShrink: 0 }}
+          />
+          <span style={{ fontSize: "13px", color: C.sub, fontWeight: "500" }}>次回から自動ログイン</span>
+        </label>
 
         {error && (
           <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.red}12`, border: `1.5px solid ${C.red}40` }}>
