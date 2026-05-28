@@ -71,6 +71,7 @@ const initScores = [
 ];
 
 const ADMIN_PASSWORD = "1234";
+const AUTO_LOGIN_KEY = "shamenikki_autologin";
 
 // ============================================================
 // localStorage 永続化フック
@@ -121,6 +122,24 @@ function App() {
   const [scores, setScores] = useLocalStorage("shamenikki_scores", initScores);
   const [settings, setSettings] = useLocalStorage("shamenikki_settings", initSettings);
   const [loggedInCast, setLoggedInCast] = useState(null);
+  const autoLoginDone = useRef(false);
+
+  // casts がロードされたら自動ログイン判定
+  useEffect(() => {
+    if (autoLoginDone.current || loggedInCast) return;
+    try {
+      const saved = localStorage.getItem(AUTO_LOGIN_KEY);
+      if (!saved) return;
+      const { castName, autoLogin: flag } = JSON.parse(saved);
+      if (!flag || !castName) return;
+      const cast = casts.find((c) => c.name === castName && c.is_active);
+      if (cast) {
+        autoLoginDone.current = true;
+        setLoggedInCast(castName);
+        setCastPage("shindan");
+      }
+    } catch {}
+  }, [casts, loggedInCast]);
 
   function tryUnlock() {
     if (passInput === ADMIN_PASSWORD) {
@@ -298,41 +317,25 @@ function ModeBtn({ active, onClick, label }) {
 // ============================================================
 // キャストログイン
 // ============================================================
-const AUTO_LOGIN_KEY = "shamenikki_autologin";
-
 function CastLoginScreen({ casts, onLogin }) {
   const [heavenId, setHeavenId]     = useState("");
   const [heavenPass, setHeavenPass] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError]           = useState("");
   const [loading, setLoading]       = useState(false);
-  const attempted = useRef(false);
 
-  // マウント時: 保存済み認証情報を読み込む
+  // マウント時: 保存済みデータでフォームを初期化
   useEffect(() => {
     try {
       const saved = localStorage.getItem(AUTO_LOGIN_KEY);
       if (saved) {
-        const { heavenId: id, heavenPass: pass } = JSON.parse(saved);
-        setHeavenId(id || "");
-        setHeavenPass(pass || "");
-        setRememberMe(true);
+        const { heavenId: id, heavenPass: pass, autoLogin: flag } = JSON.parse(saved);
+        if (id)   setHeavenId(id);
+        if (pass) setHeavenPass(pass);
+        if (flag) setRememberMe(true);
       }
     } catch {}
   }, []);
-
-  // 保存済み認証情報があればキャストデータ読み込み後に自動ログイン
-  useEffect(() => {
-    if (attempted.current) return;
-    if (!rememberMe || !heavenId || !heavenPass) return;
-    const matched = casts.find(
-      (c) => c.heaven_id === heavenId && c.heaven_pass === heavenPass && c.is_active
-    );
-    if (matched) {
-      attempted.current = true;
-      onLogin(matched.name);
-    }
-  }, [casts, heavenId, heavenPass, rememberMe, onLogin]);
 
   function handleLogin() {
     if (!heavenId || !heavenPass) { setError("IDとパスワードを入力してください"); return; }
@@ -341,8 +344,14 @@ function CastLoginScreen({ casts, onLogin }) {
     setTimeout(() => {
       setLoading(false);
       if (matched) {
+        // キャスト名・認証情報・フラグをまとめて保存
         if (rememberMe) {
-          localStorage.setItem(AUTO_LOGIN_KEY, JSON.stringify({ heavenId, heavenPass }));
+          localStorage.setItem(AUTO_LOGIN_KEY, JSON.stringify({
+            castName: matched.name,
+            heavenId,
+            heavenPass,
+            autoLogin: true,
+          }));
         } else {
           localStorage.removeItem(AUTO_LOGIN_KEY);
         }
@@ -358,7 +367,6 @@ function CastLoginScreen({ casts, onLogin }) {
     setRememberMe(false);
     setHeavenId("");
     setHeavenPass("");
-    attempted.current = false;
   }
 
   const hasSaved = rememberMe && heavenId;
