@@ -3,40 +3,40 @@
 import { useState, useEffect, useRef } from "react";
 
 // ============================================================
-// ダークパープル カラーテーマ
+// ポップ女子向け カラーテーマ（ピンク・パープル・ホワイト）
 // ============================================================
 const C = {
-  bg:       "#0d0b18",
-  surface:  "#13102a",
-  card:     "#1a1635",
-  border:   "#2a2250",
-  accent:   "#9d4edd",
-  accent2:  "#7b2ff7",
-  glow:     "#c77dff",
-  green:    "#00d68f",
-  red:      "#ff4757",
-  yellow:   "#ffd32a",
-  pink:     "#e040fb",
-  blue:     "#448aff",
-  text:     "#ede7f6",
-  sub:      "#b39ddb",
-  muted:    "#6a5f8a",
+  bg:      "#fff0f8",
+  surface: "#fff8fc",
+  card:    "#ffffff",
+  border:  "#ffd6ea",
+  accent:  "#ff6b9d",
+  accent2: "#d946ef",
+  glow:    "#ffb3d1",
+  green:   "#2ec4a9",
+  red:     "#ff5c7a",
+  yellow:  "#ffb347",
+  pink:    "#ff6b9d",
+  blue:    "#7b9eff",
+  text:    "#3d1a4e",
+  sub:     "#7c5a8e",
+  muted:   "#c4a0c8",
 };
 
 const card = {
-  background: C.card,
-  border: `1px solid ${C.border}`,
-  borderRadius: "16px",
+  background: "#ffffff",
+  border: `1.5px solid ${C.border}`,
+  borderRadius: "20px",
   padding: "20px",
-  boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+  boxShadow: "0 4px 20px rgba(255,107,157,0.08)",
 };
 
 const inp = {
   width: "100%",
   padding: "12px 14px",
-  borderRadius: "10px",
-  border: `1px solid ${C.border}`,
-  background: C.surface,
+  borderRadius: "12px",
+  border: `1.5px solid ${C.border}`,
+  background: "#fff8fc",
   color: C.text,
   fontSize: "14px",
   outline: "none",
@@ -106,18 +106,18 @@ function App() {
   function castLogout() { setLoggedInCast(null); setCastPage("shindan"); }
 
   const castNav = [
-    { id: "shindan", label: "タイプ診断", icon: "◆" },
-    { id: "score",   label: "AI採点",    icon: "✦" },
-    { id: "image",   label: "画像指導",  icon: "⬡" },
-    ...(settings.show_guarantee ? [{ id: "myguarantee", label: "保証確認", icon: "◈" }] : []),
+    { id: "shindan", label: "タイプ診断", icon: "💎" },
+    { id: "score",   label: "AI採点",    icon: "✨" },
+    { id: "image",   label: "画像指導",  icon: "📸" },
+    ...(settings.show_guarantee ? [{ id: "myguarantee", label: "保証確認", icon: "🎀" }] : []),
   ];
 
   const adminNav = [
-    { id: "guarantee", label: "保証管理", icon: "◈" },
-    { id: "cast",      label: "キャスト", icon: "◎" },
-    { id: "ranking",   label: "ランキング", icon: "★" },
-    { id: "title",     label: "タイトル", icon: "✎" },
-    { id: "settings",  label: "設定",    icon: "⚙" },
+    { id: "guarantee", label: "保証管理", icon: "🎀" },
+    { id: "cast",      label: "キャスト", icon: "👑" },
+    { id: "ranking",   label: "ランキング", icon: "🌟" },
+    { id: "title",     label: "タイトル", icon: "✏️" },
+    { id: "settings",  label: "設定",    icon: "⚙️" },
   ];
 
   const page    = mode === "cast" ? castPage    : adminPage;
@@ -129,20 +129,20 @@ function App() {
 
       {/* ヘッダー */}
       <header style={{
-        background: `linear-gradient(135deg, #1a0a3d 0%, #0d0b18 100%)`,
-        borderBottom: `1px solid ${C.border}`,
+        background: "linear-gradient(135deg, #ff6b9d 0%, #d946ef 100%)",
+        borderBottom: "none",
         padding: "0 16px",
         display: "flex",
         alignItems: "center",
-        height: "56px",
+        height: "58px",
         position: "sticky",
         top: 0,
         zIndex: 100,
-        backdropFilter: "blur(12px)",
+        boxShadow: "0 2px 16px rgba(255,107,157,0.35)",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <div style={{ width: "28px", height: "28px", borderRadius: "8px", background: "linear-gradient(135deg, #7b2ff7, #e040fb)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px", flexShrink: 0 }}>◆</div>
-          <span style={{ fontWeight: "700", fontSize: "15px", letterSpacing: "0.1em", background: "linear-gradient(90deg, #c77dff, #e040fb)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>SHAMENIKKI AI</span>
+          <div style={{ width: "30px", height: "30px", borderRadius: "10px", background: "rgba(255,255,255,0.25)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>💕</div>
+          <span style={{ fontWeight: "700", fontSize: "15px", letterSpacing: "0.08em", color: "white", textShadow: "0 1px 4px rgba(0,0,0,0.15)" }}>SHAMENIKKI AI</span>
         </div>
 
         <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
@@ -155,7 +155,7 @@ function App() {
       {mode === "admin" && !adminUnlocked ? (
         <div style={{ padding: "40px 16px", maxWidth: "400px", margin: "0 auto", display: "grid", gap: "20px" }}>
           <div style={{ textAlign: "center" }}>
-            <div style={{ width: "64px", height: "64px", borderRadius: "20px", background: "linear-gradient(135deg, #2a1a5e, #4a1a8a)", border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "26px", margin: "0 auto 16px" }}>🔐</div>
+            <div style={{ width: "68px", height: "68px", borderRadius: "22px", background: "linear-gradient(135deg, #ffe0f0, #f0d0ff)", border: `2px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px", margin: "0 auto 16px", boxShadow: "0 4px 16px rgba(255,107,157,0.15)" }}>🔐</div>
             <h2 style={{ fontSize: "20px", fontWeight: "700", color: C.text, margin: "0 0 6px" }}>店舗管理画面</h2>
             <p style={{ color: C.muted, fontSize: "13px", margin: 0 }}>パスワードを入力してください</p>
           </div>
@@ -184,11 +184,11 @@ function App() {
       ) : (
         <>
           {/* サブバー */}
-          <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: "36px" }}>
+          <div style={{ background: "white", borderBottom: `1.5px solid ${C.border}`, padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: "36px" }}>
             <span style={{ fontSize: "11px", color: C.accent, fontWeight: "700", letterSpacing: "0.05em" }}>
               {mode === "cast"
-                ? (loggedInCast ? `◆ ${loggedInCast}` : "◆ キャスト")
-                : "◆ 店舗管理"}
+                ? (loggedInCast ? `💕 ${loggedInCast}` : "💕 キャスト")
+                : "👑 店舗管理"}
             </span>
             {mode === "admin" && (
               <button onClick={logout} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "12px" }}>ログアウト</button>
@@ -204,7 +204,7 @@ function App() {
           ) : (
             <>
               {(mode === "admin" || loggedInCast) && (
-                <nav style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, display: "flex", overflowX: "auto", padding: "0 4px" }}>
+                <nav style={{ background: "white", borderBottom: `1.5px solid ${C.border}`, display: "flex", overflowX: "auto", padding: "0 4px" }}>
                   {nav.map((n) => (
                     <button key={n.id} onClick={() => setPage(n.id)} style={{
                       flex: "0 0 auto",
@@ -212,7 +212,7 @@ function App() {
                       border: "none",
                       background: "none",
                       color: page === n.id ? C.accent : C.muted,
-                      borderBottom: `2px solid ${page === n.id ? C.accent : "transparent"}`,
+                      borderBottom: `3px solid ${page === n.id ? C.accent : "transparent"}`,
                       cursor: "pointer",
                       fontSize: "11px",
                       fontWeight: page === n.id ? "700" : "400",
@@ -223,7 +223,7 @@ function App() {
                       alignItems: "center",
                       gap: "2px",
                     }}>
-                      <span style={{ fontSize: "14px" }}>{n.icon}</span>
+                      <span style={{ fontSize: "15px" }}>{n.icon}</span>
                       {n.label}
                     </button>
                   ))}
@@ -255,13 +255,14 @@ function ModeBtn({ active, onClick, label }) {
     <button onClick={onClick} style={{
       padding: "5px 14px",
       borderRadius: "20px",
-      border: active ? "none" : `1px solid ${C.border}`,
-      background: active ? "linear-gradient(135deg, #7b2ff7, #9d4edd)" : "transparent",
-      color: active ? "white" : C.muted,
+      border: active ? "none" : "1.5px solid rgba(255,255,255,0.6)",
+      background: active ? "rgba(255,255,255,0.95)" : "transparent",
+      color: active ? C.accent : "rgba(255,255,255,0.9)",
       fontWeight: "700",
       cursor: "pointer",
       fontSize: "12px",
       transition: "all 0.2s",
+      boxShadow: active ? "0 2px 8px rgba(0,0,0,0.12)" : "none",
     }}>{label}</button>
   );
 }
@@ -289,8 +290,8 @@ function CastLoginScreen({ casts, onLogin }) {
   return (
     <div style={{ padding: "40px 16px", maxWidth: "400px", margin: "0 auto", display: "grid", gap: "24px" }}>
       <div style={{ textAlign: "center" }}>
-        <div style={{ width: "72px", height: "72px", borderRadius: "24px", background: "linear-gradient(135deg, #7b2ff7, #e040fb)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "30px", margin: "0 auto 16px", boxShadow: "0 0 30px rgba(157,78,221,0.4)" }}>◆</div>
-        <h2 style={{ fontSize: "22px", fontWeight: "700", color: C.text, margin: "0 0 6px", letterSpacing: "0.08em" }}>SHAMENIKKI AI</h2>
+        <div style={{ width: "80px", height: "80px", borderRadius: "28px", background: "linear-gradient(135deg, #ff6b9d, #d946ef)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "34px", margin: "0 auto 16px", boxShadow: "0 6px 24px rgba(255,107,157,0.4)" }}>💕</div>
+        <h2 style={{ fontSize: "22px", fontWeight: "700", color: C.text, margin: "0 0 6px", letterSpacing: "0.06em" }}>SHAMENIKKI AI</h2>
         <p style={{ color: C.muted, fontSize: "13px", margin: 0 }}>ヘブンネットのID・パスでログイン</p>
       </div>
 
@@ -316,7 +317,7 @@ function CastLoginScreen({ casts, onLogin }) {
         </Field>
 
         {error && (
-          <div style={{ padding: "10px 14px", borderRadius: "10px", background: `${C.red}18`, border: `1px solid ${C.red}44` }}>
+          <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.red}12`, border: `1.5px solid ${C.red}40` }}>
             <p style={{ color: C.red, fontSize: "13px", margin: 0 }}>{error}</p>
           </div>
         )}
@@ -365,8 +366,8 @@ function MyGuaranteePage({ casts, scores, settings, loggedInCast }) {
 
       {selectedCast && (
         <div style={{ display: "grid", gap: "12px" }}>
-          <div style={{ ...card, textAlign: "center", padding: "32px", background: allOk ? "linear-gradient(135deg, #001a0e, #002d1a)" : "linear-gradient(135deg, #1a0010, #2d0020)", borderColor: allOk ? `${C.green}55` : `${C.red}55` }}>
-            <p style={{ fontSize: "36px", marginBottom: "10px" }}>{allOk ? "🎉" : "😢"}</p>
+          <div style={{ ...card, textAlign: "center", padding: "32px", background: allOk ? "linear-gradient(135deg, #e8fff8, #d0fff0)" : "linear-gradient(135deg, #fff0f4, #ffe0e8)", borderColor: allOk ? `${C.green}60` : `${C.red}50` }}>
+            <p style={{ fontSize: "40px", marginBottom: "10px" }}>{allOk ? "🎉" : "😢"}</p>
             <p style={{ fontSize: "22px", fontWeight: "700", color: allOk ? C.green : C.red, margin: 0 }}>
               {allOk ? "保証条件達成！" : "まだ未達です"}
             </p>
@@ -382,7 +383,7 @@ function MyGuaranteePage({ casts, scores, settings, loggedInCast }) {
             <div style={{ ...card }}>
               <p style={{ fontSize: "11px", color: C.muted, marginBottom: "12px", fontWeight: "700", letterSpacing: "0.05em" }}>今日の投稿</p>
               {myPosts.map((p) => (
-                <div key={p.id} style={{ padding: "12px", background: C.surface, borderRadius: "10px", marginBottom: "8px", border: `1px solid ${C.border}` }}>
+                <div key={p.id} style={{ padding: "12px", background: C.surface, borderRadius: "12px", marginBottom: "8px", border: `1.5px solid ${C.border}` }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
                     <span style={{ fontSize: "12px", color: C.muted }}>{new Date(p.posted_at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}</span>
                     <ScoreBadge score={p.score} />
@@ -416,10 +417,10 @@ const QUESTIONS = [
 
 const TYPE_INFO = {
   "清楚系":     { emoji: "🌸", color: "#b39ddb", desc: "育ちの良さ・上品さが武器。知性と清潔感で差をつけられます。" },
-  "エロ系":     { emoji: "🔥", color: "#ff4757", desc: "欲求に正直な魅力が最大の武器。大胆さをアピールしましょう。" },
-  "M系":        { emoji: "🎀", color: "#e040fb", desc: "尽くす姿勢と従順さが魅力。癒しと奉仕の文章が刺さります。" },
-  "S系":        { emoji: "👑", color: "#ffd32a", desc: "支配力とリード感が魅力。主導権を握るキャラで差別化できます。" },
-  "かわいい系": { emoji: "💕", color: "#448aff", desc: "見た目の可愛さと自己表現が武器。写真映えするキャラを前面に。" },
+  "エロ系":     { emoji: "🔥", color: "#ff5c7a", desc: "欲求に正直な魅力が最大の武器。大胆さをアピールしましょう。" },
+  "M系":        { emoji: "🎀", color: "#ff6b9d", desc: "尽くす姿勢と従順さが魅力。癒しと奉仕の文章が刺さります。" },
+  "S系":        { emoji: "👑", color: "#ffb347", desc: "支配力とリード感が魅力。主導権を握るキャラで差別化できます。" },
+  "かわいい系": { emoji: "💕", color: "#7b9eff", desc: "見た目の可愛さと自己表現が武器。写真映えするキャラを前面に。" },
 };
 
 function ShindanPage({ casts, setCasts, loggedInCast }) {
@@ -479,8 +480,8 @@ function ShindanPage({ casts, setCasts, loggedInCast }) {
           <button onClick={() => { if (currentQ > 0) setCurrentQ(currentQ - 1); }} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "13px" }}>← 戻る</button>
         </div>
 
-        <div style={{ height: "3px", background: C.border, borderRadius: "2px", overflow: "hidden" }}>
-          <div style={{ height: "100%", width: `${progress}%`, background: `linear-gradient(90deg, ${C.accent2}, ${C.glow})`, borderRadius: "2px", transition: "width 0.3s" }} />
+        <div style={{ height: "6px", background: C.border, borderRadius: "4px", overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${progress}%`, background: "linear-gradient(90deg, #ff6b9d, #d946ef)", borderRadius: "4px", transition: "width 0.3s" }} />
         </div>
 
         <div style={{ ...card, padding: "28px 20px", textAlign: "center" }}>
@@ -489,17 +490,17 @@ function ShindanPage({ casts, setCasts, loggedInCast }) {
             {["YES", "NO", "どちらでも"].map((opt) => (
               <button key={opt} onClick={() => answer(opt)} style={{
                 padding: "15px",
-                borderRadius: "12px",
-                border: `1px solid ${C.border}`,
-                background: C.surface,
+                borderRadius: "14px",
+                border: `1.5px solid ${C.border}`,
+                background: "white",
                 color: C.text,
                 fontSize: "15px",
-                fontWeight: "500",
+                fontWeight: "600",
                 cursor: "pointer",
                 transition: "all 0.15s",
               }}
-                onMouseOver={(e) => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.background = `${C.accent}18`; }}
-                onMouseOut={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = C.surface; }}
+                onMouseOver={(e) => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.background = `${C.accent}12`; e.currentTarget.style.color = C.accent; }}
+                onMouseOut={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = "white"; e.currentTarget.style.color = C.text; }}
               >
                 {opt === "YES" ? "✓ YES" : opt === "NO" ? "✗ NO" : "〜 どちらでも"}
               </button>
@@ -523,9 +524,9 @@ function ShindanPage({ casts, setCasts, loggedInCast }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "20px" }}>
           {[["YES", "開示する", C.green], ["NO", "開示しない", C.pink]].map(([val, lbl, col]) => (
             <button key={val} onClick={() => setDisclose(val)} style={{
-              padding: "14px", borderRadius: "12px",
+              padding: "14px", borderRadius: "14px",
               border: `2px solid ${disclose === val ? col : C.border}`,
-              background: disclose === val ? `${col}22` : "transparent",
+              background: disclose === val ? `${col}18` : "white",
               color: disclose === val ? col : C.muted,
               fontWeight: "700", cursor: "pointer", transition: "all 0.2s",
             }}>{lbl}</button>
@@ -550,13 +551,13 @@ function ShindanPage({ casts, setCasts, loggedInCast }) {
         <Header title="診断結果" sub="あなたのタイプが判明しました" color={C.accent} />
         {loading ? (
           <div style={{ ...card, textAlign: "center", padding: "48px" }}>
-            <div style={{ fontSize: "32px", marginBottom: "12px", animation: "spin 2s linear infinite" }}>✦</div>
+            <div style={{ fontSize: "32px", marginBottom: "12px" }}>✨</div>
             <p style={{ color: C.muted, margin: 0 }}>AIが分析中です...</p>
           </div>
         ) : result && typeInfo ? (
           <>
-            <div style={{ ...card, textAlign: "center", padding: "36px", background: `linear-gradient(135deg, ${typeInfo.color}11, ${typeInfo.color}06)`, borderColor: `${typeInfo.color}44` }}>
-              <p style={{ fontSize: "48px", marginBottom: "10px" }}>{typeInfo.emoji}</p>
+            <div style={{ ...card, textAlign: "center", padding: "36px", background: `linear-gradient(135deg, ${typeInfo.color}14, ${typeInfo.color}08)`, borderColor: `${typeInfo.color}50` }}>
+              <p style={{ fontSize: "52px", marginBottom: "10px" }}>{typeInfo.emoji}</p>
               <p style={{ fontSize: "28px", fontWeight: "700", color: typeInfo.color, marginBottom: "10px" }}>{result.type}</p>
               <p style={{ fontSize: "14px", color: C.sub, lineHeight: "1.7", margin: 0 }}>{typeInfo.desc}</p>
             </div>
@@ -640,8 +641,8 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
       <Header title="写メ日記AI採点" sub="文章・タイトル指導" color={C.accent} />
 
       <div style={{ ...card, display: "grid", gap: "16px" }}>
-        <div style={{ padding: "10px 14px", borderRadius: "10px", background: `${C.accent}18`, border: `1px solid ${C.accent}44`, display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ color: C.accent, fontSize: "14px" }}>◆</span>
+        <div style={{ padding: "10px 14px", borderRadius: "12px", background: `linear-gradient(135deg, ${C.accent}15, ${C.accent2}10)`, border: `1.5px solid ${C.accent}30`, display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ fontSize: "16px" }}>💕</span>
           <span style={{ fontWeight: "700", color: C.accent }}>{castName}</span>
           <span style={{ color: C.muted, fontSize: "12px" }}>さんの投稿</span>
         </div>
@@ -657,7 +658,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
 
         <Toggle checked={hasImage} onChange={setHasImage} label="画像あり" />
 
-        <div style={{ padding: "10px 14px", borderRadius: "10px", background: `${C.green}11`, border: `1px solid ${C.green}33`, display: "flex", alignItems: "center", gap: "8px" }}>
+        <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.green}12`, border: `1.5px solid ${C.green}30`, display: "flex", alignItems: "center", gap: "8px" }}>
           <span style={{ fontSize: "13px", color: C.muted }}>🔒 投稿時刻は送信した瞬間に自動記録されます</span>
           {postedTime && <span style={{ marginLeft: "auto", color: C.green, fontWeight: "700", fontSize: "14px" }}>{postedTime}</span>}
         </div>
@@ -667,8 +668,8 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
 
       {result && rating && (
         <div style={{ display: "grid", gap: "12px" }}>
-          <div style={{ ...card, display: "flex", alignItems: "center", gap: "16px", borderColor: `${rating.color}55` }}>
-            <div style={{ width: "56px", height: "56px", borderRadius: "14px", background: `${rating.color}22`, border: `2px solid ${rating.color}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", fontWeight: "700", color: rating.color, flexShrink: 0 }}>{rating.label}</div>
+          <div style={{ ...card, display: "flex", alignItems: "center", gap: "16px", borderColor: `${rating.color}50` }}>
+            <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: `${rating.color}18`, border: `2px solid ${rating.color}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", fontWeight: "700", color: rating.color, flexShrink: 0 }}>{rating.label}</div>
             <div>
               <p style={{ color: rating.color, fontWeight: "700", fontSize: "18px", margin: "0 0 4px" }}>{result.match(/総合点：(\d+点)/)?.[1] || ""}</p>
               <p style={{ color: C.muted, fontSize: "13px", margin: 0 }}>{rating.desc}</p>
@@ -680,7 +681,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
             if (!text) return null;
             return (
               <div key={sec} style={{ ...card }}>
-                <p style={{ color: C.accent, fontSize: "11px", fontWeight: "700", marginBottom: "10px", letterSpacing: "0.08em", textTransform: "uppercase" }}>{sec}</p>
+                <p style={{ color: C.accent, fontSize: "11px", fontWeight: "700", marginBottom: "10px", letterSpacing: "0.08em" }}>{sec}</p>
                 <p style={{ whiteSpace: "pre-wrap", lineHeight: "1.8", fontSize: "14px", color: C.sub, margin: 0 }}>{text}</p>
               </div>
             );
@@ -731,7 +732,7 @@ function HeavenPostButton({ castName, diary, result, casts, postedTime }) {
 
   return (
     <div style={{ display: "grid", gap: "10px" }}>
-      <div style={{ ...card, borderColor: `${C.yellow}44` }}>
+      <div style={{ ...card, borderColor: `${C.yellow}50` }}>
         <p style={{ color: C.yellow, fontSize: "11px", fontWeight: "700", marginBottom: "12px", letterSpacing: "0.08em" }}>投稿内容プレビュー</p>
         <p style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>タイトル（AI提案）</p>
         <p style={{ fontSize: "14px", fontWeight: "700", marginBottom: "12px", color: C.text }}>{suggestedTitle || "タイトルを手動で入力してください"}</p>
@@ -740,13 +741,13 @@ function HeavenPostButton({ castName, diary, result, casts, postedTime }) {
       </div>
 
       {!hasCredentials && (
-        <div style={{ padding: "12px", borderRadius: "10px", background: `${C.red}11`, border: `1px solid ${C.red}33` }}>
+        <div style={{ padding: "12px", borderRadius: "12px", background: `${C.red}10`, border: `1.5px solid ${C.red}30` }}>
           <p style={{ fontSize: "13px", color: C.red, margin: 0 }}>⚠️ キャスト管理でヘブンID/パスを登録してください</p>
         </div>
       )}
 
       {posted ? (
-        <div style={{ padding: "20px", borderRadius: "14px", background: `${C.green}15`, border: `1px solid ${C.green}44`, textAlign: "center" }}>
+        <div style={{ padding: "20px", borderRadius: "16px", background: `${C.green}15`, border: `1.5px solid ${C.green}40`, textAlign: "center" }}>
           <p style={{ fontSize: "32px", marginBottom: "8px" }}>🎉</p>
           <p style={{ color: C.green, fontWeight: "700", fontSize: "16px", margin: "0 0 4px" }}>ヘブンへの投稿完了！</p>
           <p style={{ color: C.muted, fontSize: "12px", margin: 0 }}>自動投稿されました</p>
@@ -754,30 +755,30 @@ function HeavenPostButton({ castName, diary, result, casts, postedTime }) {
       ) : null}
 
       {postError && (
-        <div style={{ padding: "12px", borderRadius: "10px", background: `${C.red}11`, border: `1px solid ${C.red}33` }}>
+        <div style={{ padding: "12px", borderRadius: "12px", background: `${C.red}10`, border: `1.5px solid ${C.red}30` }}>
           <p style={{ fontSize: "13px", color: C.red, margin: 0 }}>❌ {postError}</p>
         </div>
       )}
 
       {showConfirm && (
-        <div style={{ ...card, borderColor: `${C.yellow}44` }}>
-          <p style={{ fontWeight: "700", marginBottom: "8px" }}>ヘブンに自動投稿しますか？</p>
+        <div style={{ ...card, borderColor: `${C.yellow}50` }}>
+          <p style={{ fontWeight: "700", marginBottom: "8px", color: C.text }}>ヘブンに自動投稿しますか？</p>
           <p style={{ fontSize: "13px", color: C.muted, marginBottom: "16px" }}>VPSサーバー経由でヘブンに自動投稿します。</p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-            <button onClick={() => setShowConfirm(false)} style={{ padding: "12px", borderRadius: "10px", border: `1px solid ${C.border}`, background: "none", color: C.muted, cursor: "pointer", fontWeight: "700" }}>キャンセル</button>
-            <button onClick={handlePost} style={{ padding: "12px", borderRadius: "10px", border: "none", background: "linear-gradient(135deg, #7b2ff7, #e040fb)", color: "white", cursor: "pointer", fontWeight: "700" }}>投稿する</button>
+            <button onClick={() => setShowConfirm(false)} style={{ padding: "12px", borderRadius: "12px", border: `1.5px solid ${C.border}`, background: "white", color: C.muted, cursor: "pointer", fontWeight: "700" }}>キャンセル</button>
+            <button onClick={handlePost} style={{ padding: "12px", borderRadius: "12px", border: "none", background: "linear-gradient(135deg, #ff6b9d, #d946ef)", color: "white", cursor: "pointer", fontWeight: "700" }}>投稿する</button>
           </div>
         </div>
       )}
 
       {!posted && !showConfirm && (
-        <button onClick={() => setShowConfirm(true)} disabled={posting} style={{ padding: "16px", borderRadius: "14px", border: "none", background: posting ? C.surface : "linear-gradient(135deg, #7b2ff7, #e040fb)", color: posting ? C.muted : "white", fontWeight: "700", fontSize: "15px", cursor: posting ? "not-allowed" : "pointer", boxShadow: posting ? "none" : "0 4px 20px rgba(123,47,247,0.4)" }}>
+        <button onClick={() => setShowConfirm(true)} disabled={posting} style={{ padding: "16px", borderRadius: "16px", border: "none", background: posting ? C.surface : "linear-gradient(135deg, #ff6b9d, #d946ef)", color: posting ? C.muted : "white", fontWeight: "700", fontSize: "15px", cursor: posting ? "not-allowed" : "pointer", boxShadow: posting ? "none" : "0 4px 20px rgba(255,107,157,0.4)" }}>
           ヘブンに投稿する
         </button>
       )}
 
       {posted && (
-        <button onClick={() => setPosted(false)} style={{ padding: "12px", borderRadius: "10px", border: `1px solid ${C.border}`, background: "none", color: C.muted, cursor: "pointer", fontSize: "13px" }}>
+        <button onClick={() => setPosted(false)} style={{ padding: "12px", borderRadius: "12px", border: `1.5px solid ${C.border}`, background: "white", color: C.muted, cursor: "pointer", fontSize: "13px" }}>
           もう一度投稿する
         </button>
       )}
@@ -872,14 +873,14 @@ function CastPage({ casts, setCasts, scores }) {
       <Header title="キャスト管理" sub="得意・苦手分析と成長サポート" color={C.green} />
 
       {modal && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: "20px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(255,107,157,0.2)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
               <div>
                 <p style={{ fontWeight: "700", fontSize: "18px", color: C.text, margin: "0 0 4px" }}>{modal.name}</p>
                 <p style={{ color: C.accent, fontSize: "12px", margin: 0 }}>ヘブンネット ログイン情報</p>
               </div>
-              <button onClick={() => setModal(null)} style={{ background: "none", border: "none", fontSize: "24px", cursor: "pointer", color: C.muted, lineHeight: 1 }}>×</button>
+              <button onClick={() => setModal(null)} style={{ background: `${C.accent}15`, border: "none", width: "32px", height: "32px", borderRadius: "50%", fontSize: "18px", cursor: "pointer", color: C.accent, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
             </div>
             <div style={{ display: "grid", gap: "14px" }}>
               <Field label="ヘブンID">
@@ -888,11 +889,11 @@ function CastPage({ casts, setCasts, scores }) {
               <Field label="パスワード">
                 <input type="password" value={modalPass} onChange={(e) => setModalPass(e.target.value)} placeholder="パスワードを入力" style={inp} />
               </Field>
-              <div style={{ padding: "10px", borderRadius: "10px", background: `${C.yellow}11`, border: `1px solid ${C.yellow}22` }}>
-                <p style={{ fontSize: "11px", color: C.muted, margin: 0 }}>🔒 ID/パスはこのアプリ内にのみ保存されます</p>
+              <div style={{ padding: "10px", borderRadius: "10px", background: `${C.yellow}15`, border: `1.5px solid ${C.yellow}30` }}>
+                <p style={{ fontSize: "11px", color: C.sub, margin: 0 }}>🔒 ID/パスはこのアプリ内にのみ保存されます</p>
               </div>
               {modalSaved ? (
-                <div style={{ padding: "14px", borderRadius: "12px", background: `${C.green}15`, border: `1px solid ${C.green}44`, textAlign: "center" }}>
+                <div style={{ padding: "14px", borderRadius: "14px", background: `${C.green}15`, border: `1.5px solid ${C.green}40`, textAlign: "center" }}>
                   <p style={{ color: C.green, fontWeight: "700", margin: 0 }}>✅ 保存しました！</p>
                 </div>
               ) : (
@@ -905,7 +906,7 @@ function CastPage({ casts, setCasts, scores }) {
 
       <div style={{ display: "flex", gap: "8px" }}>
         {[["list", "キャスト一覧"], ["add", "新規追加"]].map(([t, lbl]) => (
-          <button key={t} onClick={() => setTab(t)} style={{ padding: "8px 18px", borderRadius: "8px", border: `1px solid ${tab === t ? C.accent : C.border}`, background: tab === t ? `${C.accent}22` : "transparent", color: tab === t ? C.accent : C.muted, fontWeight: "700", cursor: "pointer", fontSize: "13px", transition: "all 0.2s" }}>
+          <button key={t} onClick={() => setTab(t)} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${tab === t ? C.accent : C.border}`, background: tab === t ? `${C.accent}18` : "white", color: tab === t ? C.accent : C.muted, fontWeight: "700", cursor: "pointer", fontSize: "13px", transition: "all 0.2s" }}>
             {lbl}
           </button>
         ))}
@@ -922,12 +923,12 @@ function CastPage({ casts, setCasts, scores }) {
       {tab === "list" && (
         <div style={{ display: "grid", gap: "10px" }}>
           {casts.map((c) => (
-            <div key={c.name} style={{ ...card, borderColor: c.is_active ? `${C.green}33` : C.border }}>
+            <div key={c.name} style={{ ...card, borderColor: c.is_active ? `${C.green}40` : C.border }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                    <p style={{ fontWeight: "700", fontSize: "15px", margin: 0 }}>{c.name}</p>
-                    <span style={{ fontSize: "11px", color: c.is_active ? C.green : C.muted, background: `${c.is_active ? C.green : C.muted}18`, padding: "2px 8px", borderRadius: "20px" }}>{c.is_active ? "在籍中" : "停止中"}</span>
+                    <p style={{ fontWeight: "700", fontSize: "15px", margin: 0, color: C.text }}>{c.name}</p>
+                    <span style={{ fontSize: "11px", color: c.is_active ? C.green : C.muted, background: `${c.is_active ? C.green : C.muted}18`, padding: "3px 10px", borderRadius: "20px", fontWeight: "700" }}>{c.is_active ? "在籍中" : "停止中"}</span>
                   </div>
                   <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                     <Tag label={`得意：${c.strong}`} color={C.green} />
@@ -936,10 +937,10 @@ function CastPage({ casts, setCasts, scores }) {
                   </div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
-                  <button onClick={() => openModal(c)} style={{ padding: "6px 12px", borderRadius: "8px", border: `1px solid ${C.accent}44`, background: `${C.accent}18`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                  <button onClick={() => openModal(c)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.accent}40`, background: `${C.accent}12`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     ID設定
                   </button>
-                  <button onClick={() => toggle(c.name)} style={{ padding: "6px 12px", borderRadius: "8px", border: `1px solid ${c.is_active ? C.red : C.green}44`, background: `${c.is_active ? C.red : C.green}18`, color: c.is_active ? C.red : C.green, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
+                  <button onClick={() => toggle(c.name)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${c.is_active ? C.red : C.green}40`, background: `${c.is_active ? C.red : C.green}12`, color: c.is_active ? C.red : C.green, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
                     {c.is_active ? "停止" : "再開"}
                   </button>
                 </div>
@@ -988,19 +989,19 @@ function GuaranteePage({ casts, scores, settings }) {
       <Header title="保証条件チェック" sub="保証達成状況の自動判定" color={C.yellow} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-        <div style={{ ...card, textAlign: "center", borderColor: `${C.green}44`, background: `${C.green}08` }}>
+        <div style={{ ...card, textAlign: "center", borderColor: `${C.green}40`, background: `${C.green}08` }}>
           <p style={{ color: C.muted, fontSize: "11px", marginBottom: "8px", fontWeight: "700", letterSpacing: "0.05em" }}>達成</p>
           <p style={{ fontSize: "40px", fontWeight: "700", color: C.green, margin: "0 0 4px" }}>{doneCount}</p>
           <p style={{ color: C.muted, fontSize: "11px", margin: 0 }}>名</p>
         </div>
-        <div style={{ ...card, textAlign: "center", borderColor: `${C.red}44`, background: `${C.red}08` }}>
+        <div style={{ ...card, textAlign: "center", borderColor: `${C.red}40`, background: `${C.red}08` }}>
           <p style={{ color: C.muted, fontSize: "11px", marginBottom: "8px", fontWeight: "700", letterSpacing: "0.05em" }}>未達</p>
           <p style={{ fontSize: "40px", fontWeight: "700", color: C.red, margin: "0 0 4px" }}>{rows.length - doneCount}</p>
           <p style={{ color: C.muted, fontSize: "11px", margin: 0 }}>名</p>
         </div>
       </div>
 
-      <div style={{ ...card, padding: "12px 16px" }}>
+      <div style={{ ...card, padding: "12px 16px", background: `${C.accent}06` }}>
         <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>
           目標{settings.daily_post_goal}件 / 連投除外{settings.repeat_limit_min}分 / 最低{settings.min_text_length}文字 {settings.image_required ? "/ 画像必須" : ""}
         </p>
@@ -1008,10 +1009,10 @@ function GuaranteePage({ casts, scores, settings }) {
 
       <div style={{ display: "grid", gap: "10px" }}>
         {rows.map((r) => (
-          <div key={r.name} style={{ ...card, borderColor: r.ok ? `${C.green}44` : `${C.red}33` }}>
+          <div key={r.name} style={{ ...card, borderColor: r.ok ? `${C.green}40` : `${C.red}30` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-              <p style={{ fontWeight: "700", fontSize: "15px", margin: 0 }}>{r.name}</p>
-              <span style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "12px", fontWeight: "700", background: r.ok ? `${C.green}22` : `${C.red}22`, color: r.ok ? C.green : C.red }}>
+              <p style={{ fontWeight: "700", fontSize: "15px", margin: 0, color: C.text }}>{r.name}</p>
+              <span style={{ padding: "4px 14px", borderRadius: "20px", fontSize: "12px", fontWeight: "700", background: r.ok ? `${C.green}18` : `${C.red}15`, color: r.ok ? C.green : C.red }}>
                 {r.ok ? "保証達成" : "未達"}
               </span>
             </div>
@@ -1062,8 +1063,8 @@ function ImagePage({ casts, loggedInCast }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: "10px" }}>
         {criteria.map((c) => (
-          <div key={c} style={{ ...card, padding: "14px", textAlign: "center", background: `${C.accent}08` }}>
-            <p style={{ fontSize: "12px", color: C.sub, margin: 0 }}>{c}</p>
+          <div key={c} style={{ ...card, padding: "14px", textAlign: "center", background: `linear-gradient(135deg, ${C.accent}08, ${C.accent2}05)` }}>
+            <p style={{ fontSize: "12px", color: C.sub, margin: 0, fontWeight: "600" }}>{c}</p>
           </div>
         ))}
       </div>
@@ -1101,12 +1102,12 @@ function RankingPage({ scores }) {
       ) : (
         <div style={{ display: "grid", gap: "10px" }}>
           {sorted.map((s, i) => (
-            <div key={s.id} style={{ ...card, borderColor: i === 0 ? `${C.yellow}55` : C.border, background: i === 0 ? `linear-gradient(135deg, #1a1000, ${C.card})` : C.card }}>
+            <div key={s.id} style={{ ...card, borderColor: i === 0 ? `${C.yellow}60` : C.border, background: i === 0 ? `linear-gradient(135deg, #fffbe8, white)` : "white" }}>
               <div style={{ display: "flex", gap: "14px", alignItems: "flex-start" }}>
                 <div style={{ fontSize: "22px", flexShrink: 0, width: "32px", textAlign: "center" }}>{medals[i] || `${i + 1}`}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                    <p style={{ fontWeight: "700", margin: 0 }}>{s.cast_name}</p>
+                    <p style={{ fontWeight: "700", margin: 0, color: C.text }}>{s.cast_name}</p>
                     <ScoreBadge score={s.score} large />
                   </div>
                   <p style={{ fontSize: "13px", color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", margin: "0 0 8px" }}>{s.diary}</p>
@@ -1153,7 +1154,7 @@ function SettingsPage({ settings, setSettings }) {
         ))}
         <Toggle checked={local.image_required} onChange={(v) => setLocal({ ...local, image_required: v })} label="画像必須" />
 
-        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "16px" }}>
+        <div style={{ borderTop: `1.5px solid ${C.border}`, paddingTop: "16px" }}>
           <p style={{ fontSize: "12px", color: C.muted, marginBottom: "12px", fontWeight: "700" }}>キャスト画面の表示設定</p>
           <Toggle checked={local.show_guarantee} onChange={(v) => setLocal({ ...local, show_guarantee: v })} label="保証確認をキャスト画面に表示する" />
           <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px", paddingLeft: "54px", margin: "6px 0 0 54px" }}>
@@ -1174,10 +1175,10 @@ function Header({ title, sub, color }) {
   return (
     <div style={{ marginBottom: "4px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
-        <div style={{ width: "3px", height: "22px", borderRadius: "2px", background: `linear-gradient(180deg, ${color}, ${color}55)` }} />
+        <div style={{ width: "4px", height: "22px", borderRadius: "2px", background: `linear-gradient(180deg, ${color}, ${color}66)` }} />
         <h1 style={{ fontSize: "19px", fontWeight: "700", color: C.text, margin: 0, letterSpacing: "0.02em" }}>{title}</h1>
       </div>
-      {sub && <p style={{ color: C.muted, fontSize: "12px", paddingLeft: "13px", margin: 0 }}>{sub}</p>}
+      {sub && <p style={{ color: C.muted, fontSize: "12px", paddingLeft: "14px", margin: 0 }}>{sub}</p>}
     </div>
   );
 }
@@ -1185,7 +1186,7 @@ function Header({ title, sub, color }) {
 function Field({ label, children }) {
   return (
     <div>
-      <label style={{ fontSize: "11px", color: C.muted, display: "block", marginBottom: "6px", fontWeight: "700", letterSpacing: "0.06em" }}>{label}</label>
+      <label style={{ fontSize: "11px", color: C.sub, display: "block", marginBottom: "6px", fontWeight: "700", letterSpacing: "0.06em" }}>{label}</label>
       {children}
     </div>
   );
@@ -1196,9 +1197,9 @@ function Btn({ onClick, loading, label, color }) {
   return (
     <button onClick={onClick} disabled={loading} style={{
       padding: "14px",
-      borderRadius: "12px",
+      borderRadius: "14px",
       border: "none",
-      background: loading ? C.surface : `linear-gradient(135deg, ${bg}, ${bg}bb)`,
+      background: loading ? C.surface : `linear-gradient(135deg, ${bg}, ${bg}cc)`,
       color: loading ? C.muted : "white",
       fontWeight: "700",
       fontSize: "14px",
@@ -1216,8 +1217,8 @@ function Btn({ onClick, loading, label, color }) {
 function Toggle({ checked, onChange, label }) {
   return (
     <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer" }}>
-      <div onClick={() => onChange(!checked)} style={{ width: "44px", height: "24px", borderRadius: "12px", background: checked ? `linear-gradient(135deg, ${C.accent2}, ${C.glow})` : C.border, display: "flex", alignItems: "center", padding: "2px", transition: "all 0.3s", flexShrink: 0 }}>
-        <div style={{ width: "20px", height: "20px", borderRadius: "50%", background: "white", transform: checked ? "translateX(20px)" : "translateX(0)", transition: "transform 0.3s", boxShadow: "0 1px 4px rgba(0,0,0,0.3)" }} />
+      <div onClick={() => onChange(!checked)} style={{ width: "44px", height: "26px", borderRadius: "13px", background: checked ? "linear-gradient(135deg, #ff6b9d, #d946ef)" : C.border, display: "flex", alignItems: "center", padding: "3px", transition: "all 0.3s", flexShrink: 0, boxShadow: checked ? "0 2px 8px rgba(255,107,157,0.4)" : "none" }}>
+        <div style={{ width: "20px", height: "20px", borderRadius: "50%", background: "white", transform: checked ? "translateX(18px)" : "translateX(0)", transition: "transform 0.3s", boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }} />
       </div>
       <span style={{ fontSize: "14px", color: C.sub }}>{label}</span>
     </label>
@@ -1226,13 +1227,13 @@ function Toggle({ checked, onChange, label }) {
 
 function Tag({ label, color }) {
   return (
-    <span style={{ padding: "3px 10px", borderRadius: "20px", fontSize: "11px", background: `${color}18`, color, border: `1px solid ${color}33`, fontWeight: "700" }}>{label}</span>
+    <span style={{ padding: "3px 10px", borderRadius: "20px", fontSize: "11px", background: `${color}15`, color, border: `1.5px solid ${color}30`, fontWeight: "700" }}>{label}</span>
   );
 }
 
 function CheckItem({ label, ok }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", borderRadius: "10px", background: ok ? `${C.green}0f` : `${C.red}0f`, border: `1px solid ${ok ? C.green : C.red}33` }}>
+    <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", borderRadius: "12px", background: ok ? `${C.green}10` : `${C.red}08`, border: `1.5px solid ${ok ? C.green : C.red}30` }}>
       <span style={{ fontSize: "14px" }}>{ok ? "✅" : "❌"}</span>
       <span style={{ fontSize: "13px", color: C.sub, fontWeight: "500" }}>{label}</span>
     </div>
