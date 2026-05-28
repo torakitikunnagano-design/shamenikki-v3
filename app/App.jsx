@@ -72,6 +72,7 @@ const initScores = [
 
 const ADMIN_PASSWORD = "1234";
 const AUTO_LOGIN_KEY = "shamenikki_autologin";
+const CREDS_KEY      = "shamenikki_creds";
 
 // ============================================================
 // localStorage 永続化フック
@@ -323,17 +324,17 @@ function CastLoginScreen({ casts, onLogin }) {
   const [error, setError]           = useState("");
   const [loading, setLoading]       = useState(false);
 
-  // マウント時: 保存済み認証情報をフォームに自動表示
+  // マウント時にlocalStorageからID・パスワードを読み込んでinputの初期値に設定
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(AUTO_LOGIN_KEY);
+      const saved = localStorage.getItem(CREDS_KEY);
       if (saved) {
-        const { heavenId: id, heavenPass: pass } = JSON.parse(saved);
-        if (id)   setHeavenId(id);
-        if (pass) setHeavenPass(pass);
+        const creds = JSON.parse(saved);
+        setHeavenId(creds.heavenId || "");
+        setHeavenPass(creds.heavenPass || "");
       }
     } catch {}
-  }, []);
+  }, []); // マウント時のみ実行
 
   function handleLogin() {
     if (!heavenId || !heavenPass) { setError("IDとパスワードを入力してください"); return; }
@@ -342,7 +343,9 @@ function CastLoginScreen({ casts, onLogin }) {
     setTimeout(() => {
       setLoading(false);
       if (matched) {
-        // ログイン成功: 常にID・パス・キャスト名を保存
+        // ログイン成功: ID・パスワードをlocalStorageに保存
+        localStorage.setItem(CREDS_KEY, JSON.stringify({ heavenId, heavenPass }));
+        // App自動ログイン用にキャスト名も保存
         localStorage.setItem(AUTO_LOGIN_KEY, JSON.stringify({
           castName: matched.name,
           heavenId,
@@ -357,6 +360,7 @@ function CastLoginScreen({ casts, onLogin }) {
   }
 
   function clearSavedLogin() {
+    localStorage.removeItem(CREDS_KEY);
     localStorage.removeItem(AUTO_LOGIN_KEY);
     setHeavenId("");
     setHeavenPass("");
