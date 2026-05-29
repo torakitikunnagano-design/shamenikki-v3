@@ -678,6 +678,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
   const fileInputRef = useRef(null);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [rating, setRating] = useState(null);
   const [postedTime, setPostedTime] = useState(null);
 
@@ -685,13 +686,28 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
     return () => { if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl); };
   }, [imagePreviewUrl]);
 
-  function handleImageSelect(e) {
+  async function handleImageSelect(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-    setImageFile(file);
-    setImagePreviewUrl(URL.createObjectURL(file));
-    setHasImage(true);
+    setProcessing(true);
+    setImageFile(null);
+    setImagePreviewUrl(null);
+    let finalFile = file;
+    let finalUrl = URL.createObjectURL(file);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("https://cast-ais.com/process", { method: "POST", body: fd });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      URL.revokeObjectURL(finalUrl);
+      finalUrl = URL.createObjectURL(blob);
+      finalFile = new File([blob], file.name, { type: "image/jpeg" });
+    } catch { /* use original */ }
+    setImageFile(finalFile);
+    setImagePreviewUrl(finalUrl);
+    setProcessing(false);
   }
 
   function clearImage() {
@@ -784,7 +800,12 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
             style={{ display: "none" }}
           />
 
-          {imagePreviewUrl ? (
+          {processing ? (
+            <div style={{ width: "100%", padding: "40px 16px", border: `2px dashed ${C.accent}60`, borderRadius: "14px", background: "white", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "32px" }}>✨</span>
+              <span style={{ fontSize: "14px", color: C.accent, fontWeight: "700" }}>画像を加工中...✨</span>
+            </div>
+          ) : imagePreviewUrl ? (
             <div>
               <div style={{ position: "relative" }}>
                 <img
@@ -1303,14 +1324,20 @@ function ImagePage({ casts, loggedInCast }) {
   const [result, setResult]             = useState(null);
   const [loading, setLoading]           = useState(false);
   const fileInputRef = useRef(null);
+  const vpsInProgress = useRef(false);
 
   useEffect(() => {
     return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
   }, [previewUrl]);
 
-  // 画像選択時に自動補正を実行
+  useEffect(() => {
+    return () => { if (correctedUrl?.startsWith("blob:")) URL.revokeObjectURL(correctedUrl); };
+  }, [correctedUrl]);
+
+  // VPS失敗時のCanvas補正フォールバック
   useEffect(() => {
     if (!previewUrl) { setCorrectedUrl(null); return; }
+    if (vpsInProgress.current) return;
     setCorrecting(true);
     const img = new Image();
     img.onload = () => {
@@ -1322,17 +1349,43 @@ function ImagePage({ casts, loggedInCast }) {
     img.src = previewUrl;
   }, [previewUrl]);
 
-  function handleImageSelect(e) {
+  async function handleImageSelect(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (previewUrl) URL.revokeObjectURL(previewUrl);
+    const originalUrl = URL.createObjectURL(file);
+    vpsInProgress.current = true;
+    setCorrecting(true);
+    setCorrectedUrl(null);
     setImageFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
+    setPreviewUrl(originalUrl);
     setResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("https://cast-ais.com/process", { method: "POST", body: fd });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      setImageFile(new File([blob], file.name, { type: "image/jpeg" }));
+      setCorrectedUrl(URL.createObjectURL(blob));
+      setCorrecting(false);
+    } catch {
+      const img = new Image();
+      img.onload = () => {
+        try { setCorrectedUrl(applyImageCorrections(img)); }
+        catch {}
+        setCorrecting(false);
+      };
+      img.onerror = () => setCorrecting(false);
+      img.src = originalUrl;
+    } finally {
+      vpsInProgress.current = false;
+    }
   }
 
   function clearImage() {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
+    vpsInProgress.current = false;
     setImageFile(null);
     setPreviewUrl(null);
     setCorrectedUrl(null);
@@ -1421,7 +1474,7 @@ function ImagePage({ casts, loggedInCast }) {
 
             {/* 補正内容ラベル */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-              {["明るさ+20%", "コントラスト+10%", "彩度+10%", "シャープネス"].map((t) => (
+              {["明るさ補正", "コントラスト", "美肌フィルター", "シャープネス"].map((t) => (
                 <span key={t} style={{ padding: "3px 10px", borderRadius: "20px", fontSize: "11px", background: `${C.pink}15`, color: C.pink, border: `1px solid ${C.pink}30`, fontWeight: "700" }}>{t}</span>
               ))}
             </div>
