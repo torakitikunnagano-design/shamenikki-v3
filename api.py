@@ -5,30 +5,26 @@ import io
 import numpy as np
 import cv2
 from PIL import Image, ImageEnhance
-import mediapipe as mp
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-mp_face_mesh = mp.solutions.face_mesh
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
 def skin_mask(img_bgr):
     h, w = img_bgr.shape[:2]
-    mask = np.zeros((h, w), dtype=np.uint8)
-    rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    with mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=5) as fm:
-        res = fm.process(rgb)
-    if not res.multi_face_landmarks:
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(60, 60))
+    if len(faces) == 0:
         return None
-    for face in res.multi_face_landmarks:
-        pts = [(int(lm.x * w), int(lm.y * h)) for lm in face.landmark]
-        oval = sorted(set(i for pair in mp_face_mesh.FACEMESH_FACE_OVAL for i in pair))
-        hull = cv2.convexHull(np.array([pts[i] for i in oval], dtype=np.int32))
-        cv2.fillConvexPoly(mask, hull, 255)
-        for region in (mp_face_mesh.FACEMESH_LEFT_EYE, mp_face_mesh.FACEMESH_RIGHT_EYE, mp_face_mesh.FACEMESH_LIPS):
-            ridx = sorted(set(i for pair in region for i in pair))
-            rhull = cv2.convexHull(np.array([pts[i] for i in ridx], dtype=np.int32))
-            cv2.fillConvexPoly(mask, rhull, 0)
+    mask = np.zeros((h, w), dtype=np.uint8)
+    ycrcb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2YCrCb)
+    for (x, y, fw, fh) in faces:
+        x0 = max(0, x - int(fw * 0.1)); y0 = max(0, y - int(fh * 0.1))
+        x1 = min(w, x + fw + int(fw * 0.1)); y1 = min(h, y + fh + int(fh * 0.2))
+        roi = ycrcb[y0:y1, x0:x1]
+        skin = cv2.inRange(roi, (0, 133, 77), (255, 173, 127))
+        mask[y0:y1, x0:x1] = skin
     return mask
 
 def beautify(img_bgr):
@@ -36,8 +32,8 @@ def beautify(img_bgr):
     m = skin_mask(img_bgr)
     if m is None:
         return cv2.addWeighted(img_bgr, 0.6, cv2.bilateralFilter(img_bgr, 9, 50, 50), 0.4, 0)
-    m = cv2.GaussianBlur(m, (21, 21), 0)
-    a = (m.astype(np.float32) / 255.0 * 0.7)[..., None]
+    m = cv2.GaussianBlur(m, (15, 15), 0)
+    a = (m.astype(np.float32) / 255.0 * 0.75)[..., None]
     out = img_bgr.astype(np.float32) * (1 - a) + smooth.astype(np.float32) * a
     return out.astype(np.uint8)
 
