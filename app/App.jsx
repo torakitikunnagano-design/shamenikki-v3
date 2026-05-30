@@ -732,7 +732,6 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
     if (!file) return;
     if (originalPreviewUrl) URL.revokeObjectURL(originalPreviewUrl);
     if (imagePreviewUrl && imagePreviewUrl !== originalPreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-    setProcessing(true);
     setImageFile(null);
     setImagePreviewUrl(null);
     setOriginalPreviewUrl(null);
@@ -743,18 +742,21 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
 
     let finalFile = file;
     let finalUrl = origUrl;
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("https://cast-ais.com/process", { method: "POST", body: fd });
-      if (!res.ok) throw new Error();
-      const blob = await res.blob();
-      finalUrl = URL.createObjectURL(blob);
-      finalFile = new File([blob], file.name, { type: "image/jpeg" });
-    } catch { /* use original */ }
+    if (imageSupport) {
+      setProcessing(true);
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("https://cast-ais.com/process", { method: "POST", body: fd });
+        if (!res.ok) throw new Error();
+        const blob = await res.blob();
+        finalUrl = URL.createObjectURL(blob);
+        finalFile = new File([blob], file.name, { type: "image/jpeg" });
+      } catch { /* use original */ }
+      setProcessing(false);
+    }
     setImageFile(finalFile);
     setImagePreviewUrl(finalUrl);
-    setProcessing(false);
   }
 
   function clearImage() {
@@ -804,15 +806,19 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
     const autoTimeStr = autoPostedAt.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
     setPostedTime(autoTimeStr);
 
+    let scoreText = "";
+    let sc = 0;
     try {
-      const scoreReqPromise = fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
-        body: JSON.stringify({
-          model: "gpt-4o", max_tokens: 1000,
+      const scoreReqPromise = textSupport
+        ? fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
+            body: JSON.stringify({
+              model: "gpt-4o", max_tokens: 1000,
           messages: [{ role: "user", content: `あなたはエンタメ業界のブログコンサルタントです。スタッフのブログ記事を分析・採点してください。\n\n【投稿ルール】\n最低文字数：${settings.min_text_length}文字 / 今回：${charCount}文字 / 不足：${charShort}文字\n画像必須：${settings.image_required ? "あり" : "なし"} / 画像：${imageFile ? "あり" : "なし"}\n\n必ず以下のフォーマットで返答してください：\n\n総合点：○○点\n\n投稿ルールチェック\n・文字数判定：達成 or 文字数不足\n・画像判定：達成 or 画像不足\n\n改善提案\n・\n・\n\n良い点\n・\n・\n\n改善点\n・\n・\n\n改善タイトル案\n・\n・\n\nキャラクター分析\n・\n\n【スタッフ名】${castName}\n【ブログ本文】${diary}` }]
-        })
-      });
+            })
+          })
+        : Promise.resolve(null);
 
       const imageAnalysisPromise = (imageSupport && imageFile)
         ? toBase64(imageFile).then((base64) => fetch("https://api.openai.com/v1/chat/completions", {
@@ -834,76 +840,82 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
 
       const [scoreRes, imgRes] = await Promise.all([scoreReqPromise, imageAnalysisPromise]);
 
-      const scoreData = await scoreRes.json();
-      const text = scoreData.choices?.[0]?.message?.content || "結果を取得できませんでした";
-      const scoreMatch = text.match(/(\d+)点/);
-      const sc = scoreMatch ? Number(scoreMatch[1]) : 50;
-      setResult(text); setRating(getRating(sc));
-      setScores((prev) => [{ id: Date.now(), cast_name: castName, diary, result: text, posted_at: autoPostedAtISO, has_image: !!imageFile, score: sc }, ...prev]);
+      if (scoreRes) {
+        const scoreData = await scoreRes.json();
+        scoreText = scoreData.choices?.[0]?.message?.content || "結果を取得できませんでした";
+        const scoreMatch = scoreText.match(/(\d+)点/);
+        sc = scoreMatch ? Number(scoreMatch[1]) : 50;
+        setResult(scoreText);
+        setRating(getRating(sc));
+      }
 
       if (imgRes) {
         const imgData = await imgRes.json();
         setImageResult(imgData.choices?.[0]?.message?.content || null);
       }
-    } catch { setResult("エラーが発生しました。もう一度お試しください。"); }
-    setLoading(false);
+    } catch { if (textSupport) setResult("エラーが発生しました。もう一度お試しください。"); }
+    finally {
+      setScores((prev) => [{ id: Date.now(), cast_name: castName, diary, result: scoreText, posted_at: autoPostedAtISO, has_image: !!imageFile, score: sc }, ...prev]);
+      setLoading(false);
+    }
   }
 
   const sections = ["投稿ルールチェック", "改善提案", "良い点", "改善点", "改善タイトル案", "キャラクター分析"];
   const imgStyle = { width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "12px", border: `1.5px solid ${C.border}`, display: "block", background: "#fdf0f8" };
-  const bothOff = !imageSupport && !textSupport;
 
   return (
     <div style={{ display: "grid", gap: "16px" }}>
       <Header title="写メ日記AI採点" sub="文章・画像・タイトル指導" color={C.accent} />
 
-      {/* サポート設定トグル */}
+      {/* AIサポート設定トグル */}
       <div style={{ ...card, padding: "16px 20px" }}>
-        <p style={{ fontSize: "11px", color: C.sub, fontWeight: "700", letterSpacing: "0.06em", marginBottom: "12px" }}>サポート設定</p>
+        <p style={{ fontSize: "11px", color: C.sub, fontWeight: "700", letterSpacing: "0.06em", marginBottom: "12px" }}>AIサポート設定</p>
         <div style={{ display: "flex", gap: "28px", flexWrap: "wrap" }}>
-          <Toggle checked={imageSupport} onChange={(v) => updateSupport({ imageSupport: v })} label="📸 画像サポート" />
-          <Toggle checked={textSupport}  onChange={(v) => updateSupport({ textSupport: v })}  label="✏️ 文章サポート" />
+          <Toggle checked={imageSupport} onChange={(v) => updateSupport({ imageSupport: v })} label="📸 画像AIサポート" />
+          <Toggle checked={textSupport}  onChange={(v) => updateSupport({ textSupport: v })}  label="✏️ 文章AIサポート" />
         </div>
+        {!imageSupport && !textSupport && (
+          <p style={{ fontSize: "12px", color: C.muted, margin: "10px 0 0", padding: "8px 12px", background: `${C.muted}10`, borderRadius: "8px" }}>
+            AIサポートOFF：入力・投稿・記録は引き続き使えます
+          </p>
+        )}
       </div>
 
-      {bothOff ? (
-        <div style={{ ...card, textAlign: "center", padding: "40px 20px", background: `linear-gradient(135deg, ${C.surface}, white)` }}>
-          <p style={{ fontSize: "36px", marginBottom: "12px" }}>💤</p>
-          <p style={{ fontWeight: "700", color: C.sub, fontSize: "16px", marginBottom: "6px" }}>サポート機能がOFFです</p>
-          <p style={{ color: C.muted, fontSize: "13px", margin: 0 }}>上の「サポート設定」からONにすると機能が使えます</p>
+      {/* メインフォーム（常に表示） */}
+      <div style={{ ...card, display: "grid", gap: "16px" }}>
+        <div style={{ padding: "10px 14px", borderRadius: "12px", background: `linear-gradient(135deg, ${C.accent}15, ${C.accent2}10)`, border: `1.5px solid ${C.accent}30`, display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ fontSize: "16px" }}>💕</span>
+          <span style={{ fontWeight: "700", color: C.accent }}>{castName}</span>
+          <span style={{ color: C.muted, fontSize: "12px" }}>さんの投稿</span>
         </div>
-      ) : (
-        <div style={{ ...card, display: "grid", gap: "16px" }}>
-          <div style={{ padding: "10px 14px", borderRadius: "12px", background: `linear-gradient(135deg, ${C.accent}15, ${C.accent2}10)`, border: `1.5px solid ${C.accent}30`, display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontSize: "16px" }}>💕</span>
-            <span style={{ fontWeight: "700", color: C.accent }}>{castName}</span>
-            <span style={{ color: C.muted, fontSize: "12px" }}>さんの投稿</span>
-          </div>
 
-          {textSupport && (
-            <Field label={
-              <span style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>写メ日記本文</span>
-                <span style={{ color: charShort > 0 ? C.red : C.green }}>{charCount}文字 {charShort > 0 ? `(あと${charShort}文字)` : "✓"}</span>
-              </span>
-            }>
-              <textarea value={diary} onChange={(e) => setDiary(e.target.value)} placeholder="写メ日記本文を入力..." style={{ ...inp, minHeight: "160px", resize: "vertical" }} />
-            </Field>
-          )}
+        {/* 本文入力（常に表示） */}
+        <Field label={
+          <span style={{ display: "flex", justifyContent: "space-between" }}>
+            <span>写メ日記本文</span>
+            <span style={{ color: charShort > 0 ? C.red : C.green }}>{charCount}文字 {charShort > 0 ? `(あと${charShort}文字)` : "✓"}</span>
+          </span>
+        }>
+          <textarea value={diary} onChange={(e) => setDiary(e.target.value)} placeholder="写メ日記本文を入力..." style={{ ...inp, minHeight: "160px", resize: "vertical" }} />
+        </Field>
 
-          {imageSupport && (
-            <div>
-              <p style={{ fontSize: "11px", color: C.sub, marginBottom: "8px", fontWeight: "700", letterSpacing: "0.06em" }}>投稿画像（ヘブン自動投稿 ＋ 画像指導AI分析）</p>
+        {/* 画像アップロード（常に表示・補正はimageSupport ONのみ） */}
+        <div>
+          <p style={{ fontSize: "11px", color: C.sub, marginBottom: "8px", fontWeight: "700", letterSpacing: "0.06em" }}>
+            投稿画像{imageSupport ? "（ヘブン自動投稿 ＋ 画像指導AI分析）" : "（ヘブン自動投稿用）"}
+          </p>
 
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} style={{ display: "none" }} />
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} style={{ display: "none" }} />
 
-              {processing ? (
-                <div style={{ width: "100%", padding: "40px 16px", border: `2px dashed ${C.accent}60`, borderRadius: "14px", background: "white", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
-                  <span style={{ fontSize: "32px" }}>✨</span>
-                  <span style={{ fontSize: "14px", color: C.accent, fontWeight: "700" }}>画像を加工中...✨</span>
-                </div>
-              ) : originalPreviewUrl ? (
-                <div style={{ display: "grid", gap: "10px" }}>
+          {processing ? (
+            <div style={{ width: "100%", padding: "40px 16px", border: `2px dashed ${C.accent}60`, borderRadius: "14px", background: "white", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "32px" }}>✨</span>
+              <span style={{ fontSize: "14px", color: C.accent, fontWeight: "700" }}>画像を加工中...✨</span>
+            </div>
+          ) : originalPreviewUrl ? (
+            <div style={{ display: "grid", gap: "10px" }}>
+              {imageSupport ? (
+                <>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
                     <div>
                       <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px", textAlign: "center" }}>補正前</p>
@@ -927,40 +939,40 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
                       ⬇ 補正後の画像をダウンロード
                     </a>
                   )}
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: "12px", color: C.green, fontWeight: "700" }}>✓ {imageFile?.name}</span>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button type="button" onClick={() => fileInputRef.current?.click()} style={{ background: "none", border: `1.5px solid ${C.border}`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.muted, cursor: "pointer" }}>変更</button>
-                      <button type="button" onClick={clearImage} style={{ background: "none", border: `1.5px solid ${C.red}40`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.red, cursor: "pointer" }}>削除</button>
-                    </div>
-                  </div>
-                </div>
+                </>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  style={{ width: "100%", padding: "24px 16px", border: `2px dashed ${C.accent}60`, borderRadius: "14px", background: "white", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}
-                >
-                  <span style={{ fontSize: "32px" }}>📷</span>
-                  <span style={{ fontSize: "14px", color: C.accent, fontWeight: "700" }}>画像を選択する</span>
-                  <span style={{ fontSize: "11px", color: C.muted }}>JPG / PNG / HEIC</span>
-                </button>
+                <img src={originalPreviewUrl} alt="プレビュー" style={imgStyle} />
               )}
-            </div>
-          )}
-
-          {textSupport && (
-            <>
-              <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.green}12`, border: `1.5px solid ${C.green}30`, display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ fontSize: "13px", color: C.muted }}>🔒 投稿時刻は送信した瞬間に自動記録されます</span>
-                {postedTime && <span style={{ marginLeft: "auto", color: C.green, fontWeight: "700", fontSize: "14px" }}>{postedTime}</span>}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: "12px", color: C.green, fontWeight: "700" }}>✓ {imageFile?.name}</span>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button type="button" onClick={() => fileInputRef.current?.click()} style={{ background: "none", border: `1.5px solid ${C.border}`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.muted, cursor: "pointer" }}>変更</button>
+                  <button type="button" onClick={clearImage} style={{ background: "none", border: `1.5px solid ${C.red}40`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.red, cursor: "pointer" }}>削除</button>
+                </div>
               </div>
-              <Btn onClick={handleScore} loading={loading} label="AI採点する" color={C.accent} />
-            </>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              style={{ width: "100%", padding: "24px 16px", border: `2px dashed ${C.accent}60`, borderRadius: "14px", background: "white", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}
+            >
+              <span style={{ fontSize: "32px" }}>📷</span>
+              <span style={{ fontSize: "14px", color: C.accent, fontWeight: "700" }}>画像を選択する</span>
+              <span style={{ fontSize: "11px", color: C.muted }}>JPG / PNG / HEIC</span>
+            </button>
           )}
         </div>
-      )}
 
+        {/* 時刻記録 + 送信ボタン（常に表示） */}
+        <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.green}12`, border: `1.5px solid ${C.green}30`, display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ fontSize: "13px", color: C.muted }}>🔒 投稿時刻は送信した瞬間に自動記録されます</span>
+          {postedTime && <span style={{ marginLeft: "auto", color: C.green, fontWeight: "700", fontSize: "14px" }}>{postedTime}</span>}
+        </div>
+        <Btn onClick={handleScore} loading={loading} label={textSupport ? "AI採点する" : "投稿記録する"} color={C.accent} />
+      </div>
+
+      {/* AI採点結果（textSupport ON時のみ） */}
       {textSupport && result && rating && (
         <div style={{ display: "grid", gap: "12px" }}>
           <div style={{ ...card, display: "flex", alignItems: "center", gap: "16px", borderColor: `${rating.color}50` }}>
@@ -988,9 +1000,12 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
               <p style={{ whiteSpace: "pre-wrap", lineHeight: "1.9", fontSize: "14px", color: C.sub, margin: 0 }}>{imageResult}</p>
             </div>
           )}
-
-          <HeavenPostButton castName={castName} diary={diary} result={result} casts={casts} postedTime={postedTime} imageFile={imageFile} imagePreviewUrl={imagePreviewUrl} />
         </div>
+      )}
+
+      {/* ヘブン投稿（投稿記録後は常に表示） */}
+      {postedTime && (
+        <HeavenPostButton castName={castName} diary={diary} result={result} casts={casts} postedTime={postedTime} imageFile={imageFile} imagePreviewUrl={imagePreviewUrl} />
       )}
     </div>
   );
@@ -1036,8 +1051,6 @@ function HeavenPostButton({ castName, diary, result, casts, postedTime, imageFil
     } catch (e) { setPostError("サーバーに接続できませんでした: " + e.message); }
     setPosting(false);
   }
-
-  if (!result) return null;
 
   return (
     <div style={{ display: "grid", gap: "10px" }}>
