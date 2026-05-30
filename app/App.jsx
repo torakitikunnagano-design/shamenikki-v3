@@ -514,9 +514,65 @@ const TYPE_INFO = {
   "かわいい系": { emoji: "💕", color: "#7b9eff", desc: "見た目の可愛さと自己表現が武器。写真映えするキャラを前面に。" },
 };
 
+// ============================================================
+// タイプマッピング・リライトプロンプト・ロックフック
+// ============================================================
+function mapToCanonicalType(raw) {
+  if (!raw) return null;
+  const CANONICAL = ["清楚系", "エロ系", "M系", "S系", "かわいい系"];
+  if (CANONICAL.includes(raw)) return raw;
+  if (/清楚|上品/.test(raw)) return "清楚系";
+  if (/エロ|色気|官能/.test(raw)) return "エロ系";
+  if (/M系|尽くす|従順/.test(raw)) return "M系";
+  if (/S系|女王|支配/.test(raw)) return "S系";
+  if (/かわいい|可愛|キュート/.test(raw)) return "かわいい系";
+  return "清楚系";
+}
+
+const REWRITE_PROMPTS = {
+  "清楚系":     "あなたは上品で清楚な風俗嬢のブログライターです。以下の文章を、育ちの良さと上品さが伝わり、お客様に丁寧で優しい配慮が感じられる清潔感ある文章にリライトしてください。",
+  "エロ系":     "あなたは色気と大人の魅力がある風俗嬢のブログライターです。以下の文章を、官能的で艶っぽく、思わずドキッとする誘惑的な文章にリライトしてください。",
+  "かわいい系": "あなたは元気で明るいかわいい風俗嬢のブログライターです。以下の文章を、読んだ人が笑顔になって元気をもらえるキュートで楽しい文章にリライトしてください。",
+  "M系":        "あなたは従順で甘えた雰囲気の風俗嬢のブログライターです。以下の文章を、相手に尽くし、お客様の願望を優しく受け入れる従順で甘えた雰囲気の文章にリライトしてください。",
+  "S系":        "あなたはSMクラブの女王様のような風俗嬢のブログライターです。以下の文章を、自信に満ちて凛とした、少し挑発的で魅惑的な文章にリライトしてください。",
+};
+
+function useCastTypeLock(castId) {
+  const key = castId ? `cast_type_${castId}` : null;
+  const [lockData, setLockData] = useState({ type: null, retries: 0 });
+  const lockLoaded = useRef(false);
+
+  useEffect(() => {
+    if (!key || lockLoaded.current) return;
+    lockLoaded.current = true;
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved) setLockData(JSON.parse(saved));
+    } catch {}
+  }, [key]);
+
+  function saveLock(updates) {
+    setLockData((prev) => {
+      const next = { ...prev, ...updates };
+      if (key) { try { localStorage.setItem(key, JSON.stringify(next)); } catch {} }
+      return next;
+    });
+  }
+
+  function resetLock() {
+    setLockData({ type: null, retries: 0 });
+    if (key) { try { localStorage.removeItem(key); } catch {} }
+  }
+
+  return [lockData, saveLock, resetLock];
+}
+
 function ShindanPage({ casts, setCasts, loggedInCast }) {
   const [step, setStep] = useState("questions");
   const castName = loggedInCast || "";
+  const cast = casts.find((c) => c.name === castName);
+  const castId = cast?.heaven_id || castName;
+  const [lockData, saveLock] = useCastTypeLock(castId);
   const [answers, setAnswers] = useState({});
   const [currentQ, setCurrentQ] = useState(0);
   const [note, setNote] = useState("");
@@ -558,7 +614,30 @@ function ShindanPage({ casts, setCasts, loggedInCast }) {
       setResult({ type: typeGuess, detail: text });
       setCasts((prev) => prev.map((c) => c.name === castName ? { ...c, type: typeGuess, disclose, shindan_note: disclose === "YES" ? note : null } : c));
     } catch { setResult({ type: typeGuess, detail: "分析中にエラーが発生しました。" }); }
+    saveLock({ type: typeGuess, retries: lockData.retries + 1 });
     setLoading(false);
+  }
+
+  if (lockData.retries >= 2 && step !== "result") {
+    const lockedTypeInfo = lockData.type ? TYPE_INFO[mapToCanonicalType(lockData.type)] : null;
+    return (
+      <div style={{ display: "grid", gap: "16px" }}>
+        <Header title="タイプ診断" sub="ロック中" color={C.muted} />
+        <div style={{ ...card, textAlign: "center", padding: "32px 20px" }}>
+          <p style={{ fontSize: "40px", marginBottom: "12px" }}>🔒</p>
+          <p style={{ fontWeight: "700", color: C.text, fontSize: "16px", marginBottom: "6px" }}>やり直し回数の上限です</p>
+          <p style={{ color: C.muted, fontSize: "13px", marginBottom: "20px", lineHeight: "1.7" }}>
+            これ以上やり直しはできません。<br />店舗の管理画面から解除してください。
+          </p>
+          {lockedTypeInfo && (
+            <div style={{ ...card, background: `linear-gradient(135deg, ${lockedTypeInfo.color}14, ${lockedTypeInfo.color}08)`, borderColor: `${lockedTypeInfo.color}50`, padding: "24px" }}>
+              <p style={{ fontSize: "32px", marginBottom: "8px" }}>{lockedTypeInfo.emoji}</p>
+              <p style={{ fontSize: "18px", fontWeight: "700", color: lockedTypeInfo.color, margin: 0 }}>確定タイプ：{lockData.type}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   }
 
   if (step === "questions") {
@@ -655,7 +734,12 @@ function ShindanPage({ casts, setCasts, loggedInCast }) {
             <div style={{ ...card }}>
               <p style={{ whiteSpace: "pre-wrap", lineHeight: "1.8", fontSize: "14px", color: C.sub }}>{result.detail}</p>
             </div>
-            <Btn onClick={() => { setStep("questions"); setAnswers({}); setCurrentQ(0); setNote(""); setDisclose(null); setResult(null); }} loading={false} label="もう一度診断する" color={C.muted} />
+            {lockData.retries >= 2
+              ? <div style={{ padding: "12px 16px", borderRadius: "12px", background: `${C.muted}10`, border: `1.5px solid ${C.muted}30`, textAlign: "center" }}>
+                  <p style={{ color: C.muted, fontSize: "13px", margin: 0 }}>🔒 店舗の管理画面からやり直しを解除してください</p>
+                </div>
+              : <Btn onClick={() => { setStep("questions"); setAnswers({}); setCurrentQ(0); setNote(""); setDisclose(null); setResult(null); }} loading={false} label="もう一度診断する" color={C.muted} />
+            }
           </>
         ) : null}
       </div>
@@ -727,6 +811,20 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
     return () => { if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl); };
   }, [imagePreviewUrl]);
 
+  const [confirmedType, setConfirmedType] = useState(null);
+  useEffect(() => {
+    if (!castId) return;
+    try {
+      const saved = localStorage.getItem(`cast_type_${castId}`);
+      if (saved) {
+        const { type } = JSON.parse(saved);
+        setConfirmedType(mapToCanonicalType(type));
+      }
+    } catch {}
+  }, [castId]);
+  const [rewriting, setRewriting] = useState(false);
+  const [rewriteResult, setRewriteResult] = useState(null);
+
   async function handleImageSelect(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -766,6 +864,28 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
     setOriginalPreviewUrl(null);
     setImagePreviewUrl(null);
     setImageResult(null);
+  }
+
+  async function handleRewrite() {
+    if (!diary.trim()) return alert("本文を入力してください");
+    const type = confirmedType || "清楚系";
+    setRewriting(true); setRewriteResult(null);
+    try {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
+        body: JSON.stringify({
+          model: "gpt-4o", max_tokens: 800,
+          messages: [
+            { role: "system", content: REWRITE_PROMPTS[type] },
+            { role: "user", content: `以下の写メ日記をリライトしてください。内容・情報は維持しつつ、指定スタイルの文章に書き換えてください。\n\n${diary}` }
+          ]
+        })
+      });
+      const data = await res.json();
+      setRewriteResult(data.choices?.[0]?.message?.content || "");
+    } catch { setRewriteResult("エラーが発生しました。"); }
+    setRewriting(false);
   }
 
   function toBase64(file) {
@@ -898,6 +1018,31 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
         }>
           <textarea value={diary} onChange={(e) => setDiary(e.target.value)} placeholder="写メ日記本文を入力..." style={{ ...inp, minHeight: "160px", resize: "vertical" }} />
         </Field>
+
+        {/* AIリライト（文章サポートON時） */}
+        {textSupport && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "-6px" }}>
+              {confirmedType ? (
+                <button type="button" onClick={handleRewrite} disabled={rewriting || !diary.trim()} style={{ padding: "7px 16px", borderRadius: "10px", border: `1.5px solid ${C.accent2}60`, background: rewriting || !diary.trim() ? C.surface : `${C.accent2}12`, color: rewriting || !diary.trim() ? C.muted : C.accent2, fontWeight: "700", cursor: rewriting || !diary.trim() ? "not-allowed" : "pointer", fontSize: "12px" }}>
+                  {rewriting ? "リライト中..." : `✨ AIリライト（${confirmedType}）`}
+                </button>
+              ) : (
+                <span style={{ fontSize: "11px", color: C.muted }}>💡 タイプ診断を完了するとAIリライトが使えます</span>
+              )}
+            </div>
+            {rewriteResult && (
+              <div style={{ ...card, marginTop: "10px", borderColor: `${C.accent2}40`, background: `${C.accent2}05` }}>
+                <p style={{ color: C.accent2, fontSize: "11px", fontWeight: "700", marginBottom: "8px", letterSpacing: "0.06em" }}>✨ {confirmedType}向けリライト結果</p>
+                <p style={{ whiteSpace: "pre-wrap", fontSize: "13px", color: C.sub, lineHeight: "1.8", marginBottom: "12px" }}>{rewriteResult}</p>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button type="button" onClick={() => { setDiary(rewriteResult); setRewriteResult(null); }} style={{ flex: 1, padding: "10px", borderRadius: "10px", border: "none", background: `linear-gradient(135deg, ${C.accent2}, ${C.accent})`, color: "white", fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>採用する</button>
+                  <button type="button" onClick={() => setRewriteResult(null)} style={{ padding: "10px 16px", borderRadius: "10px", border: `1.5px solid ${C.border}`, background: "white", color: C.muted, fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>閉じる</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 画像アップロード（常に表示・補正はimageSupport ONのみ） */}
         <div>
@@ -1182,6 +1327,12 @@ function CastPage({ casts, setCasts, scores }) {
   const [newName, setNewName] = useState("");
   const [newStart, setNewStart] = useState("");
   const [tab, setTab] = useState("list");
+  const [lockRefresh, setLockRefresh] = useState(0);
+
+  function resetDiagLock(c) {
+    try { localStorage.removeItem(`cast_type_${c.heaven_id || c.name}`); } catch {}
+    setLockRefresh((n) => n + 1);
+  }
 
   function toggle(name) { setCasts(casts.map((c) => c.name === name ? { ...c, is_active: !c.is_active } : c)); }
   function addCast() {
@@ -1250,7 +1401,11 @@ function CastPage({ casts, setCasts, scores }) {
 
       {tab === "list" && (
         <div style={{ display: "grid", gap: "10px" }}>
-          {casts.map((c) => (
+          {casts.map((c) => {
+            let diagData = null;
+            try { const s = localStorage.getItem(`cast_type_${c.heaven_id || c.name}`); if (s) diagData = JSON.parse(s); } catch {}
+            const isLocked = (diagData?.retries ?? 0) >= 2;
+            return (
             <div key={c.name} style={{ ...card, borderColor: c.is_active ? `${C.green}40` : C.border }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div style={{ flex: 1 }}>
@@ -1262,6 +1417,7 @@ function CastPage({ casts, setCasts, scores }) {
                     <Tag label={`得意：${c.strong}`} color={C.green} />
                     <Tag label={`苦手：${c.weak}`} color={C.yellow} />
                     {c.heaven_id ? <Tag label="ヘブン✓" color={C.accent} /> : <Tag label="ヘブン未設定" color={C.muted} />}
+                    {diagData?.type && <Tag label={`${diagData.type}${isLocked ? " 🔒" : ""}`} color={isLocked ? C.red : C.blue} />}
                   </div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
@@ -1271,10 +1427,16 @@ function CastPage({ casts, setCasts, scores }) {
                   <button onClick={() => toggle(c.name)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${c.is_active ? C.red : C.green}40`, background: `${c.is_active ? C.red : C.green}12`, color: c.is_active ? C.red : C.green, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
                     {c.is_active ? "停止" : "再開"}
                   </button>
+                  {diagData?.type && (
+                    <button onClick={() => resetDiagLock(c)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}12`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                      {isLocked ? "診断解除" : "診断リセット"}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
