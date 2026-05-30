@@ -156,7 +156,6 @@ function App() {
   const castNav = [
     { id: "shindan", label: "タイプ診断", icon: "💎" },
     { id: "score",   label: "AI採点",    icon: "✨" },
-    { id: "image",   label: "画像指導",  icon: "📸" },
     ...(settings.show_guarantee ? [{ id: "myguarantee", label: "保証確認", icon: "🎀" }] : []),
   ];
 
@@ -282,7 +281,6 @@ function App() {
                 {mode === "cast" && page === "shindan"     && <ShindanPage casts={casts} setCasts={setCasts} loggedInCast={loggedInCast} />}
                 {mode === "cast" && page === "score"       && <ScorePage casts={casts} settings={settings} scores={scores} setScores={setScores} loggedInCast={loggedInCast} />}
                 {mode === "cast" && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
-                {mode === "cast" && page === "image"       && <ImagePage casts={casts} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} />}
                 {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} />}
@@ -668,19 +666,25 @@ function ShindanPage({ casts, setCasts, loggedInCast }) {
 }
 
 // ============================================================
-// AI採点
+// AI採点（画像指導統合）
 // ============================================================
 function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
   const castName = loggedInCast || "";
   const [diary, setDiary] = useState("");
   const [imageFile, setImageFile] = useState(null);
+  const [originalPreviewUrl, setOriginalPreviewUrl] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
   const fileInputRef = useRef(null);
   const [result, setResult] = useState(null);
+  const [imageResult, setImageResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [rating, setRating] = useState(null);
   const [postedTime, setPostedTime] = useState(null);
+
+  useEffect(() => {
+    return () => { if (originalPreviewUrl) URL.revokeObjectURL(originalPreviewUrl); };
+  }, [originalPreviewUrl]);
 
   useEffect(() => {
     return () => { if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl); };
@@ -689,19 +693,25 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
   async function handleImageSelect(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    if (originalPreviewUrl) URL.revokeObjectURL(originalPreviewUrl);
+    if (imagePreviewUrl && imagePreviewUrl !== originalPreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setProcessing(true);
     setImageFile(null);
     setImagePreviewUrl(null);
+    setOriginalPreviewUrl(null);
+    setImageResult(null);
+
+    const origUrl = URL.createObjectURL(file);
+    setOriginalPreviewUrl(origUrl);
+
     let finalFile = file;
-    let finalUrl = URL.createObjectURL(file);
+    let finalUrl = origUrl;
     try {
       const fd = new FormData();
       fd.append("file", file);
       const res = await fetch("https://cast-ais.com/process", { method: "POST", body: fd });
       if (!res.ok) throw new Error();
       const blob = await res.blob();
-      URL.revokeObjectURL(finalUrl);
       finalUrl = URL.createObjectURL(blob);
       finalFile = new File([blob], file.name, { type: "image/jpeg" });
     } catch { /* use original */ }
@@ -711,9 +721,21 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
   }
 
   function clearImage() {
-    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    if (originalPreviewUrl) URL.revokeObjectURL(originalPreviewUrl);
+    if (imagePreviewUrl && imagePreviewUrl !== originalPreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setImageFile(null);
+    setOriginalPreviewUrl(null);
     setImagePreviewUrl(null);
+    setImageResult(null);
+  }
+
+  function toBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
   }
 
   const charCount = diary.length;
@@ -739,14 +761,14 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
 
   async function handleScore() {
     if (!diary.trim()) return alert("写メ日記本文を入力してください");
-    setLoading(true); setResult(null); setRating(null);
+    setLoading(true); setResult(null); setRating(null); setImageResult(null);
     const autoPostedAt = new Date();
     const autoPostedAtISO = autoPostedAt.toISOString();
     const autoTimeStr = autoPostedAt.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
     setPostedTime(autoTimeStr);
 
     try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      const scoreReqPromise = fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
         body: JSON.stringify({
@@ -754,21 +776,48 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
           messages: [{ role: "user", content: `あなたはエンタメ業界のブログコンサルタントです。スタッフのブログ記事を分析・採点してください。\n\n【投稿ルール】\n最低文字数：${settings.min_text_length}文字 / 今回：${charCount}文字 / 不足：${charShort}文字\n画像必須：${settings.image_required ? "あり" : "なし"} / 画像：${imageFile ? "あり" : "なし"}\n\n必ず以下のフォーマットで返答してください：\n\n総合点：○○点\n\n投稿ルールチェック\n・文字数判定：達成 or 文字数不足\n・画像判定：達成 or 画像不足\n\n改善提案\n・\n・\n\n良い点\n・\n・\n\n改善点\n・\n・\n\n改善タイトル案\n・\n・\n\nキャラクター分析\n・\n\n【スタッフ名】${castName}\n【ブログ本文】${diary}` }]
         })
       });
-      const data = await res.json();
-      const text = data.choices?.[0]?.message?.content || "結果を取得できませんでした";
+
+      const imageAnalysisPromise = imageFile
+        ? toBase64(imageFile).then((base64) => fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
+            body: JSON.stringify({
+              model: "gpt-4o",
+              max_tokens: 1000,
+              messages: [{
+                role: "user",
+                content: [
+                  { type: "image_url", image_url: { url: base64 } },
+                  { type: "text", text: `あなたは風俗店の写メ日記専門の画像アドバイザーです。プロとして忖度なく厳しく、かつ具体的に分析してください。褒めるだけでなく改善点を必ず3つ以上指摘することが絶対条件です。\n\nキャスト名：${castName || "未設定"}\n\n【採点基準】\n高評価：肌の透明感・きれいさ、顔の可愛さ・きれいさ、スタイルの良さ（谷間など魅力的な体のライン）\n低評価：人物が写っていない、見た目の魅力が低い、体型の問題（たるみ・しわ）\n\n【分析の絶対ルール】\n・顔が縦に長く見える場合は必ず「顔が縦に長く見えます。カメラを目線より少し上に置いて斜め下から撮ると小顔に見えます」のように具体的な撮影アドバイスを書く\n・顔のパーツバランスが悪い場合は「目の間隔が広い」「鼻が高く見えすぎる」「あごが長い」など具体的にどこがどう問題かを書く\n・お客様が「会いたい」と思えない場合はその理由を明確かつ率直に書く\n・加工アドバイスは「顔を縦に10〜15%圧縮する」「肌のトーンをハイライトで明るくする」「目の下のクマをレタッチで消す」など具体的な数値・方法を書く\n・改善点は必ず3つ以上、各項目で具体的に書く\n\n【必ず以下の順番で分析してください】\n\n1. 総合評価（100点満点）\n総合評価：○○点\n総評：（率直な一言）\n\n2. 肌の状態\n・透明感・きれいさ：\n・問題点（あれば率直に）：\n・加工アドバイス：（「○○フィルターで肌トーンを均一に」など具体的に）\n\n3. 顔の可愛さ・きれいさ\n・評価：\n・良い点：\n・改善点（必ず具体的に）：\n\n4. 顔のバランス（必ず厳しく分析）\n・頭の縦横比：（細長い・丸い・バランス良いなど率直に）\n・顔の長さの問題：（長く見えるか・大きく見えるかを率直に）\n・パーツのバランスの問題：（目・鼻・口・あごなど具体的に）\n・撮影アドバイス：（カメラ位置・角度・距離を具体的に）\n\n5. スタイル・体のライン\n・評価：\n・魅力的な部分：\n・改善点（率直に）：\n\n6. 構図・撮影角度\n・現在の問題点：\n・改善アドバイス：（「カメラを○○cm上に」「体を○度傾けて」など具体的に）\n\n7. 改善アドバイス（必ず3つ以上）\n①撮影角度・カメラ位置：\n②ポーズ・体の向き：\n③加工方法（具体的な数値・ツール名も）：\n④その他：\n\n8. お客様の反応予測\n・「会いたい」と思うか：（はい・いいえ・普通）\n・理由（率直に）：\n・改善後の見込み：` },
+                ],
+              }],
+            }),
+          }))
+        : Promise.resolve(null);
+
+      const [scoreRes, imgRes] = await Promise.all([scoreReqPromise, imageAnalysisPromise]);
+
+      const scoreData = await scoreRes.json();
+      const text = scoreData.choices?.[0]?.message?.content || "結果を取得できませんでした";
       const scoreMatch = text.match(/(\d+)点/);
       const sc = scoreMatch ? Number(scoreMatch[1]) : 50;
       setResult(text); setRating(getRating(sc));
       setScores((prev) => [{ id: Date.now(), cast_name: castName, diary, result: text, posted_at: autoPostedAtISO, has_image: !!imageFile, score: sc }, ...prev]);
+
+      if (imgRes) {
+        const imgData = await imgRes.json();
+        setImageResult(imgData.choices?.[0]?.message?.content || null);
+      }
     } catch { setResult("エラーが発生しました。もう一度お試しください。"); }
     setLoading(false);
   }
 
   const sections = ["投稿ルールチェック", "改善提案", "良い点", "改善点", "改善タイトル案", "キャラクター分析"];
+  const imgStyle = { width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "12px", border: `1.5px solid ${C.border}`, display: "block", background: "#fdf0f8" };
 
   return (
     <div style={{ display: "grid", gap: "16px" }}>
-      <Header title="写メ日記AI採点" sub="文章・タイトル指導" color={C.accent} />
+      <Header title="写メ日記AI採点" sub="文章・画像・タイトル指導" color={C.accent} />
 
       <div style={{ ...card, display: "grid", gap: "16px" }}>
         <div style={{ padding: "10px 14px", borderRadius: "12px", background: `linear-gradient(135deg, ${C.accent}15, ${C.accent2}10)`, border: `1.5px solid ${C.accent}30`, display: "flex", alignItems: "center", gap: "8px" }}>
@@ -786,64 +835,55 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
           <textarea value={diary} onChange={(e) => setDiary(e.target.value)} placeholder="写メ日記本文を入力..." style={{ ...inp, minHeight: "160px", resize: "vertical" }} />
         </Field>
 
-
-        {/* 画像アップロード */}
+        {/* 画像アップロード（ヘブン投稿 + 画像指導AI分析 共有） */}
         <div>
-          <p style={{ fontSize: "11px", color: C.sub, marginBottom: "8px", fontWeight: "700", letterSpacing: "0.06em" }}>投稿画像（ヘブン自動投稿用）</p>
+          <p style={{ fontSize: "11px", color: C.sub, marginBottom: "8px", fontWeight: "700", letterSpacing: "0.06em" }}>投稿画像（ヘブン自動投稿 ＋ 画像指導AI分析）</p>
 
-          {/* hidden file input — ref経由でトリガー */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleImageSelect}
-            style={{ display: "none" }}
-          />
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} style={{ display: "none" }} />
 
           {processing ? (
             <div style={{ width: "100%", padding: "40px 16px", border: `2px dashed ${C.accent}60`, borderRadius: "14px", background: "white", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
               <span style={{ fontSize: "32px" }}>✨</span>
               <span style={{ fontSize: "14px", color: C.accent, fontWeight: "700" }}>画像を加工中...✨</span>
             </div>
-          ) : imagePreviewUrl ? (
-            <div>
-              <div style={{ position: "relative" }}>
-                <img
-                  src={imagePreviewUrl}
-                  alt="プレビュー"
-                  style={{ width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "12px", border: `1.5px solid ${C.border}`, display: "block", background: "#fdf0f8" }}
-                />
-                <button
-                  type="button"
-                  onClick={clearImage}
-                  style={{ position: "absolute", top: "8px", right: "8px", background: "rgba(255,255,255,0.92)", border: "none", borderRadius: "50%", width: "30px", height: "30px", cursor: "pointer", fontSize: "16px", fontWeight: "700", color: C.text, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}
-                >×</button>
+          ) : originalPreviewUrl ? (
+            <div style={{ display: "grid", gap: "10px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div>
+                  <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px", textAlign: "center" }}>補正前</p>
+                  <img src={originalPreviewUrl} alt="補正前" style={imgStyle} />
+                </div>
+                <div>
+                  <p style={{ fontSize: "11px", color: C.pink, fontWeight: "700", marginBottom: "6px", textAlign: "center" }}>補正後 ✨</p>
+                  {imagePreviewUrl
+                    ? <img src={imagePreviewUrl} alt="補正後" style={imgStyle} />
+                    : <div style={{ ...imgStyle, minHeight: "120px", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: "12px", color: C.muted }}>補正中...</span></div>
+                  }
+                </div>
               </div>
-              <div style={{ marginTop: "8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                {["明るさ補正", "コントラスト", "美肌フィルター", "シャープネス"].map((t) => (
+                  <span key={t} style={{ padding: "3px 10px", borderRadius: "20px", fontSize: "11px", background: `${C.pink}15`, color: C.pink, border: `1px solid ${C.pink}30`, fontWeight: "700" }}>{t}</span>
+                ))}
+              </div>
+              {imagePreviewUrl && (
+                <a href={imagePreviewUrl} download="corrected.jpg" style={{ display: "block", padding: "10px", borderRadius: "10px", border: `1.5px solid ${C.green}50`, background: `${C.green}10`, color: C.green, textAlign: "center", fontWeight: "700", fontSize: "12px", textDecoration: "none" }}>
+                  ⬇ 補正後の画像をダウンロード
+                </a>
+              )}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span style={{ fontSize: "12px", color: C.green, fontWeight: "700" }}>✓ {imageFile?.name}</span>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  style={{ background: "none", border: `1.5px solid ${C.border}`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.muted, cursor: "pointer" }}
-                >変更</button>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button type="button" onClick={() => fileInputRef.current?.click()} style={{ background: "none", border: `1.5px solid ${C.border}`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.muted, cursor: "pointer" }}>変更</button>
+                  <button type="button" onClick={clearImage} style={{ background: "none", border: `1.5px solid ${C.red}40`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.red, cursor: "pointer" }}>削除</button>
+                </div>
               </div>
             </div>
           ) : (
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              style={{
-                width: "100%",
-                padding: "24px 16px",
-                border: `2px dashed ${C.accent}60`,
-                borderRadius: "14px",
-                background: "white",
-                cursor: "pointer",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "6px",
-              }}
+              style={{ width: "100%", padding: "24px 16px", border: `2px dashed ${C.accent}60`, borderRadius: "14px", background: "white", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}
             >
               <span style={{ fontSize: "32px" }}>📷</span>
               <span style={{ fontSize: "14px", color: C.accent, fontWeight: "700" }}>画像を選択する</span>
@@ -880,6 +920,13 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
               </div>
             );
           })}
+
+          {imageResult && (
+            <div style={{ ...card, borderColor: `${C.pink}40` }}>
+              <p style={{ color: C.pink, fontSize: "11px", fontWeight: "700", marginBottom: "12px", letterSpacing: "0.08em" }}>📸 画像指導AI分析</p>
+              <p style={{ whiteSpace: "pre-wrap", lineHeight: "1.9", fontSize: "14px", color: C.sub, margin: 0 }}>{imageResult}</p>
+            </div>
+          )}
 
           <HeavenPostButton castName={castName} diary={diary} result={result} casts={casts} postedTime={postedTime} imageFile={imageFile} imagePreviewUrl={imagePreviewUrl} />
         </div>
@@ -1231,291 +1278,6 @@ function GuaranteePage({ casts, scores, settings }) {
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-// ============================================================
-// Canvas API による自動画像補正
-// ============================================================
-function applyImageCorrections(img) {
-  const w = img.naturalWidth  || img.width;
-  const h = img.naturalHeight || img.height;
-
-  // ── Step 1: 明るさ・コントラスト・彩度 ──
-  const c1 = document.createElement("canvas");
-  c1.width = w; c1.height = h;
-  const ctx1 = c1.getContext("2d");
-  ctx1.drawImage(img, 0, 0);
-  const imgData = ctx1.getImageData(0, 0, w, h);
-  const d = imgData.data;
-
-  for (let i = 0; i < d.length; i += 4) {
-    let r = d[i], g = d[i + 1], b = d[i + 2];
-
-    // 明るさ +20%
-    r *= 1.2; g *= 1.2; b *= 1.2;
-
-    // コントラスト +10%
-    r = (r - 128) * 1.1 + 128;
-    g = (g - 128) * 1.1 + 128;
-    b = (b - 128) * 1.1 + 128;
-
-    // 彩度 +10%（肌色を綺麗に）
-    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-    r = gray + (r - gray) * 1.1;
-    g = gray + (g - gray) * 1.1;
-    b = gray + (b - gray) * 1.1;
-
-    d[i]     = Math.max(0, Math.min(255, r));
-    d[i + 1] = Math.max(0, Math.min(255, g));
-    d[i + 2] = Math.max(0, Math.min(255, b));
-  }
-  ctx1.putImageData(imgData, 0, 0);
-
-  // ── Step 2: シャープネス強調（畳み込みカーネル） ──
-  const c2 = document.createElement("canvas");
-  c2.width = w; c2.height = h;
-  const ctx2 = c2.getContext("2d");
-  const src = ctx1.getImageData(0, 0, w, h);
-  const dst = ctx2.createImageData(w, h);
-  const sd = src.data, dd = dst.data;
-  const K = [0, -1, 0, -1, 5, -1, 0, -1, 0]; // シャープネスカーネル
-
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const idx = (y * w + x) * 4;
-      for (let c = 0; c < 3; c++) {
-        let v = 0;
-        for (let ky = -1; ky <= 1; ky++)
-          for (let kx = -1; kx <= 1; kx++)
-            v += sd[((y + ky) * w + (x + kx)) * 4 + c] * K[(ky + 1) * 3 + (kx + 1)];
-        dd[idx + c] = Math.max(0, Math.min(255, v));
-      }
-      dd[idx + 3] = sd[idx + 3];
-    }
-  }
-  // 端ピクセルをコピー
-  for (let x = 0; x < w; x++) {
-    for (let c = 0; c < 4; c++) {
-      dd[x * 4 + c]             = sd[x * 4 + c];
-      dd[((h - 1) * w + x) * 4 + c] = sd[((h - 1) * w + x) * 4 + c];
-    }
-  }
-  for (let y = 0; y < h; y++) {
-    for (let c = 0; c < 4; c++) {
-      dd[y * w * 4 + c]              = sd[y * w * 4 + c];
-      dd[(y * w + w - 1) * 4 + c]    = sd[(y * w + w - 1) * 4 + c];
-    }
-  }
-  ctx2.putImageData(dst, 0, 0);
-  return c2.toDataURL("image/jpeg", 0.95);
-}
-
-// ============================================================
-// 画像指導
-// ============================================================
-function ImagePage({ casts, loggedInCast }) {
-  const castName = loggedInCast || "";
-  const [imageFile, setImageFile]       = useState(null);
-  const [previewUrl, setPreviewUrl]     = useState(null);
-  const [correctedUrl, setCorrectedUrl] = useState(null);
-  const [correcting, setCorrecting]     = useState(false);
-  const [result, setResult]             = useState(null);
-  const [loading, setLoading]           = useState(false);
-  const fileInputRef = useRef(null);
-  const vpsInProgress = useRef(false);
-
-  useEffect(() => {
-    return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
-  }, [previewUrl]);
-
-  useEffect(() => {
-    return () => { if (correctedUrl?.startsWith("blob:")) URL.revokeObjectURL(correctedUrl); };
-  }, [correctedUrl]);
-
-  // VPS失敗時のCanvas補正フォールバック
-  useEffect(() => {
-    if (!previewUrl) { setCorrectedUrl(null); return; }
-    if (vpsInProgress.current) return;
-    setCorrecting(true);
-    const img = new Image();
-    img.onload = () => {
-      try { setCorrectedUrl(applyImageCorrections(img)); }
-      catch { /* canvas CORS 等の場合は無視 */ }
-      setCorrecting(false);
-    };
-    img.onerror = () => setCorrecting(false);
-    img.src = previewUrl;
-  }, [previewUrl]);
-
-  async function handleImageSelect(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    const originalUrl = URL.createObjectURL(file);
-    vpsInProgress.current = true;
-    setCorrecting(true);
-    setCorrectedUrl(null);
-    setImageFile(file);
-    setPreviewUrl(originalUrl);
-    setResult(null);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch("https://cast-ais.com/process", { method: "POST", body: fd });
-      if (!res.ok) throw new Error();
-      const blob = await res.blob();
-      setImageFile(new File([blob], file.name, { type: "image/jpeg" }));
-      setCorrectedUrl(URL.createObjectURL(blob));
-      setCorrecting(false);
-    } catch {
-      const img = new Image();
-      img.onload = () => {
-        try { setCorrectedUrl(applyImageCorrections(img)); }
-        catch {}
-        setCorrecting(false);
-      };
-      img.onerror = () => setCorrecting(false);
-      img.src = originalUrl;
-    } finally {
-      vpsInProgress.current = false;
-    }
-  }
-
-  function clearImage() {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    vpsInProgress.current = false;
-    setImageFile(null);
-    setPreviewUrl(null);
-    setCorrectedUrl(null);
-    setResult(null);
-  }
-
-  function toBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  }
-
-  async function analyze() {
-    if (!imageFile) return alert("画像を選択してください");
-    setLoading(true); setResult(null);
-    try {
-      const base64 = await toBase64(imageFile);
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o",
-          max_tokens: 1000,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "image_url", image_url: { url: base64 } },
-              {
-                type: "text",
-                text: `あなたは風俗店の写メ日記専門の画像アドバイザーです。プロとして忖度なく厳しく、かつ具体的に分析してください。褒めるだけでなく改善点を必ず3つ以上指摘することが絶対条件です。\n\nキャスト名：${castName || "未設定"}\n\n【採点基準】\n高評価：肌の透明感・きれいさ、顔の可愛さ・きれいさ、スタイルの良さ（谷間など魅力的な体のライン）\n低評価：人物が写っていない、見た目の魅力が低い、体型の問題（たるみ・しわ）\n\n【分析の絶対ルール】\n・顔が縦に長く見える場合は必ず「顔が縦に長く見えます。カメラを目線より少し上に置いて斜め下から撮ると小顔に見えます」のように具体的な撮影アドバイスを書く\n・顔のパーツバランスが悪い場合は「目の間隔が広い」「鼻が高く見えすぎる」「あごが長い」など具体的にどこがどう問題かを書く\n・お客様が「会いたい」と思えない場合はその理由を明確かつ率直に書く\n・加工アドバイスは「顔を縦に10〜15%圧縮する」「肌のトーンをハイライトで明るくする」「目の下のクマをレタッチで消す」など具体的な数値・方法を書く\n・改善点は必ず3つ以上、各項目で具体的に書く\n\n【必ず以下の順番で分析してください】\n\n1. 総合評価（100点満点）\n総合評価：○○点\n総評：（率直な一言）\n\n2. 肌の状態\n・透明感・きれいさ：\n・問題点（あれば率直に）：\n・加工アドバイス：（「○○フィルターで肌トーンを均一に」など具体的に）\n\n3. 顔の可愛さ・きれいさ\n・評価：\n・良い点：\n・改善点（必ず具体的に）：\n\n4. 顔のバランス（必ず厳しく分析）\n・頭の縦横比：（細長い・丸い・バランス良いなど率直に）\n・顔の長さの問題：（長く見えるか・大きく見えるかを率直に）\n・パーツのバランスの問題：（目・鼻・口・あごなど具体的に）\n・撮影アドバイス：（カメラ位置・角度・距離を具体的に）\n\n5. スタイル・体のライン\n・評価：\n・魅力的な部分：\n・改善点（率直に）：\n\n6. 構図・撮影角度\n・現在の問題点：\n・改善アドバイス：（「カメラを○○cm上に」「体を○度傾けて」など具体的に）\n\n7. 改善アドバイス（必ず3つ以上）\n①撮影角度・カメラ位置：\n②ポーズ・体の向き：\n③加工方法（具体的な数値・ツール名も）：\n④その他：\n\n8. お客様の反応予測\n・「会いたい」と思うか：（はい・いいえ・普通）\n・理由（率直に）：\n・改善後の見込み：`,
-              },
-            ],
-          }],
-        }),
-      });
-      const data = await res.json();
-      setResult(data.choices?.[0]?.message?.content || "結果を取得できませんでした");
-    } catch { setResult("エラーが発生しました。もう一度お試しください。"); }
-    setLoading(false);
-  }
-
-  const criteria = ["肌の美しさ", "顔・頭部バランス", "頭身・スタイル", "雰囲気・色気"];
-  const imgStyle = { width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "12px", border: `1.5px solid ${C.border}`, display: "block", background: "#fdf0f8" };
-
-  return (
-    <div style={{ display: "grid", gap: "16px" }}>
-      <Header title="画像指導" sub="GPT-4o visionで画像を直接分析" color={C.pink} />
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: "10px" }}>
-        {criteria.map((c) => (
-          <div key={c} style={{ ...card, padding: "14px", textAlign: "center", background: `linear-gradient(135deg, ${C.pink}08, ${C.accent2}05)` }}>
-            <p style={{ fontSize: "12px", color: C.sub, margin: 0, fontWeight: "600" }}>{c}</p>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ ...card, display: "grid", gap: "16px" }}>
-        <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} style={{ display: "none" }} />
-
-        {previewUrl ? (
-          <>
-            {/* 補正前・補正後の並び表示 */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-              <div>
-                <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px", textAlign: "center" }}>補正前</p>
-                <img src={previewUrl} alt="補正前" style={imgStyle} />
-              </div>
-              <div>
-                <p style={{ fontSize: "11px", color: C.pink, fontWeight: "700", marginBottom: "6px", textAlign: "center" }}>
-                  {correcting ? "補正中..." : "補正後 ✨"}
-                </p>
-                {correctedUrl
-                  ? <img src={correctedUrl} alt="補正後" style={imgStyle} />
-                  : <div style={{ ...imgStyle, minHeight: "120px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <span style={{ fontSize: "12px", color: C.muted }}>{correcting ? "処理中..." : "補正失敗"}</span>
-                    </div>
-                }
-              </div>
-            </div>
-
-            {/* 補正内容ラベル */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-              {["明るさ補正", "コントラスト", "美肌フィルター", "シャープネス"].map((t) => (
-                <span key={t} style={{ padding: "3px 10px", borderRadius: "20px", fontSize: "11px", background: `${C.pink}15`, color: C.pink, border: `1px solid ${C.pink}30`, fontWeight: "700" }}>{t}</span>
-              ))}
-            </div>
-
-            {/* ダウンロードボタン */}
-            {correctedUrl && (
-              <a
-                href={correctedUrl}
-                download="corrected.jpg"
-                style={{ display: "block", padding: "12px", borderRadius: "12px", border: `1.5px solid ${C.green}50`, background: `${C.green}10`, color: C.green, textAlign: "center", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}
-              >
-                ⬇ 補正後の画像をダウンロード
-              </a>
-            )}
-
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: "12px", color: C.green, fontWeight: "700" }}>✓ {imageFile?.name}</span>
-              <button type="button" onClick={clearImage} style={{ background: "none", border: `1.5px solid ${C.border}`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.muted, cursor: "pointer" }}>画像を変更</button>
-            </div>
-          </>
-        ) : (
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            style={{ width: "100%", padding: "28px 16px", border: `2px dashed ${C.pink}60`, borderRadius: "14px", background: "white", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}
-          >
-            <span style={{ fontSize: "36px" }}>📸</span>
-            <span style={{ fontSize: "14px", color: C.pink, fontWeight: "700" }}>画像を選択する</span>
-            <span style={{ fontSize: "11px", color: C.muted }}>JPG / PNG / HEIC</span>
-          </button>
-        )}
-
-        <Btn onClick={analyze} loading={loading} label={loading ? "AIが分析中..." : "画像をAIで分析する"} color={C.pink} />
-      </div>
-
-      {result && (
-        <div style={{ ...card }}>
-          <p style={{ color: C.pink, fontSize: "11px", fontWeight: "700", marginBottom: "12px", letterSpacing: "0.08em" }}>AI分析結果</p>
-          <p style={{ whiteSpace: "pre-wrap", lineHeight: "1.9", fontSize: "14px", color: C.sub, margin: 0 }}>{result}</p>
-        </div>
-      )}
     </div>
   );
 }
