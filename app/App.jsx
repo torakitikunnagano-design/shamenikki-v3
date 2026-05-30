@@ -1467,7 +1467,7 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
     try { return JSON.parse(localStorage.getItem(storageKey)) || []; } catch { return []; }
   }
 
-  const mkHon = () => ({ courseMin: "", shimei: "", op: "", extCount: "", extMin: "" });
+  const mkHon = () => ({ courseMin: "", shimei: "", fee: "", shimeiRyou: "", op: "", extCount: "", extMin: "" });
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
   const [records, setRecords] = useState(loadRecords);
   const [startTime, setStartTime] = useState("");
@@ -1486,7 +1486,7 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
   }
 
   function isActive(h) {
-    return h.courseMin !== "" || h.shimei !== "" || h.op !== "" || h.extCount !== "" || h.extMin !== "";
+    return h.courseMin !== "" || h.shimei !== "" || h.fee !== "" || h.shimeiRyou !== "" || h.op !== "" || h.extCount !== "" || h.extMin !== "";
   }
 
   async function readSlip(file) {
@@ -1501,10 +1501,24 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
       });
       const prompt = `あなたは業務委託明細・給料明細のデータ抽出専門AIです。添付の明細画像から以下のJSON形式でデータを抽出してください。明細フォーマットはお店ごとに異なります。表の見出しを手がかりに柔軟に読み取り、空欄・不明な項目は0としてください。
 
-指名種類の判定：本指名・ホン指名・H指名→"本指名" / P指名・プレミアム指名→"P指名" / フリー・指名なし→"フリー" / 不明→"フリー"
-courseMinは数値（分）。金額はすべて円（数値のみ）。
+【各セッション（1本ごと）のフィールド定義】
+- courseMin: コース時間（分）。数値のみ。
+- shimei: 指名種類。本指名・ホン指名・H指名→"本指名" / P指名・プレミアム→"P指名" / フリー・指名なし→"フリー" / 不明→"フリー"
+- courseFee: 「金額」列のバック額（コース料金の本人取り分）。オプション料金とは別の欄。
+- shimeiRyou: 「指名」列の指名料バック額。フリーは0。
+- extCount: 延長回数。数値。
+- extMin: 延長時間（分）。数値。
+- op: 「オプション」列のオプション料金バック額。courseFeeとは別欄。
+- subtotal: 小計（courseFee+shimeiRyou+延長料金+opの合計）。
 
-必ずこのJSONのみで返してください（説明文不要）：
+【合計欄のフィールド定義】
+- gross: 総支給（各本の小計の合計）。正の整数。
+- misc: 雑費の金額。明細にマイナス表記（例：-8600）でも必ず正の整数で返すこと。
+- dorm: 寮費の金額。必ず正の整数で返すこと。
+- transport: 交通費の金額。必ず正の整数で返すこと。
+- takeHome: 手取り（gross-misc-dorm-transport）。
+
+金額はすべて円（数値のみ、記号・カンマなし）。必ずこのJSONのみで返してください（説明文不要）：
 {"sessions":[{"courseMin":60,"shimei":"本指名","courseFee":5000,"shimeiRyou":2000,"extCount":0,"extMin":0,"op":0,"subtotal":7000}],"gross":50000,"misc":3000,"dorm":10000,"transport":1000,"takeHome":36000}`;
       const res = await fetch("https://api.x.ai/v1/chat/completions", {
         method: "POST",
@@ -1528,16 +1542,18 @@ courseMinは数値（分）。金額はすべて円（数値のみ）。
         if (i < 12) newHons[i] = {
           courseMin: String(s.courseMin || ""),
           shimei: s.shimei || "",
-          op: String(s.op || ""),
+          fee: String(Math.abs(s.courseFee || 0) || ""),
+          shimeiRyou: String(Math.abs(s.shimeiRyou || 0) || ""),
+          op: String(Math.abs(s.op || 0) || ""),
           extCount: String(s.extCount || ""),
           extMin: String(s.extMin || ""),
         };
       });
       setHons(newHons);
-      if (parsed.gross) setGross(String(parsed.gross));
-      if (parsed.dorm) setDorm(String(parsed.dorm));
-      if (parsed.misc) setMisc(String(parsed.misc));
-      if (parsed.transport) setTransport(String(parsed.transport));
+      if (parsed.gross != null) setGross(String(Math.abs(parsed.gross)));
+      if (parsed.dorm != null) setDorm(String(Math.abs(parsed.dorm)));
+      if (parsed.misc != null) setMisc(String(Math.abs(parsed.misc)));
+      if (parsed.transport != null) setTransport(String(Math.abs(parsed.transport)));
       setSlipOcrDone(true);
     } catch {
       alert("読み取りに失敗しました。手動で入力してください。");
@@ -1661,6 +1677,14 @@ courseMinは数値（分）。金額はすべて円（数値のみ）。
                   <option value="">選択</option>
                   {shimeiOpts.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
+              </Field>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "10px" }}>
+              <Field label="金額（円）">
+                <input type="number" min="0" value={h.fee} onChange={(e) => updateHon(i, "fee", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              </Field>
+              <Field label="指名料（円）">
+                <input type="number" min="0" value={h.shimeiRyou} onChange={(e) => updateHon(i, "shimeiRyou", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
               </Field>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
