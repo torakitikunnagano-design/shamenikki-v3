@@ -552,6 +552,14 @@ const REWRITE_PROMPTS = {
   "S系":        "あなたはSMクラブの女王様のような風俗嬢のブログライターです。以下の文章を、自信に満ちて凛とした、少し挑発的で魅惑的な文章にリライトしてください。絵文字・顔文字は女王様の威厳や挑発的な雰囲気を演出するものを効果的に散りばめてください（例：👑 😏 💅 🖤 ⛓ など）。ヘブンネットの写メ日記を見ているお客様が「この女王様に会いに行かなければ」と引き寄せられるような、圧倒的な存在感と魅惑で惹きつける文章にアレンジしてください。",
 };
 
+const TITLE_PROMPTS = {
+  "清楚系":     "あなたは上品で清楚な風俗嬢のブログタイトルライターです。以下の本文に合った、ヘブンネットの写メ日記でお客様がクリックしたくなる清楚で上品なタイトルを1つだけ生成してください。絵文字を1〜2個自然に使い、20文字以内で簡潔にまとめてください。タイトルのみ返してください。",
+  "エロ系":     "あなたは色気のある風俗嬢のブログタイトルライターです。以下の本文に合った、ヘブンネットの写メ日記でお客様が思わずクリックしたくなる官能的で惹きつけるタイトルを1つだけ生成してください。絵文字を1〜2個自然に使い、20文字以内で簡潔にまとめてください。タイトルのみ返してください。",
+  "かわいい系": "あなたはかわいい風俗嬢のブログタイトルライターです。以下の本文に合った、ヘブンネットの写メ日記でお客様が「かわいい！」と思ってクリックしたくなるポップで明るいタイトルを1つだけ生成してください。絵文字を1〜2個自然に使い、20文字以内で簡潔にまとめてください。タイトルのみ返してください。",
+  "M系":        "あなたは甘えた雰囲気の風俗嬢のブログタイトルライターです。以下の本文に合った、ヘブンネットの写メ日記でお客様が「守ってあげたい・会いに行きたい」と感じてクリックしたくなる甘えた可愛らしいタイトルを1つだけ生成してください。絵文字を1〜2個自然に使い、20文字以内で簡潔にまとめてください。タイトルのみ返してください。",
+  "S系":        "あなたは女王様キャラの風俗嬢のブログタイトルライターです。以下の本文に合った、ヘブンネットの写メ日記でお客様が「この女王様に会いに行かなければ」と感じてクリックしたくなる自信に満ちた挑発的なタイトルを1つだけ生成してください。絵文字を1〜2個自然に使い、20文字以内で簡潔にまとめてください。タイトルのみ返してください。",
+};
+
 function useCastTypeLock(castId) {
   const key = castId ? `cast_type_${castId}` : null;
   const [lockData, setLockData] = useState({ type: null, retries: 0 });
@@ -773,7 +781,7 @@ function ShindanPage({ casts, setCasts, loggedInCast, onComplete }) {
 // ============================================================
 function useSupportSettings(castId) {
   const key = castId ? `support_settings_${castId}` : null;
-  const [support, setSupport] = useState({ imageSupport: true, textSupport: true });
+  const [support, setSupport] = useState({ imageSupport: true, textSupport: true, titleAssist: true });
   const loaded = useRef(false);
 
   useEffect(() => {
@@ -782,10 +790,11 @@ function useSupportSettings(castId) {
     try {
       const saved = localStorage.getItem(key);
       if (saved) {
-        const { imageSupport, textSupport } = JSON.parse(saved);
+        const { imageSupport, textSupport, titleAssist } = JSON.parse(saved);
         setSupport({
           imageSupport: typeof imageSupport === "boolean" ? imageSupport : true,
           textSupport:  typeof textSupport  === "boolean" ? textSupport  : true,
+          titleAssist:  typeof titleAssist  === "boolean" ? titleAssist  : true,
         });
       }
     } catch {}
@@ -799,7 +808,7 @@ function useSupportSettings(castId) {
     });
   }
 
-  return [support.imageSupport, support.textSupport, update];
+  return [support.imageSupport, support.textSupport, support.titleAssist, update];
 }
 
 // ============================================================
@@ -809,8 +818,9 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
   const castName = loggedInCast || "";
   const cast = casts.find((c) => c.name === castName);
   const castId = cast?.heaven_id || castName;
-  const [imageSupport, textSupport, updateSupport] = useSupportSettings(castId);
+  const [imageSupport, textSupport, titleAssist, updateSupport] = useSupportSettings(castId);
   const [diary, setDiary] = useState("");
+  const [title, setTitle] = useState("");
   const [imageFile, setImageFile] = useState(null);
   const [originalPreviewUrl, setOriginalPreviewUrl] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
@@ -843,9 +853,6 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
       }
     } catch {}
   }, [castId]);
-  const [rewriting, setRewriting] = useState(false);
-  const [rewriteResult, setRewriteResult] = useState(null);
-
   async function handleImageSelect(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -887,28 +894,6 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
     setImageResult(null);
   }
 
-  async function handleRewrite() {
-    if (!diary.trim()) return alert("本文を入力してください");
-    const type = confirmedType || "清楚系";
-    setRewriting(true); setRewriteResult(null);
-    try {
-      const res = await fetch("https://api.x.ai/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
-        body: JSON.stringify({
-          model: "grok-4.3", max_tokens: 800,
-          messages: [
-            { role: "system", content: REWRITE_PROMPTS[type] },
-            { role: "user", content: `以下の写メ日記をリライトしてください。内容・情報は維持しつつ、指定スタイルの文章に書き換えてください。\n\n${diary}` }
-          ]
-        })
-      });
-      const data = await res.json();
-      setRewriteResult(data.choices?.[0]?.message?.content || "");
-    } catch { setRewriteResult("エラーが発生しました。"); }
-    setRewriting(false);
-  }
-
   function toBase64(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -947,16 +932,57 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
     const autoTimeStr = autoPostedAt.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
     setPostedTime(autoTimeStr);
 
+    const type = confirmedType || "清楚系";
+
+    // Step 1: 本文AIリライト（textSupport ON のとき）
+    let finalDiary = diary;
+    if (textSupport) {
+      try {
+        const rwRes = await fetch("https://api.x.ai/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
+          body: JSON.stringify({
+            model: "grok-4.3", max_tokens: 800,
+            messages: [
+              { role: "system", content: REWRITE_PROMPTS[type] },
+              { role: "user", content: `以下の写メ日記をリライトしてください。内容・情報は維持しつつ、指定スタイルの文章に書き換えてください。\n\n${diary}` }
+            ]
+          })
+        });
+        const rwData = await rwRes.json();
+        const rewritten = rwData.choices?.[0]?.message?.content;
+        if (rewritten) { finalDiary = rewritten; setDiary(rewritten); }
+      } catch { /* use original */ }
+    }
+
+    const charCountFinal = finalDiary.length;
+    const charShortFinal = Math.max(settings.min_text_length - charCountFinal, 0);
+
     let scoreText = "";
     let sc = 0;
     try {
+      // Step 2: AI採点・タイトル生成・画像分析を並列実行
       const scoreReqPromise = textSupport
         ? fetch("https://api.x.ai/v1/chat/completions", {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
             body: JSON.stringify({
               model: "grok-4.3", max_tokens: 1000,
-          messages: [{ role: "user", content: `あなたはエンタメ業界のブログコンサルタントです。スタッフのブログ記事を分析・採点してください。\n\n【投稿ルール】\n最低文字数：${settings.min_text_length}文字 / 今回：${charCount}文字 / 不足：${charShort}文字\n画像必須：${settings.image_required ? "あり" : "なし"} / 画像：${imageFile ? "あり" : "なし"}\n\n必ず以下のフォーマットで返答してください：\n\n総合点：○○点\n\n投稿ルールチェック\n・文字数判定：達成 or 文字数不足\n・画像判定：達成 or 画像不足\n\n改善提案\n・\n・\n\n良い点\n・\n・\n\n改善点\n・\n・\n\n改善タイトル案\n・\n・\n\nキャラクター分析\n・\n\n【スタッフ名】${castName}\n【ブログ本文】${diary}` }]
+              messages: [{ role: "user", content: `あなたはエンタメ業界のブログコンサルタントです。スタッフのブログ記事を分析・採点してください。\n\n【投稿ルール】\n最低文字数：${settings.min_text_length}文字 / 今回：${charCountFinal}文字 / 不足：${charShortFinal}文字\n画像必須：${settings.image_required ? "あり" : "なし"} / 画像：${imageFile ? "あり" : "なし"}\n\n必ず以下のフォーマットで返答してください：\n\n総合点：○○点\n\n投稿ルールチェック\n・文字数判定：達成 or 文字数不足\n・画像判定：達成 or 画像不足\n\n改善提案\n・\n・\n\n良い点\n・\n・\n\n改善点\n・\n・\n\n改善タイトル案\n・\n・\n\nキャラクター分析\n・\n\n【スタッフ名】${castName}\n【ブログ本文】${finalDiary}` }]
+            })
+          })
+        : Promise.resolve(null);
+
+      const titleGenPromise = titleAssist
+        ? fetch("https://api.x.ai/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
+            body: JSON.stringify({
+              model: "grok-4.3", max_tokens: 100,
+              messages: [
+                { role: "system", content: TITLE_PROMPTS[type] },
+                { role: "user", content: `本文：${finalDiary}\n\nこの本文に合うタイトルを1つ生成してください。タイトルのみ返してください。` }
+              ]
             })
           })
         : Promise.resolve(null);
@@ -979,7 +1005,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
           }))
         : Promise.resolve(null);
 
-      const [scoreRes, imgRes] = await Promise.all([scoreReqPromise, imageAnalysisPromise]);
+      const [scoreRes, titleRes, imgRes] = await Promise.all([scoreReqPromise, titleGenPromise, imageAnalysisPromise]);
 
       if (scoreRes) {
         const scoreData = await scoreRes.json();
@@ -990,13 +1016,19 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
         setRating(getRating(sc));
       }
 
+      if (titleRes) {
+        const titleData = await titleRes.json();
+        const generated = titleData.choices?.[0]?.message?.content;
+        if (generated) setTitle(generated.trim());
+      }
+
       if (imgRes) {
         const imgData = await imgRes.json();
         setImageResult(imgData.choices?.[0]?.message?.content || null);
       }
     } catch { if (textSupport) setResult("エラーが発生しました。もう一度お試しください。"); }
     finally {
-      setScores((prev) => [{ id: Date.now(), cast_name: castName, diary, result: scoreText, posted_at: autoPostedAtISO, has_image: !!imageFile, score: sc }, ...prev]);
+      setScores((prev) => [{ id: Date.now(), cast_name: castName, diary: finalDiary, result: scoreText, posted_at: autoPostedAtISO, has_image: !!imageFile, score: sc }, ...prev]);
       setLoading(false);
     }
   }
@@ -1031,8 +1063,9 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
         <div style={{ display: "flex", gap: "28px", flexWrap: "wrap" }}>
           <Toggle checked={imageSupport} onChange={(v) => updateSupport({ imageSupport: v })} label="📸 画像AIサポート" />
           <Toggle checked={textSupport}  onChange={(v) => updateSupport({ textSupport: v })}  label="✏️ 文章AIサポート" />
+          <Toggle checked={titleAssist}  onChange={(v) => updateSupport({ titleAssist: v })}  label="📝 タイトルアシスト" />
         </div>
-        {!imageSupport && !textSupport && (
+        {!imageSupport && !textSupport && !titleAssist && (
           <p style={{ fontSize: "12px", color: C.muted, margin: "10px 0 0", padding: "8px 12px", background: `${C.muted}10`, borderRadius: "8px" }}>
             AIサポートOFF：入力・投稿・記録は引き続き使えます
           </p>
@@ -1047,39 +1080,28 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
           <span style={{ color: C.muted, fontSize: "12px" }}>さんの投稿</span>
         </div>
 
+        {/* タイトル入力（常に表示） */}
+        <Field label={
+          <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>タイトル</span>
+            {titleAssist && <span style={{ fontSize: "10px", color: C.accent2, fontWeight: "700" }}>📝 タイトルアシストON：AI採点時に自動生成</span>}
+          </span>
+        }>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={titleAssist ? "空欄でもAIが自動生成します" : "タイトルを入力"} style={inp} />
+        </Field>
+
         {/* 本文入力（常に表示） */}
         <Field label={
-          <span style={{ display: "flex", justifyContent: "space-between" }}>
+          <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>写メ日記本文</span>
             <span style={{ color: charShort > 0 ? C.red : C.green }}>{charCount}文字 {charShort > 0 ? `(あと${charShort}文字)` : "✓"}</span>
           </span>
         }>
-          <textarea value={diary} onChange={(e) => setDiary(e.target.value)} placeholder="写メ日記本文を入力..." style={{ ...inp, minHeight: "160px", resize: "vertical" }} />
+          <textarea value={diary} onChange={(e) => setDiary(e.target.value)} placeholder={textSupport ? "入力後「AI採点する」でAIが自動リライトします..." : "写メ日記本文を入力..."} style={{ ...inp, minHeight: "160px", resize: "vertical" }} />
         </Field>
 
-        {/* AIリライト（文章サポートON時） */}
-        {textSupport && (
-          <div>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "-6px" }}>
-              {confirmedType ? (
-                <button type="button" onClick={handleRewrite} disabled={rewriting || !diary.trim()} style={{ padding: "7px 16px", borderRadius: "10px", border: `1.5px solid ${C.accent2}60`, background: rewriting || !diary.trim() ? C.surface : `${C.accent2}12`, color: rewriting || !diary.trim() ? C.muted : C.accent2, fontWeight: "700", cursor: rewriting || !diary.trim() ? "not-allowed" : "pointer", fontSize: "12px" }}>
-                  {rewriting ? "リライト中..." : `✨ AIリライト（${confirmedType}）`}
-                </button>
-              ) : (
-                <span style={{ fontSize: "11px", color: C.muted }}>💡 タイプ診断を完了するとAIリライトが使えます</span>
-              )}
-            </div>
-            {rewriteResult && (
-              <div style={{ ...card, marginTop: "10px", borderColor: `${C.accent2}40`, background: `${C.accent2}05` }}>
-                <p style={{ color: C.accent2, fontSize: "11px", fontWeight: "700", marginBottom: "8px", letterSpacing: "0.06em" }}>✨ {confirmedType}向けリライト結果</p>
-                <p style={{ whiteSpace: "pre-wrap", fontSize: "13px", color: C.sub, lineHeight: "1.8", marginBottom: "12px" }}>{rewriteResult}</p>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button type="button" onClick={() => { setDiary(rewriteResult); setRewriteResult(null); }} style={{ flex: 1, padding: "10px", borderRadius: "10px", border: "none", background: `linear-gradient(135deg, ${C.accent2}, ${C.accent})`, color: "white", fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>採用する</button>
-                  <button type="button" onClick={() => setRewriteResult(null)} style={{ padding: "10px 16px", borderRadius: "10px", border: `1.5px solid ${C.border}`, background: "white", color: C.muted, fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>閉じる</button>
-                </div>
-              </div>
-            )}
-          </div>
+        {textSupport && !confirmedType && (
+          <p style={{ fontSize: "11px", color: C.muted, margin: "-8px 0 0", paddingLeft: "2px" }}>💡 タイプ診断を完了すると、タイプ別リライトが適用されます（未診断は清楚系で処理）</p>
         )}
 
         {/* 画像アップロード（常に表示・補正はimageSupport ONのみ） */}
@@ -1152,7 +1174,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
           <span style={{ fontSize: "13px", color: C.muted }}>🔒 投稿時刻は送信した瞬間に自動記録されます</span>
           {postedTime && <span style={{ marginLeft: "auto", color: C.green, fontWeight: "700", fontSize: "14px" }}>{postedTime}</span>}
         </div>
-        <Btn onClick={handleScore} loading={loading} label={textSupport ? "AI採点する" : "投稿記録する"} color={C.accent} />
+        <Btn onClick={handleScore} loading={loading} label={(textSupport || titleAssist) ? "AI採点する" : "投稿記録する"} color={C.accent} />
       </div>
 
       {/* AI採点結果（textSupport ON時のみ） */}
@@ -1188,7 +1210,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
 
       {/* ヘブン投稿（投稿記録後は常に表示） */}
       {postedTime && (
-        <HeavenPostButton castName={castName} diary={diary} result={result} casts={casts} postedTime={postedTime} imageFile={imageFile} imagePreviewUrl={imagePreviewUrl} />
+        <HeavenPostButton castName={castName} diary={diary} title={title} result={result} casts={casts} postedTime={postedTime} imageFile={imageFile} imagePreviewUrl={imagePreviewUrl} />
       )}
     </div>
   );
@@ -1197,7 +1219,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
 // ============================================================
 // ヘブン投稿
 // ============================================================
-function HeavenPostButton({ castName, diary, result, casts, postedTime, imageFile, imagePreviewUrl }) {
+function HeavenPostButton({ castName, diary, title, result, casts, postedTime, imageFile, imagePreviewUrl }) {
   const [posting, setPosting] = useState(false);
   const [posted, setPosted] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -1207,19 +1229,13 @@ function HeavenPostButton({ castName, diary, result, casts, postedTime, imageFil
   const hasCredentials = cast?.heaven_id && cast?.heaven_pass;
   const VPS_URL = "http://160.251.166.73:3000";
 
-  function extractTitle(text) {
-    const match = text.match(/改善タイトル案[\s\S]*?・(.+)/);
-    return match ? match[1].trim() : "";
-  }
-  const suggestedTitle = result ? extractTitle(result) : "";
-
   async function handlePost() {
     setShowConfirm(false); setPosting(true);
     try {
       const formData = new FormData();
       formData.append("heavenId", cast.heaven_id);
       formData.append("heavenPass", cast.heaven_pass);
-      formData.append("title", suggestedTitle);
+      formData.append("title", title || "");
       formData.append("body", diary);
       if (imageFile) formData.append("image", imageFile);
 
@@ -1239,8 +1255,8 @@ function HeavenPostButton({ castName, diary, result, casts, postedTime, imageFil
     <div style={{ display: "grid", gap: "10px" }}>
       <div style={{ ...card, borderColor: `${C.yellow}50` }}>
         <p style={{ color: C.yellow, fontSize: "11px", fontWeight: "700", marginBottom: "12px", letterSpacing: "0.08em" }}>投稿内容プレビュー</p>
-        <p style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>タイトル（AI提案）</p>
-        <p style={{ fontSize: "14px", fontWeight: "700", marginBottom: "12px", color: C.text }}>{suggestedTitle || "タイトルを手動で入力してください"}</p>
+        <p style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>タイトル</p>
+        <p style={{ fontSize: "14px", fontWeight: "700", marginBottom: "12px", color: C.text }}>{title || "（タイトルなし）"}</p>
         <p style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>本文</p>
         <p style={{ fontSize: "13px", color: C.sub, whiteSpace: "pre-wrap", maxHeight: "80px", overflow: "hidden", margin: 0 }}>{diary}</p>
         {imagePreviewUrl && (
