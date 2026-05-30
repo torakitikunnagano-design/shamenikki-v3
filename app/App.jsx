@@ -988,11 +988,11 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
         : Promise.resolve(null);
 
       const imageAnalysisPromise = (imageSupport && imageFile)
-        ? toBase64(imageFile).then((base64) => fetch("https://api.openai.com/v1/chat/completions", {
+        ? toBase64(imageFile).then((base64) => fetch("https://api.x.ai/v1/chat/completions", {
             method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
             body: JSON.stringify({
-              model: "gpt-4o",
+              model: "grok-4.3",
               max_tokens: 1000,
               messages: [{
                 role: "user",
