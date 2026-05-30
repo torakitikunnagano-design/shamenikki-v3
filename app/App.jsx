@@ -130,6 +130,7 @@ function App() {
   const [scores, setScores] = useLocalStorage("shamenikki_scores", initScores);
   const [settings, setSettings] = useLocalStorage("shamenikki_settings", initSettings);
   const [courses, setCourses] = useLocalStorage("shamenikki_courses", initCourses);
+  const [shifts, setShifts] = useLocalStorage("shamenikki_shifts", {});
   const [loggedInCast, setLoggedInCast] = useState(null);
   const autoLoginDone = useRef(false);
 
@@ -185,6 +186,7 @@ function App() {
   const adminNav = [
     { id: "guarantee", label: "保証管理", icon: "🎀" },
     { id: "cast",      label: "キャスト", icon: "👑" },
+    { id: "shifts",    label: "出勤設定", icon: "🕐" },
     { id: "ranking",   label: "ランキング", icon: "🌟" },
     { id: "title",     label: "タイトル", icon: "✏️" },
     { id: "courses",   label: "コース設定", icon: "⏱️" },
@@ -304,11 +306,12 @@ function App() {
               <div style={{ padding: "20px 16px", maxWidth: "680px", margin: "0 auto" }}>
                 {mode === "cast" && showShindan && <ShindanPage casts={casts} setCasts={setCasts} loggedInCast={loggedInCast} onComplete={() => { setShowShindan(false); setCastPage("score"); }} />}
                 {mode === "cast" && !showShindan && page === "score"       && <ScorePage casts={casts} settings={settings} scores={scores} setScores={setScores} loggedInCast={loggedInCast} onRetryDiagnosis={() => setShowShindan(true)} />}
-                {mode === "cast" && !showShindan && page === "salary"      && <SalaryPage loggedInCast={loggedInCast} casts={casts} courses={courses} />}
+                {mode === "cast" && !showShindan && page === "salary"      && <SalaryPage loggedInCast={loggedInCast} casts={casts} courses={courses} shifts={shifts} />}
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} />}
                 {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} />}
+                {mode === "admin" && page === "shifts"    && <ShiftsPage casts={casts} shifts={shifts} setShifts={setShifts} />}
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
                 {mode === "admin" && page === "courses"   && <CoursesPage courses={courses} setCourses={setCourses} />}
@@ -1458,7 +1461,7 @@ function TitlePage({ casts }) {
 // ============================================================
 // 給料記録
 // ============================================================
-function SalaryPage({ loggedInCast, casts, courses = [] }) {
+function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   const cast = casts.find((c) => c.name === loggedInCast);
   const castId = cast?.heaven_id || loggedInCast || "";
   const storageKey = `shamenikki_salary_${castId}`;
@@ -1472,6 +1475,13 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
   const [records, setRecords] = useState(loadRecords);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
+
+  const staffShift = shifts[`${loggedInCast}_${today}`] || null;
+
+  useEffect(() => {
+    if (staffShift?.startTime) setStartTime(staffShift.startTime);
+    if (staffShift?.endTime) setEndTime(staffShift.endTime);
+  }, [staffShift?.startTime, staffShift?.endTime]);
   const [hons, setHons] = useState(() => Array.from({ length: 12 }, mkHon));
   const [gross, setGross] = useState("");
   const [dorm, setDorm] = useState("");
@@ -1597,7 +1607,7 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
     setRecords(next);
     localStorage.setItem(storageKey, JSON.stringify(next));
     setHons(Array.from({ length: 12 }, mkHon));
-    setStartTime(""); setEndTime("");
+    if (!staffShift) { setStartTime(""); setEndTime(""); }
     setGross(""); setDorm(""); setMisc(""); setTransport("");
     setSlipOcrDone(false);
     setSaved(true);
@@ -1637,12 +1647,23 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
       {/* 出勤時間 */}
       <div style={{ ...card }}>
         <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>TODAY {today}</p>
-        <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700", display: "block", marginBottom: "6px" }}>出勤時間</label>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={{ ...inp, flex: 1 }} />
-          <span style={{ color: C.muted, fontSize: "13px" }}>〜</span>
-          <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={{ ...inp, flex: 1 }} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+          <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700" }}>出勤時間</label>
+          {staffShift && (
+            <span style={{ fontSize: "10px", color: C.blue, fontWeight: "700", background: `${C.blue}15`, padding: "2px 8px", borderRadius: "10px" }}>スタッフ設定済み</span>
+          )}
         </div>
+        {staffShift ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px 14px", borderRadius: "12px", border: `1.5px solid ${C.blue}40`, background: `${C.blue}08` }}>
+            <span style={{ flex: 1, fontSize: "15px", fontWeight: "700", color: C.text, textAlign: "center" }}>{startTime || "—"}</span>
+            <span style={{ color: C.muted, fontSize: "13px" }}>〜</span>
+            <span style={{ flex: 1, fontSize: "15px", fontWeight: "700", color: C.text, textAlign: "center" }}>{endTime || "—"}</span>
+          </div>
+        ) : (
+          <div style={{ padding: "12px 14px", borderRadius: "12px", border: `1.5px dashed ${C.border}`, background: `${C.muted}08`, textAlign: "center" }}>
+            <p style={{ color: C.muted, fontSize: "12px", margin: 0 }}>スタッフが出勤時間を設定するまでお待ちください</p>
+          </div>
+        )}
       </div>
 
       {/* 1本ごと入力 */}
@@ -2139,6 +2160,105 @@ function SettingsPage({ settings, setSettings }) {
 
         <Btn onClick={save} loading={false} label="保存する" color={C.accent} />
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// 出勤時間設定（管理者）
+// ============================================================
+function ShiftsPage({ casts, shifts, setShifts }) {
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const [date, setDate] = useState(today);
+  const [localShifts, setLocalShifts] = useState({});
+  const [saved, setSaved] = useState(false);
+
+  const activeCasts = casts.filter((c) => c.is_active);
+
+  useEffect(() => {
+    const init = {};
+    activeCasts.forEach((c) => {
+      const key = `${c.name}_${date}`;
+      init[c.name] = {
+        startTime: shifts[key]?.startTime || "",
+        endTime: shifts[key]?.endTime || "",
+      };
+    });
+    setLocalShifts(init);
+    setSaved(false);
+  }, [date, shifts]);
+
+  function updateCastShift(castName, field, value) {
+    setSaved(false);
+    setLocalShifts((prev) => ({ ...prev, [castName]: { ...prev[castName], [field]: value } }));
+  }
+
+  function saveAll() {
+    const next = { ...shifts };
+    activeCasts.forEach((c) => {
+      const key = `${c.name}_${date}`;
+      const s = localShifts[c.name] || {};
+      if (s.startTime || s.endTime) {
+        next[key] = { startTime: s.startTime || "", endTime: s.endTime || "" };
+      } else {
+        delete next[key];
+      }
+    });
+    setShifts(next);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  return (
+    <div style={{ display: "grid", gap: "16px" }}>
+      <Header title="出勤時間設定" sub="キャストごとの出勤時間をスタッフが設定します" color={C.blue} />
+
+      <div style={{ ...card, display: "grid", gap: "10px" }}>
+        <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", margin: 0 }}>日付を選択</p>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inp} />
+      </div>
+
+      {activeCasts.length === 0 && (
+        <div style={{ ...card, textAlign: "center", padding: "40px", color: C.muted }}>在籍中のキャストがいません</div>
+      )}
+
+      {activeCasts.map((c) => {
+        const s = localShifts[c.name] || {};
+        const isSet = !!(s.startTime || s.endTime);
+        return (
+          <div key={c.name} style={{ ...card, borderColor: isSet ? `${C.blue}50` : C.border }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+              <p style={{ fontWeight: "700", fontSize: "15px", color: C.text, margin: 0, flex: 1 }}>{c.name}</p>
+              {isSet && <span style={{ fontSize: "10px", color: C.blue, fontWeight: "700", background: `${C.blue}15`, padding: "2px 8px", borderRadius: "10px" }}>設定済み</span>}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <input
+                type="time"
+                value={s.startTime || ""}
+                onChange={(e) => updateCastShift(c.name, "startTime", e.target.value)}
+                style={{ ...inp, flex: 1 }}
+              />
+              <span style={{ color: C.muted, fontSize: "13px" }}>〜</span>
+              <input
+                type="time"
+                value={s.endTime || ""}
+                onChange={(e) => updateCastShift(c.name, "endTime", e.target.value)}
+                style={{ ...inp, flex: 1 }}
+              />
+            </div>
+          </div>
+        );
+      })}
+
+      {activeCasts.length > 0 && (
+        saved ? (
+          <div style={{ padding: "14px", borderRadius: "14px", background: `${C.green}15`, border: `1.5px solid ${C.green}40`, textAlign: "center" }}>
+            <p style={{ color: C.green, fontWeight: "700", margin: 0 }}>✅ 保存しました！キャスト画面に反映されます</p>
+          </div>
+        ) : (
+          <Btn onClick={saveAll} loading={false} label="保存する" color={C.blue} />
+        )
+      )}
     </div>
   );
 }
