@@ -1224,6 +1224,11 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
   const [posted, setPosted] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [postError, setPostError] = useState(null);
+  const [editTitle, setEditTitle] = useState(title || "");
+  const [editDiary, setEditDiary] = useState(diary || "");
+
+  useEffect(() => { setEditTitle(title || ""); }, [title]);
+  useEffect(() => { setEditDiary(diary || ""); }, [diary]);
 
   const cast = casts.find((c) => c.name === castName);
   const hasCredentials = cast?.heaven_id && cast?.heaven_pass;
@@ -1235,8 +1240,8 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
       const formData = new FormData();
       formData.append("heavenId", cast.heaven_id);
       formData.append("heavenPass", cast.heaven_pass);
-      formData.append("title", title || "");
-      formData.append("body", diary);
+      formData.append("title", editTitle);
+      formData.append("body", editDiary);
       if (imageFile) formData.append("image", imageFile);
 
       const res = await fetch(`${VPS_URL}/post`, {
@@ -1254,11 +1259,21 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
   return (
     <div style={{ display: "grid", gap: "10px" }}>
       <div style={{ ...card, borderColor: `${C.yellow}50` }}>
-        <p style={{ color: C.yellow, fontSize: "11px", fontWeight: "700", marginBottom: "12px", letterSpacing: "0.08em" }}>投稿内容プレビュー</p>
-        <p style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>タイトル</p>
-        <p style={{ fontSize: "14px", fontWeight: "700", marginBottom: "12px", color: C.text }}>{title || "（タイトルなし）"}</p>
-        <p style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>本文</p>
-        <p style={{ fontSize: "13px", color: C.sub, whiteSpace: "pre-wrap", maxHeight: "80px", overflow: "hidden", margin: 0 }}>{diary}</p>
+        <p style={{ color: C.yellow, fontSize: "11px", fontWeight: "700", marginBottom: "12px", letterSpacing: "0.08em" }}>投稿内容プレビュー（編集可）</p>
+        <label style={{ fontSize: "11px", color: C.muted, display: "block", marginBottom: "6px", fontWeight: "700", letterSpacing: "0.06em" }}>タイトル</label>
+        <input
+          value={editTitle}
+          onChange={(e) => setEditTitle(e.target.value)}
+          placeholder="タイトルを入力"
+          style={{ ...inp, fontWeight: "700", marginBottom: "14px" }}
+        />
+        <label style={{ fontSize: "11px", color: C.muted, display: "block", marginBottom: "6px", fontWeight: "700", letterSpacing: "0.06em" }}>本文</label>
+        <textarea
+          value={editDiary}
+          onChange={(e) => setEditDiary(e.target.value)}
+          placeholder="本文を入力"
+          style={{ ...inp, minHeight: "120px", resize: "vertical", whiteSpace: "pre-wrap", margin: 0 }}
+        />
         {imagePreviewUrl && (
           <div style={{ marginTop: "12px" }}>
             <p style={{ fontSize: "11px", color: C.muted, marginBottom: "6px" }}>添付画像</p>
