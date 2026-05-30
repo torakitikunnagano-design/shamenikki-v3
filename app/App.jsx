@@ -1476,7 +1476,10 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
   const [gross, setGross] = useState("");
   const [dorm, setDorm] = useState("");
   const [misc, setMisc] = useState("");
+  const [transport, setTransport] = useState("");
   const [saved, setSaved] = useState(false);
+  const [slipLoading, setSlipLoading] = useState(false);
+  const [slipOcrDone, setSlipOcrDone] = useState(false);
 
   function updateHon(i, key, val) {
     setHons((prev) => prev.map((h, idx) => idx === i ? { ...h, [key]: val } : h));
@@ -1484,6 +1487,63 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
 
   function isActive(h) {
     return h.courseMin !== "" || h.shimei !== "" || h.op !== "" || h.extCount !== "" || h.extMin !== "";
+  }
+
+  async function readSlip(file) {
+    setSlipLoading(true);
+    setSlipOcrDone(false);
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+      const prompt = `あなたは業務委託明細・給料明細のデータ抽出専門AIです。添付の明細画像から以下のJSON形式でデータを抽出してください。明細フォーマットはお店ごとに異なります。表の見出しを手がかりに柔軟に読み取り、空欄・不明な項目は0としてください。
+
+指名種類の判定：本指名・ホン指名・H指名→"本指名" / P指名・プレミアム指名→"P指名" / フリー・指名なし→"フリー" / 不明→"フリー"
+courseMinは数値（分）。金額はすべて円（数値のみ）。
+
+必ずこのJSONのみで返してください（説明文不要）：
+{"sessions":[{"courseMin":60,"shimei":"本指名","courseFee":5000,"shimeiRyou":2000,"extCount":0,"extMin":0,"op":0,"subtotal":7000}],"gross":50000,"misc":3000,"dorm":10000,"transport":1000,"takeHome":36000}`;
+      const res = await fetch("https://api.x.ai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
+        body: JSON.stringify({
+          model: "grok-4.3",
+          max_tokens: 2000,
+          messages: [{ role: "user", content: [
+            { type: "image_url", image_url: { url: base64 } },
+            { type: "text", text: prompt },
+          ]}],
+        }),
+      });
+      const data = await res.json();
+      const text = data.choices?.[0]?.message?.content || "";
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("parse failed");
+      const parsed = JSON.parse(jsonMatch[0]);
+      const newHons = Array.from({ length: 12 }, mkHon);
+      (parsed.sessions || []).forEach((s, i) => {
+        if (i < 12) newHons[i] = {
+          courseMin: String(s.courseMin || ""),
+          shimei: s.shimei || "",
+          op: String(s.op || ""),
+          extCount: String(s.extCount || ""),
+          extMin: String(s.extMin || ""),
+        };
+      });
+      setHons(newHons);
+      if (parsed.gross) setGross(String(parsed.gross));
+      if (parsed.dorm) setDorm(String(parsed.dorm));
+      if (parsed.misc) setMisc(String(parsed.misc));
+      if (parsed.transport) setTransport(String(parsed.transport));
+      setSlipOcrDone(true);
+    } catch {
+      alert("読み取りに失敗しました。手動で入力してください。");
+    } finally {
+      setSlipLoading(false);
+    }
   }
 
   const activeHons = hons.filter(isActive);
@@ -1497,7 +1557,7 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
   const totalExtCount  = activeHons.reduce((s, h) => s + (Number(h.extCount) || 0), 0);
   const totalExtMin    = activeHons.reduce((s, h) => s + (Number(h.extMin) || 0), 0);
   const totalOp        = activeHons.reduce((s, h) => s + (Number(h.op) || 0), 0);
-  const takeHome = (Number(gross) || 0) - (Number(dorm) || 0) - (Number(misc) || 0);
+  const takeHome = (Number(gross) || 0) - (Number(dorm) || 0) - (Number(misc) || 0) - (Number(transport) || 0);
 
   function saveRecord() {
     const rec = {
@@ -1513,6 +1573,7 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
       gross: Number(gross) || 0,
       dorm: Number(dorm) || 0,
       misc: Number(misc) || 0,
+      transport: Number(transport) || 0,
       takeHome,
       hons: activeHons,
     };
@@ -1521,7 +1582,8 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
     localStorage.setItem(storageKey, JSON.stringify(next));
     setHons(Array.from({ length: 12 }, mkHon));
     setStartTime(""); setEndTime("");
-    setGross(""); setDorm(""); setMisc("");
+    setGross(""); setDorm(""); setMisc(""); setTransport("");
+    setSlipOcrDone(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
@@ -1532,6 +1594,29 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
   return (
     <div style={{ display: "grid", gap: "16px" }}>
       <Header title="給料記録" sub="1本ごとに入力して手取りを計算" color={C.accent} />
+
+      {/* 給料明細から自動入力 */}
+      <div style={{ ...card, border: `2px dashed ${C.accent}60` }}>
+        <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "8px" }}>給料明細から自動入力（任意）</p>
+        <p style={{ fontSize: "11px", color: C.muted, marginBottom: "12px", lineHeight: 1.6 }}>明細の写真をアップすると自動で読み取ります。必ず内容を確認してから保存してください。</p>
+        <label style={{ display: "block", cursor: slipLoading ? "not-allowed" : "pointer" }}>
+          <input
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            disabled={slipLoading}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) readSlip(f); e.target.value = ""; }}
+          />
+          <div style={{ background: slipLoading ? `${C.muted}15` : `${C.accent}15`, border: `1.5px solid ${slipLoading ? C.muted : C.accent}40`, borderRadius: "12px", padding: "14px", textAlign: "center", color: slipLoading ? C.muted : C.accent, fontSize: "13px", fontWeight: "700" }}>
+            {slipLoading ? "読み取り中..." : "明細画像をアップ"}
+          </div>
+        </label>
+        {slipOcrDone && (
+          <div style={{ marginTop: "10px", background: `${C.green}15`, border: `1.5px solid ${C.green}40`, borderRadius: "10px", padding: "10px", fontSize: "12px", color: C.green, fontWeight: "700", textAlign: "center" }}>
+            読み取り完了。内容を確認・修正してから保存してください
+          </div>
+        )}
+      </div>
 
       {/* 出勤時間 */}
       <div style={{ ...card }}>
@@ -1615,18 +1700,21 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
         <Field label="総支給（円）">
           <input type="number" min="0" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="0" style={inp} />
         </Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "10px", marginBottom: "14px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginTop: "10px", marginBottom: "14px" }}>
           <Field label="寮費（円）">
             <input type="number" min="0" value={dorm} onChange={(e) => setDorm(e.target.value)} placeholder="0" style={inp} />
           </Field>
           <Field label="雑費（円）">
             <input type="number" min="0" value={misc} onChange={(e) => setMisc(e.target.value)} placeholder="0" style={inp} />
           </Field>
+          <Field label="交通費（円）">
+            <input type="number" min="0" value={transport} onChange={(e) => setTransport(e.target.value)} placeholder="0" style={inp} />
+          </Field>
         </div>
         <div style={{ background: "linear-gradient(135deg, #fff0f8, #ffe8f5)", border: `2px solid ${C.accent}40`, borderRadius: "14px", padding: "18px", textAlign: "center", marginBottom: "14px" }}>
           <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px" }}>手取り</p>
           <p style={{ fontSize: "32px", fontWeight: "700", color: takeHome >= 0 ? C.accent : C.red, margin: 0 }}>{fmtYen(takeHome)}</p>
-          <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>総支給 {fmtYen(Number(gross)||0)} − 寮費 {fmtYen(Number(dorm)||0)} − 雑費 {fmtYen(Number(misc)||0)}</p>
+          <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>総支給 {fmtYen(Number(gross)||0)} − 寮費 {fmtYen(Number(dorm)||0)} − 雑費 {fmtYen(Number(misc)||0)} − 交通費 {fmtYen(Number(transport)||0)}</p>
         </div>
         <Btn onClick={saveRecord} loading={false} label={saved ? "保存しました ✓" : "記録を保存"} color={saved ? C.green : C.accent} />
       </div>
@@ -1647,6 +1735,7 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
                   <span style={{ fontSize: "11px", color: C.muted }}>合計{r.totalHon}本（本{r.honShimei} P{r.pShimei} F{r.free}）</span>
                   {(r.extCount > 0 || r.extMin > 0) && <span style={{ fontSize: "11px", color: C.muted }}>延長{r.extCount}回/{r.extMin}分</span>}
                   {r.option > 0 && <span style={{ fontSize: "11px", color: C.muted }}>OP {fmtYen(r.option)}</span>}
+                  {r.transport > 0 && <span style={{ fontSize: "11px", color: C.muted }}>交通費 {fmtYen(r.transport)}</span>}
                 </div>
               </div>
             ))}
