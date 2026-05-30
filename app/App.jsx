@@ -1803,6 +1803,8 @@ function CastPage({ casts, setCasts, scores }) {
   const [newStart, setNewStart] = useState("");
   const [tab, setTab] = useState("list");
   const [lockRefresh, setLockRefresh] = useState(0);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkDone, setBulkDone] = useState(null);
 
   function resetDiagLock(c) {
     try { localStorage.removeItem(`cast_type_${c.heaven_id || c.name}`); } catch {}
@@ -1814,6 +1816,36 @@ function CastPage({ casts, setCasts, scores }) {
     if (!newName.trim()) return;
     setCasts([...casts, { name: newName.trim(), is_active: true, work_start: newStart, strong: "未分析", weak: "未分析", heaven_id: "", heaven_pass: "" }]);
     setNewName(""); setNewStart("");
+  }
+
+  function parseBulkLines(text) {
+    return text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        const parts = line.split(/[,，、]/);
+        const name = parts[0].trim();
+        const heavenId = parts[1] ? parts[1].trim() : "";
+        return { name, heavenId };
+      })
+      .filter((item) => item.name.length > 0);
+  }
+
+  function bulkAddCasts() {
+    const parsed = parseBulkLines(bulkText);
+    if (parsed.length === 0) return;
+    const existingNames = new Set(casts.map((c) => c.name));
+    const added = [];
+    const skipped = [];
+    parsed.forEach(({ name, heavenId }) => {
+      if (existingNames.has(name)) { skipped.push(name); return; }
+      added.push({ name, is_active: true, work_start: "", strong: "未分析", weak: "未分析", heaven_id: heavenId, heaven_pass: "" });
+      existingNames.add(name);
+    });
+    if (added.length > 0) setCasts((prev) => [...prev, ...added]);
+    setBulkDone({ added: added.map((c) => c.name), skipped });
+    setBulkText("");
   }
   function openModal(c) { setModal(c); setModalId(c.heaven_id || ""); setModalPass(c.heaven_pass || ""); setModalSaved(false); }
   function saveModal() {
@@ -1858,9 +1890,9 @@ function CastPage({ casts, setCasts, scores }) {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: "8px" }}>
-        {[["list", "キャスト一覧"], ["add", "新規追加"]].map(([t, lbl]) => (
-          <button key={t} onClick={() => setTab(t)} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${tab === t ? C.accent : C.border}`, background: tab === t ? `${C.accent}18` : "white", color: tab === t ? C.accent : C.muted, fontWeight: "700", cursor: "pointer", fontSize: "13px", transition: "all 0.2s" }}>
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        {[["list", "キャスト一覧"], ["add", "新規追加"], ["bulk", "一括登録"]].map(([t, lbl]) => (
+          <button key={t} onClick={() => { setTab(t); setBulkDone(null); }} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${tab === t ? C.accent : C.border}`, background: tab === t ? `${C.accent}18` : "white", color: tab === t ? C.accent : C.muted, fontWeight: "700", cursor: "pointer", fontSize: "13px", transition: "all 0.2s" }}>
             {lbl}
           </button>
         ))}
@@ -1871,6 +1903,46 @@ function CastPage({ casts, setCasts, scores }) {
           <Field label="キャスト名"><input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="名前を入力" style={inp} /></Field>
           <Field label="出勤開始時間"><input type="time" value={newStart} onChange={(e) => setNewStart(e.target.value)} style={inp} /></Field>
           <Btn onClick={addCast} loading={false} label="追加する" color={C.green} />
+        </div>
+      )}
+
+      {tab === "bulk" && (
+        <div style={{ ...card, display: "grid", gap: "16px" }}>
+          <div>
+            <p style={{ fontWeight: "700", fontSize: "15px", color: C.text, margin: "0 0 6px" }}>キャスト一括登録</p>
+            <p style={{ fontSize: "12px", color: C.sub, margin: 0, lineHeight: 1.6 }}>
+              1行に1人ずつ名前を入力してください。<br />
+              ヘブンIDも一緒に登録する場合は <code style={{ background: `${C.accent}12`, padding: "1px 6px", borderRadius: "4px" }}>なな, 12345678</code> の形式で入力してください。
+            </p>
+          </div>
+          <textarea
+            value={bulkText}
+            onChange={(e) => { setBulkText(e.target.value); setBulkDone(null); }}
+            placeholder={"なな\nさくら, 66033247\nれな\nあおい, 78901234"}
+            rows={8}
+            style={{ ...inp, resize: "vertical", fontFamily: "monospace", fontSize: "14px", lineHeight: 1.7 }}
+          />
+          {bulkText.trim() && !bulkDone && (
+            <div style={{ padding: "12px", borderRadius: "12px", background: `${C.blue}10`, border: `1.5px solid ${C.blue}30` }}>
+              <p style={{ fontSize: "12px", color: C.sub, margin: "0 0 6px", fontWeight: "700" }}>登録プレビュー ({parseBulkLines(bulkText).length}人)</p>
+              {parseBulkLines(bulkText).map(({ name, heavenId }, i) => (
+                <div key={i} style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "4px" }}>
+                  <span style={{ fontSize: "13px", color: C.text, fontWeight: "600" }}>{name}</span>
+                  {heavenId && <Tag label={`ヘブンID: ${heavenId}`} color={C.accent} />}
+                  {casts.some((c) => c.name === name) && <Tag label="既存" color={C.muted} />}
+                </div>
+              ))}
+            </div>
+          )}
+          {bulkDone && (
+            <div style={{ padding: "14px", borderRadius: "14px", background: `${C.green}12`, border: `1.5px solid ${C.green}40` }}>
+              <p style={{ color: C.green, fontWeight: "700", margin: "0 0 4px" }}>✅ {bulkDone.added.length}人を登録しました！</p>
+              {bulkDone.skipped.length > 0 && (
+                <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>スキップ（既存）: {bulkDone.skipped.join("、")}</p>
+              )}
+            </div>
+          )}
+          <Btn onClick={bulkAddCasts} loading={false} label={`まとめて登録する（${parseBulkLines(bulkText).filter(({ name }) => !casts.some((c) => c.name === name)).length}人）`} color={C.green} />
         </div>
       )}
 
