@@ -642,7 +642,7 @@ function ShindanPage({ casts, setCasts, loggedInCast, onComplete }) {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
         body: JSON.stringify({
-          model: "grok-4.3", max_tokens: 800,
+          model: "grok-4.3", max_tokens: 800, reasoning_effort: "none",
           messages: [{ role: "user", content: `あなたはエンタメ業界のパーソナリティコンサルタントです。スタッフのキャラクター診断結果を分析して、自己PR文と写真のアドバイスをしてください。\n\nスタッフ名：${castName}\n診断回答：\n${QUESTIONS.map((q) => `・${q.text} → ${answers[q.id] || "未回答"}`).join("\n")}\n備考：${note || "なし"}\n判定キャラクター：${typeGuess}\n\n以下のフォーマットで返答してください：\n\nキャラクター判定：${typeGuess}\n\nあなたの魅力\n・\n・\n・\n\nおすすめ自己PR文スタイル\n・\n\nブログで使えるフレーズ例\n・\n・\n\n写真撮影のアドバイス\n・\n・` }]
         })
       });
@@ -760,7 +760,7 @@ function ShindanPage({ casts, setCasts, loggedInCast, onComplete }) {
         {loading ? (
           <div style={{ ...card, textAlign: "center", padding: "48px" }}>
             <div style={{ fontSize: "32px", marginBottom: "12px" }}>✨</div>
-            <p style={{ color: C.muted, margin: 0 }}>AIが分析中です...</p>
+            <p style={{ color: C.muted, margin: 0 }}>AIが分析中です…（数秒かかります）</p>
           </div>
         ) : result && typeInfo ? (
           <>
@@ -1015,7 +1015,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
           body: JSON.stringify({
-            model: "grok-4.3", max_tokens: 800,
+            model: "grok-4.3", max_tokens: 800, reasoning_effort: "none",
             messages: [
               { role: "system", content: REWRITE_PROMPTS[type] },
               { role: "user", content: `以下の写メ日記をリライトしてください。内容・情報は維持しつつ、指定スタイルの文章に書き換えてください。${getSalaryContext()}\n\n【厳守事項】本数・指名数・手取り・売上などの数字は絶対に本文に含めないこと。方向性の参考情報はトーン判断にのみ使うこと。\n\n${diary}` }
@@ -1040,7 +1040,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
             body: JSON.stringify({
-              model: "grok-4.3", max_tokens: 1000,
+              model: "grok-4.3", max_tokens: 1000, reasoning_effort: "none",
               messages: [{ role: "user", content: `あなたはエンタメ業界のブログコンサルタントです。スタッフのブログ記事を分析・採点してください。\n\n【投稿ルール】\n最低文字数：${settings.min_text_length}文字 / 今回：${charCountFinal}文字 / 不足：${charShortFinal}文字\n画像必須：${settings.image_required ? "あり" : "なし"} / 画像：${imageFile ? "あり" : "なし"}\n\n必ず以下のフォーマットで返答してください：\n\n総合点：○○点\n\n投稿ルールチェック\n・文字数判定：達成 or 文字数不足\n・画像判定：達成 or 画像不足\n\n改善提案\n・\n・\n\n良い点\n・\n・\n\n改善点\n・\n・\n\n改善タイトル案\n・\n・\n\nキャラクター分析\n・\n\n【スタッフ名】${castName}\n【ブログ本文】${finalDiary}` }]
             })
           })
@@ -1051,7 +1051,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
             body: JSON.stringify({
-              model: "grok-4.3", max_tokens: 100,
+              model: "grok-4.3", max_tokens: 100, reasoning_effort: "none",
               messages: [
                 { role: "system", content: TITLE_PROMPTS[type] },
                 { role: "user", content: `本文：${finalDiary}\n\nこの本文に合うタイトルを1つ生成してください。タイトルのみ返してください。` }
@@ -1247,7 +1247,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
           <span style={{ fontSize: "13px", color: C.muted }}>🔒 投稿時刻は送信した瞬間に自動記録されます</span>
           {postedTime && <span style={{ marginLeft: "auto", color: C.green, fontWeight: "700", fontSize: "14px" }}>{postedTime}</span>}
         </div>
-        <Btn onClick={handleScore} loading={loading} label={(textSupport || titleAssist) ? "AI採点する" : "投稿記録する"} color={C.accent} />
+        <Btn onClick={handleScore} loading={loading} label={loading ? "AIが分析中です…（数秒かかります）" : (textSupport || titleAssist) ? "AI採点する" : "投稿記録する"} color={C.accent} />
       </div>
 
       {/* AI採点結果（textSupport ON時のみ） */}
@@ -1420,7 +1420,7 @@ function TitlePage({ casts }) {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
         body: JSON.stringify({
-          model: "grok-4.3", max_tokens: 800,
+          model: "grok-4.3", max_tokens: 800, reasoning_effort: "none",
           messages: [{ role: "user", content: `風俗店の写メ日記タイトルを分析してください。\n\nタイトル：${title}\n本文：${body || "（未入力）"}\nキャスト：${castName || "未設定"}\n\n以下のフォーマットで返答してください：\n\nタイトル評価：良 or 普 or 改善\n\n良い点\n・\n\n改善点\n・\n\n改善タイトル案（3つ）\n1.\n2.\n3.\n\nクリックされやすい理由\n・` }]
         })
       });
@@ -1446,7 +1446,7 @@ function TitlePage({ casts }) {
         <Field label="本文（任意）">
           <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="本文があればより精度が上がります" style={{ ...inp, minHeight: "100px" }} />
         </Field>
-        <Btn onClick={analyze} loading={loading} label="タイトルを分析する" color={C.pink} />
+        <Btn onClick={analyze} loading={loading} label={loading ? "AIが分析中です…（数秒かかります）" : "タイトルを分析する"} color={C.pink} />
       </div>
       {result && (
         <div style={{ ...card }}>
