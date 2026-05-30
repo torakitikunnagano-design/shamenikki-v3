@@ -64,6 +64,12 @@ const initSettings = {
   show_guarantee: true,
 };
 
+const initCourses = [
+  { id: 1, minutes: 60 },
+  { id: 2, minutes: 90 },
+  { id: 3, minutes: 120 },
+];
+
 const initScores = [
   { id: 1, cast_name: "さくら", diary: "今日もお仕事頑張ってます！みなさんに会えるのが楽しみで、毎日元気いっぱい出勤してます。趣味の料理で新しいレシピ試したら大成功でした♪", result: "総合点：78点\n\n保証条件チェック\n・文字数判定：達成\n・画像判定：達成\n\n保証改善提案\n・タイトルをもっとキャッチーにすると反応UP\n\n良い点\n・元気な印象が伝わる\n・日常感があり親近感がある\n\n改善点\n・もう少し感情表現を入れると良い\n\n改善タイトル案\n・「料理上手な彼女♪新レシピ大成功です！」\n・「今日も元気に出勤♡待ってます！」", posted_at: new Date().toISOString(), has_image: true, score: 78 },
   { id: 2, cast_name: "みお", diary: "雨の日は家でゆっくり映画を見るのが好きです。最近ハマっているのはラブストーリー系で、感動して泣いてしまいました。そんな感受性豊かな私に会いに来てください！", result: "総合点：85点\n\n保証条件チェック\n・文字数判定：達成\n・画像判定：達成\n\n保証改善提案\n・具体的な映画名を入れるとより個性が出る\n\n良い点\n・彼女感が強く出ている\n・感情表現が豊か\n\n改善点\n・締めの一文がもう少し誘い感があると良い\n\n改善タイトル案\n・「雨の日は映画で号泣中…♡」\n・「感受性豊かな私に会いに来て♪」", posted_at: new Date(Date.now() - 3600000).toISOString(), has_image: true, score: 85 },
@@ -123,6 +129,7 @@ function App() {
   const [casts, setCasts] = useLocalStorage("shamenikki_casts", initCasts);
   const [scores, setScores] = useLocalStorage("shamenikki_scores", initScores);
   const [settings, setSettings] = useLocalStorage("shamenikki_settings", initSettings);
+  const [courses, setCourses] = useLocalStorage("shamenikki_courses", initCourses);
   const [loggedInCast, setLoggedInCast] = useState(null);
   const autoLoginDone = useRef(false);
 
@@ -180,6 +187,7 @@ function App() {
     { id: "cast",      label: "キャスト", icon: "👑" },
     { id: "ranking",   label: "ランキング", icon: "🌟" },
     { id: "title",     label: "タイトル", icon: "✏️" },
+    { id: "courses",   label: "コース設定", icon: "⏱️" },
     { id: "settings",  label: "設定",    icon: "⚙️" },
   ];
 
@@ -296,13 +304,14 @@ function App() {
               <div style={{ padding: "20px 16px", maxWidth: "680px", margin: "0 auto" }}>
                 {mode === "cast" && showShindan && <ShindanPage casts={casts} setCasts={setCasts} loggedInCast={loggedInCast} onComplete={() => { setShowShindan(false); setCastPage("score"); }} />}
                 {mode === "cast" && !showShindan && page === "score"       && <ScorePage casts={casts} settings={settings} scores={scores} setScores={setScores} loggedInCast={loggedInCast} onRetryDiagnosis={() => setShowShindan(true)} />}
-                {mode === "cast" && !showShindan && page === "salary"      && <SalaryPage loggedInCast={loggedInCast} casts={casts} />}
+                {mode === "cast" && !showShindan && page === "salary"      && <SalaryPage loggedInCast={loggedInCast} casts={casts} courses={courses} />}
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} />}
                 {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} />}
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
+                {mode === "admin" && page === "courses"   && <CoursesPage courses={courses} setCourses={setCourses} />}
                 {mode === "admin" && page === "settings"  && <SettingsPage settings={settings} setSettings={setSettings} />}
               </div>
             </>
@@ -1449,7 +1458,7 @@ function TitlePage({ casts }) {
 // ============================================================
 // 給料記録
 // ============================================================
-function SalaryPage({ loggedInCast, casts }) {
+function SalaryPage({ loggedInCast, casts, courses = [] }) {
   const cast = casts.find((c) => c.name === loggedInCast);
   const castId = cast?.heaven_id || loggedInCast || "";
   const storageKey = `shamenikki_salary_${castId}`;
@@ -1542,8 +1551,17 @@ function SalaryPage({ loggedInCast, casts }) {
           <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700", display: "block", marginBottom: "6px" }}>コース・延長</label>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
             <div>
-              <div style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>コース合計（分）</div>
-              <input type="number" min="0" value={courseMin} onChange={(e) => setCourseMin(e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              <div style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>コース（分）</div>
+              {courses.length > 0 ? (
+                <select value={courseMin} onChange={(e) => setCourseMin(e.target.value)} style={{ ...inp, textAlign: "center" }}>
+                  <option value="">選択</option>
+                  {courses.map((c) => (
+                    <option key={c.id} value={c.minutes}>{c.minutes}分</option>
+                  ))}
+                </select>
+              ) : (
+                <input type="number" min="0" value={courseMin} onChange={(e) => setCourseMin(e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              )}
             </div>
             <div>
               <div style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>延長（回）</div>
@@ -1849,6 +1867,95 @@ function RankingPage({ scores }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// コース時間設定
+// ============================================================
+function CoursesPage({ courses, setCourses }) {
+  const [newMin, setNewMin] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [editMin, setEditMin] = useState("");
+
+  function addCourse() {
+    const m = Number(newMin);
+    if (!m || m <= 0) return;
+    if (courses.find((c) => c.minutes === m)) return;
+    setCourses([...courses, { id: Date.now(), minutes: m }].sort((a, b) => a.minutes - b.minutes));
+    setNewMin("");
+  }
+
+  function deleteCourse(id) {
+    setCourses(courses.filter((c) => c.id !== id));
+  }
+
+  function startEdit(c) { setEditId(c.id); setEditMin(String(c.minutes)); }
+
+  function saveEdit(id) {
+    const m = Number(editMin);
+    if (!m || m <= 0) return;
+    setCourses(courses.map((c) => c.id === id ? { ...c, minutes: m } : c).sort((a, b) => a.minutes - b.minutes));
+    setEditId(null);
+    setEditMin("");
+  }
+
+  return (
+    <div style={{ display: "grid", gap: "16px" }}>
+      <Header title="コース時間設定" sub="コース時間を追加・編集・削除できます" color={C.blue} />
+
+      <div style={{ ...card }}>
+        <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>新しいコースを追加</p>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <input
+            type="number" min="1" value={newMin}
+            onChange={(e) => setNewMin(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addCourse()}
+            placeholder="例：60"
+            style={{ ...inp, flex: 1 }}
+          />
+          <span style={{ color: C.muted, fontSize: "13px", whiteSpace: "nowrap" }}>分</span>
+          <button
+            onClick={addCourse}
+            style={{ padding: "12px 20px", borderRadius: "12px", border: "none", background: `linear-gradient(135deg, ${C.blue}, ${C.blue}cc)`, color: "white", fontWeight: "700", cursor: "pointer", whiteSpace: "nowrap", fontSize: "13px", boxShadow: `0 4px 16px ${C.blue}44` }}
+          >追加</button>
+        </div>
+      </div>
+
+      <div style={{ ...card }}>
+        <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>登録済みコース</p>
+        {courses.length === 0 ? (
+          <p style={{ color: C.muted, fontSize: "13px", textAlign: "center", padding: "20px 0" }}>コースが登録されていません</p>
+        ) : (
+          <div style={{ display: "grid", gap: "8px" }}>
+            {courses.map((c) => (
+              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 14px", background: C.surface, borderRadius: "12px", border: `1.5px solid ${C.border}` }}>
+                {editId === c.id ? (
+                  <>
+                    <input
+                      type="number" min="1" value={editMin}
+                      onChange={(e) => setEditMin(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && saveEdit(c.id)}
+                      style={{ ...inp, flex: 1 }}
+                      autoFocus
+                    />
+                    <span style={{ color: C.muted, fontSize: "13px", whiteSpace: "nowrap" }}>分</span>
+                    <button onClick={() => saveEdit(c.id)} style={{ padding: "8px 14px", borderRadius: "10px", border: "none", background: C.green, color: "white", fontWeight: "700", cursor: "pointer", fontSize: "12px" }}>保存</button>
+                    <button onClick={() => { setEditId(null); setEditMin(""); }} style={{ padding: "8px 14px", borderRadius: "10px", border: `1.5px solid ${C.border}`, background: "white", color: C.muted, fontWeight: "700", cursor: "pointer", fontSize: "12px" }}>取消</button>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ flex: 1, fontWeight: "700", fontSize: "16px", color: C.text }}>{c.minutes}<span style={{ fontSize: "12px", color: C.muted, marginLeft: "3px" }}>分</span></span>
+                    <button onClick={() => startEdit(c)} style={{ padding: "7px 14px", borderRadius: "10px", border: `1.5px solid ${C.border}`, background: "white", color: C.sub, fontWeight: "700", cursor: "pointer", fontSize: "12px" }}>編集</button>
+                    <button onClick={() => deleteCourse(c.id)} style={{ padding: "7px 14px", borderRadius: "10px", border: "none", background: `${C.red}15`, color: C.red, fontWeight: "700", cursor: "pointer", fontSize: "12px" }}>削除</button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
