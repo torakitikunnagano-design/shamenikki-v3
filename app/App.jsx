@@ -861,14 +861,47 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
       const recs = JSON.parse(localStorage.getItem(`shamenikki_salary_${castId}`)) || [];
       if (recs.length === 0) return "";
       const recent = recs.slice(0, 5);
-      const avgHon = Math.round(recent.reduce((s, r) => s + r.honShimei, 0) / recent.length);
-      const avgFree = Math.round(recent.reduce((s, r) => s + r.free, 0) / recent.length);
-      const avgTotal = Math.round(recent.reduce((s, r) => s + r.totalHon, 0) / recent.length);
-      let direction = "";
-      if (avgHon <= 1) direction = "本指名がまだ少ないため、「また会いたい」と思わせるリピート狙いの温かみのある文章にする";
-      else if (avgFree >= avgHon * 2) direction = "フリー客が多いため、指名を増やすための個性・魅力を前面に出す文章にする";
-      else direction = "本指名・フリーのバランスを維持しながら、固定ファンを増やす親しみやすい文章にする";
-      return `\n\n【執筆方向性の参考（内部情報・出力に数字を含めないこと）】\n・直近の傾向：${direction}\n・この情報はAIが文章のトーンや戦略を決めるためだけに使うこと。本数・金額・売上などの数字は絶対に出力しないこと。`;
+
+      // 指名構成の傾向
+      const avgHon = recent.reduce((s, r) => s + r.honShimei, 0) / recent.length;
+      const avgFree = recent.reduce((s, r) => s + r.free, 0) / recent.length;
+
+      // 稼働効率：出勤時間(h)あたりの本数
+      const effRecs = recent.filter((r) => {
+        if (!r.startTime || !r.endTime) return false;
+        const [sh, sm] = r.startTime.split(":").map(Number);
+        const [eh, em] = r.endTime.split(":").map(Number);
+        let mins = (eh * 60 + em) - (sh * 60 + sm);
+        if (mins <= 0) mins += 24 * 60; // 日跨ぎ対応
+        return mins > 0;
+      });
+      let effDirection = "";
+      if (effRecs.length > 0) {
+        const avgHonPerHour = effRecs.reduce((s, r) => {
+          const [sh, sm] = r.startTime.split(":").map(Number);
+          const [eh, em] = r.endTime.split(":").map(Number);
+          let mins = (eh * 60 + em) - (sh * 60 + sm);
+          if (mins <= 0) mins += 24 * 60;
+          return s + r.totalHon / (mins / 60);
+        }, 0) / effRecs.length;
+
+        if (avgHonPerHour >= 0.8) {
+          effDirection = "出勤時間に対して本数が多く、回転・人気ともに良好。リピーターや本指名のさらなる定着、単価アップにつながる特別感・上質感を意識した表現にする";
+        } else if (avgHonPerHour >= 0.4) {
+          effDirection = "出勤時間に対して本数は平均的。フリー客をリピーターへ育てる「また会いたい」と思わせる親しみやすさと個性を前面に出す";
+        } else {
+          effDirection = "出勤時間に対して本数が少なめで、来店・指名につながる集客強化が優先課題。写真・文章で第一印象の魅力と「この子に会いたい」という動機を強く打ち出す";
+        }
+      }
+
+      // 指名構成の傾向
+      let shimeiDirection = "";
+      if (avgHon <= 1) shimeiDirection = "本指名が少ないため「また会いたい」リピート獲得を重視する";
+      else if (avgFree >= avgHon * 2) shimeiDirection = "フリー客が多いため個性・魅力を際立たせて指名転換を狙う";
+      else shimeiDirection = "本指名とフリーのバランスが取れているため固定ファンの深耕を図る";
+
+      const directions = [effDirection, shimeiDirection].filter(Boolean).join("／");
+      return `\n\n【執筆・アドバイス方向性の参考（内部情報のみ・出力に数字を含めないこと）】\n・方向性：${directions}\n・この情報はトーン・戦略の判断にのみ使うこと。出勤時間・本数・稼働率・売上などの数字や「不人気」のような否定表現は絶対に出力しないこと。改善提案は必ず前向きで具体的な表現にすること。`;
     } catch { return ""; }
   }
   async function handleImageSelect(e) {
