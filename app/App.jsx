@@ -117,7 +117,8 @@ function App() {
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [passInput, setPassInput] = useState("");
   const [passError, setPassError] = useState(false);
-  const [castPage, setCastPage] = useState("shindan");
+  const [castPage, setCastPage] = useState("score");
+  const [showShindan, setShowShindan] = useState(false);
   const [adminPage, setAdminPage] = useState("guarantee");
   const [casts, setCasts] = useLocalStorage("shamenikki_casts", initCasts);
   const [scores, setScores] = useLocalStorage("shamenikki_scores", initScores);
@@ -137,7 +138,12 @@ function App() {
       if (cast) {
         autoLoginDone.current = true;
         setLoggedInCast(castName);
-        setCastPage("shindan");
+        const castId = cast.heaven_id || castName;
+        try {
+          const typeData = localStorage.getItem(`cast_type_${castId}`);
+          if (typeData && JSON.parse(typeData)?.type) { setCastPage("score"); return; }
+        } catch {}
+        setShowShindan(true);
       }
     } catch {}
   }, [casts, loggedInCast]);
@@ -151,10 +157,19 @@ function App() {
   }
 
   function logout() { setAdminUnlocked(false); setMode("cast"); }
-  function castLogout() { setLoggedInCast(null); setCastPage("shindan"); }
+  function castLogout() { setLoggedInCast(null); setCastPage("score"); setShowShindan(false); }
+  function handleCastLogin(name) {
+    setLoggedInCast(name);
+    const cast = casts.find((c) => c.name === name);
+    const castId = cast?.heaven_id || name;
+    try {
+      const typeData = localStorage.getItem(`cast_type_${castId}`);
+      if (typeData && JSON.parse(typeData)?.type) { setCastPage("score"); return; }
+    } catch {}
+    setShowShindan(true);
+  }
 
   const castNav = [
-    { id: "shindan", label: "タイプ診断", icon: "💎" },
     { id: "score",   label: "AI採点",    icon: "✨" },
     ...(settings.show_guarantee ? [{ id: "myguarantee", label: "保証確認", icon: "🎀" }] : []),
   ];
@@ -247,10 +262,10 @@ function App() {
 
           {/* キャスト未ログイン */}
           {mode === "cast" && !loggedInCast ? (
-            <CastLoginScreen casts={casts} onLogin={(name) => { setLoggedInCast(name); setCastPage("shindan"); }} />
+            <CastLoginScreen casts={casts} onLogin={handleCastLogin} />
           ) : (
             <>
-              {(mode === "admin" || loggedInCast) && (
+              {(mode === "admin" || (loggedInCast && !showShindan)) && (
                 <nav style={{ background: "white", borderBottom: `1.5px solid ${C.border}`, display: "flex", overflowX: "auto", padding: "0 4px" }}>
                   {nav.map((n) => (
                     <button key={n.id} onClick={() => setPage(n.id)} style={{
@@ -278,9 +293,9 @@ function App() {
               )}
 
               <div style={{ padding: "20px 16px", maxWidth: "680px", margin: "0 auto" }}>
-                {mode === "cast" && page === "shindan"     && <ShindanPage casts={casts} setCasts={setCasts} loggedInCast={loggedInCast} />}
-                {mode === "cast" && page === "score"       && <ScorePage casts={casts} settings={settings} scores={scores} setScores={setScores} loggedInCast={loggedInCast} />}
-                {mode === "cast" && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
+                {mode === "cast" && showShindan && <ShindanPage casts={casts} setCasts={setCasts} loggedInCast={loggedInCast} onComplete={() => { setShowShindan(false); setCastPage("score"); }} />}
+                {mode === "cast" && !showShindan && page === "score"       && <ScorePage casts={casts} settings={settings} scores={scores} setScores={setScores} loggedInCast={loggedInCast} onRetryDiagnosis={() => setShowShindan(true)} />}
+                {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} />}
                 {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} />}
@@ -567,7 +582,7 @@ function useCastTypeLock(castId) {
   return [lockData, saveLock, resetLock];
 }
 
-function ShindanPage({ casts, setCasts, loggedInCast }) {
+function ShindanPage({ casts, setCasts, loggedInCast, onComplete }) {
   const [step, setStep] = useState("questions");
   const castName = loggedInCast || "";
   const cast = casts.find((c) => c.name === castName);
@@ -636,6 +651,7 @@ function ShindanPage({ casts, setCasts, loggedInCast }) {
             </div>
           )}
         </div>
+      {onComplete && <div style={{ marginTop: "4px" }}><Btn onClick={onComplete} loading={false} label="メインへ進む" color={C.accent} /></div>}
       </div>
     );
   }
@@ -734,6 +750,9 @@ function ShindanPage({ casts, setCasts, loggedInCast }) {
             <div style={{ ...card }}>
               <p style={{ whiteSpace: "pre-wrap", lineHeight: "1.8", fontSize: "14px", color: C.sub }}>{result.detail}</p>
             </div>
+            {onComplete && (
+              <Btn onClick={onComplete} loading={false} label={`✨ ${result.type}で確定してメインへ進む`} color={typeInfo.color} />
+            )}
             {lockData.retries >= 2
               ? <div style={{ padding: "12px 16px", borderRadius: "12px", background: `${C.muted}10`, border: `1.5px solid ${C.muted}30`, textAlign: "center" }}>
                   <p style={{ color: C.muted, fontSize: "13px", margin: 0 }}>🔒 店舗の管理画面からやり直しを解除してください</p>
@@ -786,7 +805,7 @@ function useSupportSettings(castId) {
 // ============================================================
 // AI採点（画像指導統合）
 // ============================================================
-function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
+function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDiagnosis }) {
   const castName = loggedInCast || "";
   const cast = casts.find((c) => c.name === castName);
   const castId = cast?.heaven_id || castName;
@@ -812,13 +831,15 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
   }, [imagePreviewUrl]);
 
   const [confirmedType, setConfirmedType] = useState(null);
+  const [typeRetries, setTypeRetries] = useState(0);
   useEffect(() => {
     if (!castId) return;
     try {
       const saved = localStorage.getItem(`cast_type_${castId}`);
       if (saved) {
-        const { type } = JSON.parse(saved);
+        const { type, retries } = JSON.parse(saved);
         setConfirmedType(mapToCanonicalType(type));
+        setTypeRetries(retries || 0);
       }
     } catch {}
   }, [castId]);
@@ -983,8 +1004,25 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
   const sections = ["投稿ルールチェック", "改善提案", "良い点", "改善点", "改善タイトル案", "キャラクター分析"];
   const imgStyle = { width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "12px", border: `1.5px solid ${C.border}`, display: "block", background: "#fdf0f8" };
 
+  const confirmedTypeInfo = confirmedType ? TYPE_INFO[confirmedType] : null;
   return (
     <div style={{ display: "grid", gap: "16px" }}>
+      {confirmedTypeInfo && (
+        <div style={{ ...card, textAlign: "center", padding: "28px 20px", background: `linear-gradient(135deg, ${confirmedTypeInfo.color}14, ${confirmedTypeInfo.color}08)`, borderColor: `${confirmedTypeInfo.color}50` }}>
+          <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "12px", letterSpacing: "0.1em" }}>あなたのタイプ</p>
+          <p style={{ fontSize: "44px", marginBottom: "8px" }}>{confirmedTypeInfo.emoji}</p>
+          <p style={{ fontSize: "26px", fontWeight: "700", color: confirmedTypeInfo.color, marginBottom: "8px" }}>{confirmedType}</p>
+          <p style={{ fontSize: "13px", color: C.sub, lineHeight: "1.7", marginBottom: typeRetries < 2 && onRetryDiagnosis ? "16px" : "0" }}>{confirmedTypeInfo.desc}</p>
+          {typeRetries < 2 && onRetryDiagnosis && (
+            <button onClick={onRetryDiagnosis} style={{ padding: "7px 20px", borderRadius: "20px", border: `1.5px solid ${C.muted}40`, background: "white", color: C.muted, fontSize: "12px", cursor: "pointer", fontWeight: "700" }}>
+              やり直す
+            </button>
+          )}
+          {typeRetries >= 2 && (
+            <p style={{ fontSize: "11px", color: C.muted, margin: "0" }}>🔒 店舗の管理画面からやり直しを解除してください</p>
+          )}
+        </div>
+      )}
       <Header title="写メ日記AI採点" sub="文章・画像・タイトル指導" color={C.accent} />
 
       {/* AIサポート設定トグル */}
