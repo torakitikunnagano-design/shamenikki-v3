@@ -1467,23 +1467,36 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
     try { return JSON.parse(localStorage.getItem(storageKey)) || []; } catch { return []; }
   }
 
+  const mkHon = () => ({ courseMin: "", shimei: "", op: "", extCount: "", extMin: "" });
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
   const [records, setRecords] = useState(loadRecords);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
-  const [honShimei, setHonShimei] = useState("");
-  const [pShimei, setPShimei] = useState("");
-  const [free, setFree] = useState("");
-  const [courseMin, setCourseMin] = useState("");
-  const [extCount, setExtCount] = useState("");
-  const [extMin, setExtMin] = useState("");
-  const [option, setOption] = useState("");
+  const [hons, setHons] = useState(() => Array.from({ length: 12 }, mkHon));
   const [gross, setGross] = useState("");
   const [dorm, setDorm] = useState("");
   const [misc, setMisc] = useState("");
   const [saved, setSaved] = useState(false);
 
-  const totalHon = (Number(honShimei) || 0) + (Number(pShimei) || 0) + (Number(free) || 0);
+  function updateHon(i, key, val) {
+    setHons((prev) => prev.map((h, idx) => idx === i ? { ...h, [key]: val } : h));
+  }
+
+  function isActive(h) {
+    return h.courseMin !== "" || h.shimei !== "" || h.op !== "" || h.extCount !== "" || h.extMin !== "";
+  }
+
+  const activeHons = hons.filter(isActive);
+  const visibleCount = Math.min(12, activeHons.length + 1);
+
+  const totalHon     = activeHons.length;
+  const honShimei    = activeHons.filter((h) => h.shimei === "本指名").length;
+  const pShimei      = activeHons.filter((h) => h.shimei === "P指名").length;
+  const free         = activeHons.filter((h) => h.shimei === "フリー").length;
+  const totalCourseMin = activeHons.reduce((s, h) => s + (Number(h.courseMin) || 0), 0);
+  const totalExtCount  = activeHons.reduce((s, h) => s + (Number(h.extCount) || 0), 0);
+  const totalExtMin    = activeHons.reduce((s, h) => s + (Number(h.extMin) || 0), 0);
+  const totalOp        = activeHons.reduce((s, h) => s + (Number(h.op) || 0), 0);
   const takeHome = (Number(gross) || 0) - (Number(dorm) || 0) - (Number(misc) || 0);
 
   function saveRecord() {
@@ -1491,101 +1504,118 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
       id: Date.now(),
       date: today,
       startTime, endTime,
-      honShimei: Number(honShimei) || 0,
-      pShimei: Number(pShimei) || 0,
-      free: Number(free) || 0,
+      honShimei, pShimei, free,
       totalHon,
-      courseMin: Number(courseMin) || 0,
-      extCount: Number(extCount) || 0,
-      extMin: Number(extMin) || 0,
-      option: Number(option) || 0,
+      courseMin: totalCourseMin,
+      extCount: totalExtCount,
+      extMin: totalExtMin,
+      option: totalOp,
       gross: Number(gross) || 0,
       dorm: Number(dorm) || 0,
       misc: Number(misc) || 0,
       takeHome,
+      hons: activeHons,
     };
     const next = [rec, ...records].slice(0, 30);
     setRecords(next);
     localStorage.setItem(storageKey, JSON.stringify(next));
+    setHons(Array.from({ length: 12 }, mkHon));
+    setStartTime(""); setEndTime("");
+    setGross(""); setDorm(""); setMisc("");
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
 
   const fmtYen = (n) => n.toLocaleString("ja-JP") + "円";
+  const shimeiOpts = ["本指名", "P指名", "フリー"];
 
   return (
     <div style={{ display: "grid", gap: "16px" }}>
-      <Header title="給料記録" sub="出勤データを入力して手取りを計算" color={C.accent} />
+      <Header title="給料記録" sub="1本ごとに入力して手取りを計算" color={C.accent} />
 
-      {/* 入力フォーム */}
+      {/* 出勤時間 */}
       <div style={{ ...card }}>
         <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>TODAY {today}</p>
-
-        {/* 出勤時間 */}
-        <div style={{ marginBottom: "14px" }}>
-          <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700", display: "block", marginBottom: "6px" }}>出勤時間</label>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={{ ...inp, flex: 1 }} />
-            <span style={{ color: C.muted, fontSize: "13px" }}>〜</span>
-            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={{ ...inp, flex: 1 }} />
-          </div>
+        <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700", display: "block", marginBottom: "6px" }}>出勤時間</label>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={{ ...inp, flex: 1 }} />
+          <span style={{ color: C.muted, fontSize: "13px" }}>〜</span>
+          <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={{ ...inp, flex: 1 }} />
         </div>
+      </div>
 
-        {/* 本数 */}
-        <div style={{ marginBottom: "14px" }}>
-          <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700", display: "block", marginBottom: "6px" }}>
-            本数　<span style={{ color: C.accent, fontWeight: "700" }}>合計 {totalHon}本</span>
-          </label>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
-            {[["本指名", honShimei, setHonShimei], ["P指名", pShimei, setPShimei], ["フリー", free, setFree]].map(([label, val, setter]) => (
-              <div key={label}>
-                <div style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>{label}</div>
-                <input type="number" min="0" value={val} onChange={(e) => setter(e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* コース時間・延長 */}
-        <div style={{ marginBottom: "14px" }}>
-          <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700", display: "block", marginBottom: "6px" }}>コース・延長</label>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
-            <div>
-              <div style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>コース（分）</div>
-              {courses.length > 0 ? (
-                <select value={courseMin} onChange={(e) => setCourseMin(e.target.value)} style={{ ...inp, textAlign: "center" }}>
-                  <option value="">選択</option>
-                  {courses.map((c) => (
-                    <option key={c.id} value={c.minutes}>{c.minutes}分</option>
-                  ))}
-                </select>
-              ) : (
-                <input type="number" min="0" value={courseMin} onChange={(e) => setCourseMin(e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+      {/* 1本ごと入力 */}
+      {Array.from({ length: visibleCount }, (_, i) => {
+        const h = hons[i];
+        const active = isActive(h);
+        return (
+          <div key={i} style={{ ...card, borderColor: active ? C.accent + "80" : C.border }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+              <span style={{ fontSize: "13px", fontWeight: "700", color: active ? C.accent : C.muted }}>{i + 1}本目</span>
+              {active && (
+                <span style={{ fontSize: "11px", color: C.green, fontWeight: "700" }}>
+                  {h.shimei || "未選択"}{h.courseMin ? `・${h.courseMin}分` : ""}
+                </span>
               )}
             </div>
-            <div>
-              <div style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>延長（回）</div>
-              <input type="number" min="0" value={extCount} onChange={(e) => setExtCount(e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "10px" }}>
+              <Field label="コース">
+                {courses.length > 0 ? (
+                  <select value={h.courseMin} onChange={(e) => updateHon(i, "courseMin", e.target.value)} style={inp}>
+                    <option value="">選択</option>
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.minutes}>{c.minutes}分</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input type="number" min="0" value={h.courseMin} onChange={(e) => updateHon(i, "courseMin", e.target.value)} placeholder="分" style={inp} />
+                )}
+              </Field>
+              <Field label="指名">
+                <select value={h.shimei} onChange={(e) => updateHon(i, "shimei", e.target.value)} style={inp}>
+                  <option value="">選択</option>
+                  {shimeiOpts.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </Field>
             </div>
-            <div>
-              <div style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>延長合計（分）</div>
-              <input type="number" min="0" value={extMin} onChange={(e) => setExtMin(e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+              <Field label="OP（円）">
+                <input type="number" min="0" value={h.op} onChange={(e) => updateHon(i, "op", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              </Field>
+              <Field label="延長（回）">
+                <input type="number" min="0" value={h.extCount} onChange={(e) => updateHon(i, "extCount", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              </Field>
+              <Field label="延長（分）">
+                <input type="number" min="0" value={h.extMin} onChange={(e) => updateHon(i, "extMin", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              </Field>
             </div>
           </div>
+        );
+      })}
+
+      {/* 集計サマリー */}
+      {totalHon > 0 && (
+        <div style={{ ...card, background: "linear-gradient(135deg, #fff8fc, #fff0f8)" }}>
+          <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "10px" }}>集計</p>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            <Tag label={`合計 ${totalHon}本`} color={C.accent} />
+            {honShimei > 0 && <Tag label={`本指名 ${honShimei}`} color={C.pink} />}
+            {pShimei > 0 && <Tag label={`P指名 ${pShimei}`} color={C.blue} />}
+            {free > 0 && <Tag label={`フリー ${free}`} color={C.muted} />}
+            {totalCourseMin > 0 && <Tag label={`コース ${totalCourseMin}分`} color={C.green} />}
+            {totalExtCount > 0 && <Tag label={`延長 ${totalExtCount}回/${totalExtMin}分`} color={C.yellow} />}
+            {totalOp > 0 && <Tag label={`OP ${fmtYen(totalOp)}`} color={C.accent2} />}
+          </div>
         </div>
+      )}
 
-        {/* オプション代 */}
-        <Field label="オプション代（円）">
-          <input type="number" min="0" value={option} onChange={(e) => setOption(e.target.value)} placeholder="0" style={inp} />
-        </Field>
-
-        {/* 総支給 */}
+      {/* 総支給・控除・手取り */}
+      <div style={{ ...card }}>
+        <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>給与・控除</p>
         <Field label="総支給（円）">
           <input type="number" min="0" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="0" style={inp} />
         </Field>
-
-        {/* 寮費・雑費 */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "14px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "10px", marginBottom: "14px" }}>
           <Field label="寮費（円）">
             <input type="number" min="0" value={dorm} onChange={(e) => setDorm(e.target.value)} placeholder="0" style={inp} />
           </Field>
@@ -1593,14 +1623,11 @@ function SalaryPage({ loggedInCast, casts, courses = [] }) {
             <input type="number" min="0" value={misc} onChange={(e) => setMisc(e.target.value)} placeholder="0" style={inp} />
           </Field>
         </div>
-
-        {/* 手取り表示 */}
         <div style={{ background: "linear-gradient(135deg, #fff0f8, #ffe8f5)", border: `2px solid ${C.accent}40`, borderRadius: "14px", padding: "18px", textAlign: "center", marginBottom: "14px" }}>
           <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px" }}>手取り</p>
           <p style={{ fontSize: "32px", fontWeight: "700", color: takeHome >= 0 ? C.accent : C.red, margin: 0 }}>{fmtYen(takeHome)}</p>
           <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>総支給 {fmtYen(Number(gross)||0)} − 寮費 {fmtYen(Number(dorm)||0)} − 雑費 {fmtYen(Number(misc)||0)}</p>
         </div>
-
         <Btn onClick={saveRecord} loading={false} label={saved ? "保存しました ✓" : "記録を保存"} color={saved ? C.green : C.accent} />
       </div>
 
