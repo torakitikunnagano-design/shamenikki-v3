@@ -616,11 +616,11 @@ function ShindanPage({ casts, setCasts, loggedInCast, onComplete }) {
     setStep("result"); setLoading(true);
     const typeGuess = calcType(answers);
     try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      const res = await fetch("https://api.x.ai/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
         body: JSON.stringify({
-          model: "gpt-4o", max_tokens: 800,
+          model: "grok-4.3", max_tokens: 800,
           messages: [{ role: "user", content: `あなたはエンタメ業界のパーソナリティコンサルタントです。スタッフのキャラクター診断結果を分析して、自己PR文と写真のアドバイスをしてください。\n\nスタッフ名：${castName}\n診断回答：\n${QUESTIONS.map((q) => `・${q.text} → ${answers[q.id] || "未回答"}`).join("\n")}\n備考：${note || "なし"}\n判定キャラクター：${typeGuess}\n\n以下のフォーマットで返答してください：\n\nキャラクター判定：${typeGuess}\n\nあなたの魅力\n・\n・\n・\n\nおすすめ自己PR文スタイル\n・\n\nブログで使えるフレーズ例\n・\n・\n\n写真撮影のアドバイス\n・\n・` }]
         })
       });
@@ -892,11 +892,11 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
     const type = confirmedType || "清楚系";
     setRewriting(true); setRewriteResult(null);
     try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      const res = await fetch("https://api.x.ai/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
         body: JSON.stringify({
-          model: "gpt-4o", max_tokens: 800,
+          model: "grok-4.3", max_tokens: 800,
           messages: [
             { role: "system", content: REWRITE_PROMPTS[type] },
             { role: "user", content: `以下の写メ日記をリライトしてください。内容・情報は維持しつつ、指定スタイルの文章に書き換えてください。\n\n${diary}` }
@@ -951,11 +951,11 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
     let sc = 0;
     try {
       const scoreReqPromise = textSupport
-        ? fetch("https://api.openai.com/v1/chat/completions", {
+        ? fetch("https://api.x.ai/v1/chat/completions", {
             method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
             body: JSON.stringify({
-              model: "gpt-4o", max_tokens: 1000,
+              model: "grok-4.3", max_tokens: 1000,
           messages: [{ role: "user", content: `あなたはエンタメ業界のブログコンサルタントです。スタッフのブログ記事を分析・採点してください。\n\n【投稿ルール】\n最低文字数：${settings.min_text_length}文字 / 今回：${charCount}文字 / 不足：${charShort}文字\n画像必須：${settings.image_required ? "あり" : "なし"} / 画像：${imageFile ? "あり" : "なし"}\n\n必ず以下のフォーマットで返答してください：\n\n総合点：○○点\n\n投稿ルールチェック\n・文字数判定：達成 or 文字数不足\n・画像判定：達成 or 画像不足\n\n改善提案\n・\n・\n\n良い点\n・\n・\n\n改善点\n・\n・\n\n改善タイトル案\n・\n・\n\nキャラクター分析\n・\n\n【スタッフ名】${castName}\n【ブログ本文】${diary}` }]
             })
           })
@@ -1312,11 +1312,11 @@ function TitlePage({ casts }) {
     if (!title.trim()) return alert("タイトルを入力してください");
     setLoading(true); setResult(null);
     try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      const res = await fetch("https://api.x.ai/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
         body: JSON.stringify({
-          model: "gpt-4o", max_tokens: 800,
+          model: "grok-4.3", max_tokens: 800,
           messages: [{ role: "user", content: `風俗店の写メ日記タイトルを分析してください。\n\nタイトル：${title}\n本文：${body || "（未入力）"}\nキャスト：${castName || "未設定"}\n\n以下のフォーマットで返答してください：\n\nタイトル評価：良 or 普 or 改善\n\n良い点\n・\n\n改善点\n・\n\n改善タイトル案（3つ）\n1.\n2.\n3.\n\nクリックされやすい理由\n・` }]
         })
       });
