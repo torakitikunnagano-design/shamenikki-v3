@@ -666,10 +666,47 @@ function ShindanPage({ casts, setCasts, loggedInCast }) {
 }
 
 // ============================================================
+// サポート設定フック（キャストIDごとにlocalStorage永続化）
+// ============================================================
+function useSupportSettings(castId) {
+  const key = castId ? `support_settings_${castId}` : null;
+  const [support, setSupport] = useState({ imageSupport: true, textSupport: true });
+  const loaded = useRef(false);
+
+  useEffect(() => {
+    if (!key || loaded.current) return;
+    loaded.current = true;
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const { imageSupport, textSupport } = JSON.parse(saved);
+        setSupport({
+          imageSupport: typeof imageSupport === "boolean" ? imageSupport : true,
+          textSupport:  typeof textSupport  === "boolean" ? textSupport  : true,
+        });
+      }
+    } catch {}
+  }, [key]);
+
+  function update(patch) {
+    setSupport((prev) => {
+      const next = { ...prev, ...patch };
+      if (key) { try { localStorage.setItem(key, JSON.stringify(next)); } catch {} }
+      return next;
+    });
+  }
+
+  return [support.imageSupport, support.textSupport, update];
+}
+
+// ============================================================
 // AI採点（画像指導統合）
 // ============================================================
 function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
   const castName = loggedInCast || "";
+  const cast = casts.find((c) => c.name === castName);
+  const castId = cast?.heaven_id || castName;
+  const [imageSupport, textSupport, updateSupport] = useSupportSettings(castId);
   const [diary, setDiary] = useState("");
   const [imageFile, setImageFile] = useState(null);
   const [originalPreviewUrl, setOriginalPreviewUrl] = useState(null);
@@ -777,7 +814,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
         })
       });
 
-      const imageAnalysisPromise = imageFile
+      const imageAnalysisPromise = (imageSupport && imageFile)
         ? toBase64(imageFile).then((base64) => fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
@@ -814,93 +851,117 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
 
   const sections = ["投稿ルールチェック", "改善提案", "良い点", "改善点", "改善タイトル案", "キャラクター分析"];
   const imgStyle = { width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "12px", border: `1.5px solid ${C.border}`, display: "block", background: "#fdf0f8" };
+  const bothOff = !imageSupport && !textSupport;
 
   return (
     <div style={{ display: "grid", gap: "16px" }}>
       <Header title="写メ日記AI採点" sub="文章・画像・タイトル指導" color={C.accent} />
 
-      <div style={{ ...card, display: "grid", gap: "16px" }}>
-        <div style={{ padding: "10px 14px", borderRadius: "12px", background: `linear-gradient(135deg, ${C.accent}15, ${C.accent2}10)`, border: `1.5px solid ${C.accent}30`, display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontSize: "16px" }}>💕</span>
-          <span style={{ fontWeight: "700", color: C.accent }}>{castName}</span>
-          <span style={{ color: C.muted, fontSize: "12px" }}>さんの投稿</span>
+      {/* サポート設定トグル */}
+      <div style={{ ...card, padding: "16px 20px" }}>
+        <p style={{ fontSize: "11px", color: C.sub, fontWeight: "700", letterSpacing: "0.06em", marginBottom: "12px" }}>サポート設定</p>
+        <div style={{ display: "flex", gap: "28px", flexWrap: "wrap" }}>
+          <Toggle checked={imageSupport} onChange={(v) => updateSupport({ imageSupport: v })} label="📸 画像サポート" />
+          <Toggle checked={textSupport}  onChange={(v) => updateSupport({ textSupport: v })}  label="✏️ 文章サポート" />
         </div>
-
-        <Field label={
-          <span style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>写メ日記本文</span>
-            <span style={{ color: charShort > 0 ? C.red : C.green }}>{charCount}文字 {charShort > 0 ? `(あと${charShort}文字)` : "✓"}</span>
-          </span>
-        }>
-          <textarea value={diary} onChange={(e) => setDiary(e.target.value)} placeholder="写メ日記本文を入力..." style={{ ...inp, minHeight: "160px", resize: "vertical" }} />
-        </Field>
-
-        {/* 画像アップロード（ヘブン投稿 + 画像指導AI分析 共有） */}
-        <div>
-          <p style={{ fontSize: "11px", color: C.sub, marginBottom: "8px", fontWeight: "700", letterSpacing: "0.06em" }}>投稿画像（ヘブン自動投稿 ＋ 画像指導AI分析）</p>
-
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} style={{ display: "none" }} />
-
-          {processing ? (
-            <div style={{ width: "100%", padding: "40px 16px", border: `2px dashed ${C.accent}60`, borderRadius: "14px", background: "white", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "32px" }}>✨</span>
-              <span style={{ fontSize: "14px", color: C.accent, fontWeight: "700" }}>画像を加工中...✨</span>
-            </div>
-          ) : originalPreviewUrl ? (
-            <div style={{ display: "grid", gap: "10px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                <div>
-                  <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px", textAlign: "center" }}>補正前</p>
-                  <img src={originalPreviewUrl} alt="補正前" style={imgStyle} />
-                </div>
-                <div>
-                  <p style={{ fontSize: "11px", color: C.pink, fontWeight: "700", marginBottom: "6px", textAlign: "center" }}>補正後 ✨</p>
-                  {imagePreviewUrl
-                    ? <img src={imagePreviewUrl} alt="補正後" style={imgStyle} />
-                    : <div style={{ ...imgStyle, minHeight: "120px", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: "12px", color: C.muted }}>補正中...</span></div>
-                  }
-                </div>
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                {["明るさ補正", "コントラスト", "美肌フィルター", "シャープネス"].map((t) => (
-                  <span key={t} style={{ padding: "3px 10px", borderRadius: "20px", fontSize: "11px", background: `${C.pink}15`, color: C.pink, border: `1px solid ${C.pink}30`, fontWeight: "700" }}>{t}</span>
-                ))}
-              </div>
-              {imagePreviewUrl && (
-                <a href={imagePreviewUrl} download="corrected.jpg" style={{ display: "block", padding: "10px", borderRadius: "10px", border: `1.5px solid ${C.green}50`, background: `${C.green}10`, color: C.green, textAlign: "center", fontWeight: "700", fontSize: "12px", textDecoration: "none" }}>
-                  ⬇ 補正後の画像をダウンロード
-                </a>
-              )}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: "12px", color: C.green, fontWeight: "700" }}>✓ {imageFile?.name}</span>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button type="button" onClick={() => fileInputRef.current?.click()} style={{ background: "none", border: `1.5px solid ${C.border}`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.muted, cursor: "pointer" }}>変更</button>
-                  <button type="button" onClick={clearImage} style={{ background: "none", border: `1.5px solid ${C.red}40`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.red, cursor: "pointer" }}>削除</button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              style={{ width: "100%", padding: "24px 16px", border: `2px dashed ${C.accent}60`, borderRadius: "14px", background: "white", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}
-            >
-              <span style={{ fontSize: "32px" }}>📷</span>
-              <span style={{ fontSize: "14px", color: C.accent, fontWeight: "700" }}>画像を選択する</span>
-              <span style={{ fontSize: "11px", color: C.muted }}>JPG / PNG / HEIC</span>
-            </button>
-          )}
-        </div>
-
-        <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.green}12`, border: `1.5px solid ${C.green}30`, display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontSize: "13px", color: C.muted }}>🔒 投稿時刻は送信した瞬間に自動記録されます</span>
-          {postedTime && <span style={{ marginLeft: "auto", color: C.green, fontWeight: "700", fontSize: "14px" }}>{postedTime}</span>}
-        </div>
-
-        <Btn onClick={handleScore} loading={loading} label="AI採点する" color={C.accent} />
       </div>
 
-      {result && rating && (
+      {bothOff ? (
+        <div style={{ ...card, textAlign: "center", padding: "40px 20px", background: `linear-gradient(135deg, ${C.surface}, white)` }}>
+          <p style={{ fontSize: "36px", marginBottom: "12px" }}>💤</p>
+          <p style={{ fontWeight: "700", color: C.sub, fontSize: "16px", marginBottom: "6px" }}>サポート機能がOFFです</p>
+          <p style={{ color: C.muted, fontSize: "13px", margin: 0 }}>上の「サポート設定」からONにすると機能が使えます</p>
+        </div>
+      ) : (
+        <div style={{ ...card, display: "grid", gap: "16px" }}>
+          <div style={{ padding: "10px 14px", borderRadius: "12px", background: `linear-gradient(135deg, ${C.accent}15, ${C.accent2}10)`, border: `1.5px solid ${C.accent}30`, display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "16px" }}>💕</span>
+            <span style={{ fontWeight: "700", color: C.accent }}>{castName}</span>
+            <span style={{ color: C.muted, fontSize: "12px" }}>さんの投稿</span>
+          </div>
+
+          {textSupport && (
+            <Field label={
+              <span style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>写メ日記本文</span>
+                <span style={{ color: charShort > 0 ? C.red : C.green }}>{charCount}文字 {charShort > 0 ? `(あと${charShort}文字)` : "✓"}</span>
+              </span>
+            }>
+              <textarea value={diary} onChange={(e) => setDiary(e.target.value)} placeholder="写メ日記本文を入力..." style={{ ...inp, minHeight: "160px", resize: "vertical" }} />
+            </Field>
+          )}
+
+          {imageSupport && (
+            <div>
+              <p style={{ fontSize: "11px", color: C.sub, marginBottom: "8px", fontWeight: "700", letterSpacing: "0.06em" }}>投稿画像（ヘブン自動投稿 ＋ 画像指導AI分析）</p>
+
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} style={{ display: "none" }} />
+
+              {processing ? (
+                <div style={{ width: "100%", padding: "40px 16px", border: `2px dashed ${C.accent}60`, borderRadius: "14px", background: "white", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontSize: "32px" }}>✨</span>
+                  <span style={{ fontSize: "14px", color: C.accent, fontWeight: "700" }}>画像を加工中...✨</span>
+                </div>
+              ) : originalPreviewUrl ? (
+                <div style={{ display: "grid", gap: "10px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                    <div>
+                      <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px", textAlign: "center" }}>補正前</p>
+                      <img src={originalPreviewUrl} alt="補正前" style={imgStyle} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: "11px", color: C.pink, fontWeight: "700", marginBottom: "6px", textAlign: "center" }}>補正後 ✨</p>
+                      {imagePreviewUrl
+                        ? <img src={imagePreviewUrl} alt="補正後" style={imgStyle} />
+                        : <div style={{ ...imgStyle, minHeight: "120px", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: "12px", color: C.muted }}>補正中...</span></div>
+                      }
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                    {["明るさ補正", "コントラスト", "美肌フィルター", "シャープネス"].map((t) => (
+                      <span key={t} style={{ padding: "3px 10px", borderRadius: "20px", fontSize: "11px", background: `${C.pink}15`, color: C.pink, border: `1px solid ${C.pink}30`, fontWeight: "700" }}>{t}</span>
+                    ))}
+                  </div>
+                  {imagePreviewUrl && (
+                    <a href={imagePreviewUrl} download="corrected.jpg" style={{ display: "block", padding: "10px", borderRadius: "10px", border: `1.5px solid ${C.green}50`, background: `${C.green}10`, color: C.green, textAlign: "center", fontWeight: "700", fontSize: "12px", textDecoration: "none" }}>
+                      ⬇ 補正後の画像をダウンロード
+                    </a>
+                  )}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: "12px", color: C.green, fontWeight: "700" }}>✓ {imageFile?.name}</span>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button type="button" onClick={() => fileInputRef.current?.click()} style={{ background: "none", border: `1.5px solid ${C.border}`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.muted, cursor: "pointer" }}>変更</button>
+                      <button type="button" onClick={clearImage} style={{ background: "none", border: `1.5px solid ${C.red}40`, borderRadius: "8px", padding: "4px 10px", fontSize: "11px", color: C.red, cursor: "pointer" }}>削除</button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{ width: "100%", padding: "24px 16px", border: `2px dashed ${C.accent}60`, borderRadius: "14px", background: "white", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}
+                >
+                  <span style={{ fontSize: "32px" }}>📷</span>
+                  <span style={{ fontSize: "14px", color: C.accent, fontWeight: "700" }}>画像を選択する</span>
+                  <span style={{ fontSize: "11px", color: C.muted }}>JPG / PNG / HEIC</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {textSupport && (
+            <>
+              <div style={{ padding: "10px 14px", borderRadius: "12px", background: `${C.green}12`, border: `1.5px solid ${C.green}30`, display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "13px", color: C.muted }}>🔒 投稿時刻は送信した瞬間に自動記録されます</span>
+                {postedTime && <span style={{ marginLeft: "auto", color: C.green, fontWeight: "700", fontSize: "14px" }}>{postedTime}</span>}
+              </div>
+              <Btn onClick={handleScore} loading={loading} label="AI採点する" color={C.accent} />
+            </>
+          )}
+        </div>
+      )}
+
+      {textSupport && result && rating && (
         <div style={{ display: "grid", gap: "12px" }}>
           <div style={{ ...card, display: "flex", alignItems: "center", gap: "16px", borderColor: `${rating.color}50` }}>
             <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: `${rating.color}18`, border: `2px solid ${rating.color}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", fontWeight: "700", color: rating.color, flexShrink: 0 }}>{rating.label}</div>
@@ -921,7 +982,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast }) {
             );
           })}
 
-          {imageResult && (
+          {imageSupport && imageResult && (
             <div style={{ ...card, borderColor: `${C.pink}40` }}>
               <p style={{ color: C.pink, fontSize: "11px", fontWeight: "700", marginBottom: "12px", letterSpacing: "0.08em" }}>📸 画像指導AI分析</p>
               <p style={{ whiteSpace: "pre-wrap", lineHeight: "1.9", fontSize: "14px", color: C.sub, margin: 0 }}>{imageResult}</p>
