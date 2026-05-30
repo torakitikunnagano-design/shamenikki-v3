@@ -6,6 +6,15 @@ import numpy as np
 import cv2
 from PIL import Image, ImageEnhance
 
+# ==== 調整パラメータ（数字を上げると効果UP）====
+SMOOTH_STRENGTH = 0.92
+SKIN_BRIGHTEN = 1.18
+BRIGHTNESS = 1.10
+CONTRAST = 1.03
+COLOR = 1.08
+SHARPNESS = 1.25
+# ==============================================
+
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -28,14 +37,16 @@ def skin_mask(img_bgr):
     return mask
 
 def beautify(img_bgr):
-    smooth = cv2.bilateralFilter(img_bgr, 12, 60, 60)
+    smooth = cv2.bilateralFilter(img_bgr, 15, 80, 80)
     m = skin_mask(img_bgr)
     if m is None:
-        return cv2.addWeighted(img_bgr, 0.6, cv2.bilateralFilter(img_bgr, 9, 50, 50), 0.4, 0)
+        return cv2.addWeighted(img_bgr, 0.4, cv2.bilateralFilter(img_bgr, 12, 70, 70), 0.6, 0)
     m = cv2.GaussianBlur(m, (15, 15), 0)
-    a = (m.astype(np.float32) / 255.0 * 0.75)[..., None]
+    a = (m.astype(np.float32) / 255.0 * SMOOTH_STRENGTH)[..., None]
     out = img_bgr.astype(np.float32) * (1 - a) + smooth.astype(np.float32) * a
-    return out.astype(np.uint8)
+    bright = out * SKIN_BRIGHTEN
+    out = out * (1 - a) + bright * a
+    return np.clip(out, 0, 255).astype(np.uint8)
 
 @app.post("/process")
 async def process_image(file: UploadFile = File(...)):
@@ -45,10 +56,10 @@ async def process_image(file: UploadFile = File(...)):
     bgr = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
     bgr = beautify(bgr)
     out = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-    out = ImageEnhance.Brightness(out).enhance(1.08)
-    out = ImageEnhance.Contrast(out).enhance(1.04)
-    out = ImageEnhance.Color(out).enhance(1.10)
-    out = ImageEnhance.Sharpness(out).enhance(1.15)
+    out = ImageEnhance.Brightness(out).enhance(BRIGHTNESS)
+    out = ImageEnhance.Contrast(out).enhance(CONTRAST)
+    out = ImageEnhance.Color(out).enhance(COLOR)
+    out = ImageEnhance.Sharpness(out).enhance(SHARPNESS)
     buf = io.BytesIO()
     out.save(buf, format="JPEG", quality=92)
     return Response(content=buf.getvalue(), media_type="image/jpeg")
