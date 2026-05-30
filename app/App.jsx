@@ -171,6 +171,7 @@ function App() {
 
   const castNav = [
     { id: "score",   label: "AI採点",    icon: "✨" },
+    { id: "salary",  label: "給料",      icon: "💴" },
     ...(settings.show_guarantee ? [{ id: "myguarantee", label: "保証確認", icon: "🎀" }] : []),
   ];
 
@@ -295,6 +296,7 @@ function App() {
               <div style={{ padding: "20px 16px", maxWidth: "680px", margin: "0 auto" }}>
                 {mode === "cast" && showShindan && <ShindanPage casts={casts} setCasts={setCasts} loggedInCast={loggedInCast} onComplete={() => { setShowShindan(false); setCastPage("score"); }} />}
                 {mode === "cast" && !showShindan && page === "score"       && <ScorePage casts={casts} settings={settings} scores={scores} setScores={setScores} loggedInCast={loggedInCast} onRetryDiagnosis={() => setShowShindan(true)} />}
+                {mode === "cast" && !showShindan && page === "salary"      && <SalaryPage loggedInCast={loggedInCast} casts={casts} />}
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} />}
@@ -853,6 +855,20 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
       }
     } catch {}
   }, [castId]);
+
+  function getSalaryContext() {
+    try {
+      const recs = JSON.parse(localStorage.getItem(`shamenikki_salary_${castId}`)) || [];
+      if (recs.length === 0) return "";
+      const recent = recs.slice(0, 5);
+      const lines = recent.map((r) =>
+        `${r.date}：合計${r.totalHon}本（本指名${r.honShimei} P指名${r.pShimei} フリー${r.free}）手取り${r.takeHome.toLocaleString()}円`
+      );
+      const avgHon = Math.round(recent.reduce((s, r) => s + r.honShimei, 0) / recent.length);
+      const avgFree = Math.round(recent.reduce((s, r) => s + r.free, 0) / recent.length);
+      return `\n\n【直近の成績データ（参考）】\n${lines.join("\n")}\n※本指名平均${avgHon}本・フリー平均${avgFree}本`;
+    } catch { return ""; }
+  }
   async function handleImageSelect(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -945,7 +961,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
             model: "grok-4.3", max_tokens: 800,
             messages: [
               { role: "system", content: REWRITE_PROMPTS[type] },
-              { role: "user", content: `以下の写メ日記をリライトしてください。内容・情報は維持しつつ、指定スタイルの文章に書き換えてください。\n\n${diary}` }
+              { role: "user", content: `以下の写メ日記をリライトしてください。内容・情報は維持しつつ、指定スタイルの文章に書き換えてください。${getSalaryContext()}\n\n${diary}` }
             ]
           })
         });
@@ -998,7 +1014,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
                 role: "user",
                 content: [
                   { type: "image_url", image_url: { url: base64 } },
-                  { type: "text", text: `あなたはヘブンの写メ日記専門の画像アドバイザーです。お客様が「会いたい」と思える写真にするため、具体的で読みやすいアドバイスをしてください。\n\nキャスト名：${castName || "未設定"}\n\n以下の4項目を順番通りに出力してください。専門的すぎる説明や長い項目分けは不要です。\n\n🎯 指名度判定\n下記4段階のうち1つを選び、理由を一言添えてください。\n◎ 呼ばれやすい ／ ○ まあ呼ばれる ／ △ もう一歩 ／ ✕ 改善が必要\n例）○ まあ呼ばれる ― 笑顔が自然で親しみやすいが、背景が散らかっていてもったいない\n\n📷 全体の印象\n・この写真を一言で表すと（率直に）\n\n✨ 良い点（2個）\n①（良いポイントと、なぜ魅力的かを一文で）\n②（同上）\n\n📸 改善ポイント（3〜4個）\n①（問題点）→（どう直すと良いか具体的に一文で）\n②（同上）\n③（同上）\n④（あれば）\n\n※女の子がすぐ実践できる内容で。角度・明るさ・ポーズ・構図・加工などを中心に。` },
+                  { type: "text", text: `あなたはヘブンの写メ日記専門の画像アドバイザーです。お客様が「会いたい」と思える写真にするため、具体的で読みやすいアドバイスをしてください。\n\nキャスト名：${castName || "未設定"}${getSalaryContext()}\n\n以下の4項目を順番通りに出力してください。専門的すぎる説明や長い項目分けは不要です。\n\n🎯 指名度判定\n下記4段階のうち1つを選び、理由を一言添えてください。\n◎ 呼ばれやすい ／ ○ まあ呼ばれる ／ △ もう一歩 ／ ✕ 改善が必要\n例）○ まあ呼ばれる ― 笑顔が自然で親しみやすいが、背景が散らかっていてもったいない\n\n📷 全体の印象\n・この写真を一言で表すと（率直に）\n\n✨ 良い点（2個）\n①（良いポイントと、なぜ魅力的かを一文で）\n②（同上）\n\n📸 改善ポイント（3〜4個）\n①（問題点）→（どう直すと良いか具体的に一文で）\n②（同上）\n③（同上）\n④（あれば）\n\n※女の子がすぐ実践できる内容で。角度・明るさ・ポーズ・構図・加工などを中心に。直近の成績データがある場合は、本指名が少なければリピートを増やす見せ方、フリーが多ければ指名につながる魅力のアドバイスを意識してください。` },
                 ],
               }],
             }),
@@ -1379,6 +1395,146 @@ function TitlePage({ casts }) {
         <div style={{ ...card }}>
           <p style={{ color: C.pink, fontSize: "11px", fontWeight: "700", marginBottom: "12px", letterSpacing: "0.08em" }}>分析結果</p>
           <p style={{ whiteSpace: "pre-wrap", lineHeight: "1.8", fontSize: "14px", color: C.sub, margin: 0 }}>{result}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 給料記録
+// ============================================================
+function SalaryPage({ loggedInCast, casts }) {
+  const cast = casts.find((c) => c.name === loggedInCast);
+  const castId = cast?.heaven_id || loggedInCast || "";
+  const storageKey = `shamenikki_salary_${castId}`;
+
+  function loadRecords() {
+    try { return JSON.parse(localStorage.getItem(storageKey)) || []; } catch { return []; }
+  }
+
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const [records, setRecords] = useState(loadRecords);
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [honShimei, setHonShimei] = useState("");
+  const [pShimei, setPShimei] = useState("");
+  const [free, setFree] = useState("");
+  const [option, setOption] = useState("");
+  const [gross, setGross] = useState("");
+  const [dorm, setDorm] = useState("");
+  const [misc, setMisc] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  const totalHon = (Number(honShimei) || 0) + (Number(pShimei) || 0) + (Number(free) || 0);
+  const takeHome = (Number(gross) || 0) - (Number(dorm) || 0) - (Number(misc) || 0);
+
+  function saveRecord() {
+    const rec = {
+      id: Date.now(),
+      date: today,
+      startTime, endTime,
+      honShimei: Number(honShimei) || 0,
+      pShimei: Number(pShimei) || 0,
+      free: Number(free) || 0,
+      totalHon,
+      option: Number(option) || 0,
+      gross: Number(gross) || 0,
+      dorm: Number(dorm) || 0,
+      misc: Number(misc) || 0,
+      takeHome,
+    };
+    const next = [rec, ...records].slice(0, 30);
+    setRecords(next);
+    localStorage.setItem(storageKey, JSON.stringify(next));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  const fmtYen = (n) => n.toLocaleString("ja-JP") + "円";
+
+  return (
+    <div style={{ display: "grid", gap: "16px" }}>
+      <Header title="給料記録" sub="出勤データを入力して手取りを計算" color={C.accent} />
+
+      {/* 入力フォーム */}
+      <div style={{ ...card }}>
+        <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>TODAY {today}</p>
+
+        {/* 出勤時間 */}
+        <div style={{ marginBottom: "14px" }}>
+          <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700", display: "block", marginBottom: "6px" }}>出勤時間</label>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={{ ...inp, flex: 1 }} />
+            <span style={{ color: C.muted, fontSize: "13px" }}>〜</span>
+            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={{ ...inp, flex: 1 }} />
+          </div>
+        </div>
+
+        {/* 本数 */}
+        <div style={{ marginBottom: "14px" }}>
+          <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700", display: "block", marginBottom: "6px" }}>
+            本数　<span style={{ color: C.accent, fontWeight: "700" }}>合計 {totalHon}本</span>
+          </label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+            {[["本指名", honShimei, setHonShimei], ["P指名", pShimei, setPShimei], ["フリー", free, setFree]].map(([label, val, setter]) => (
+              <div key={label}>
+                <div style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>{label}</div>
+                <input type="number" min="0" value={val} onChange={(e) => setter(e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* オプション代 */}
+        <Field label="オプション代（円）">
+          <input type="number" min="0" value={option} onChange={(e) => setOption(e.target.value)} placeholder="0" style={inp} />
+        </Field>
+
+        {/* 総支給 */}
+        <Field label="総支給（円）">
+          <input type="number" min="0" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="0" style={inp} />
+        </Field>
+
+        {/* 寮費・雑費 */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "14px" }}>
+          <Field label="寮費（円）">
+            <input type="number" min="0" value={dorm} onChange={(e) => setDorm(e.target.value)} placeholder="0" style={inp} />
+          </Field>
+          <Field label="雑費（円）">
+            <input type="number" min="0" value={misc} onChange={(e) => setMisc(e.target.value)} placeholder="0" style={inp} />
+          </Field>
+        </div>
+
+        {/* 手取り表示 */}
+        <div style={{ background: "linear-gradient(135deg, #fff0f8, #ffe8f5)", border: `2px solid ${C.accent}40`, borderRadius: "14px", padding: "18px", textAlign: "center", marginBottom: "14px" }}>
+          <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px" }}>手取り</p>
+          <p style={{ fontSize: "32px", fontWeight: "700", color: takeHome >= 0 ? C.accent : C.red, margin: 0 }}>{fmtYen(takeHome)}</p>
+          <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>総支給 {fmtYen(Number(gross)||0)} − 寮費 {fmtYen(Number(dorm)||0)} − 雑費 {fmtYen(Number(misc)||0)}</p>
+        </div>
+
+        <Btn onClick={saveRecord} loading={false} label={saved ? "保存しました ✓" : "記録を保存"} color={saved ? C.green : C.accent} />
+      </div>
+
+      {/* 履歴 */}
+      {records.length > 0 && (
+        <div style={{ ...card }}>
+          <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "12px" }}>過去の記録</p>
+          <div style={{ display: "grid", gap: "10px" }}>
+            {records.map((r) => (
+              <div key={r.id} style={{ background: C.surface, borderRadius: "12px", padding: "12px", border: `1.5px solid ${C.border}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: C.text }}>{r.date}</span>
+                  <span style={{ fontSize: "14px", fontWeight: "700", color: C.accent }}>{fmtYen(r.takeHome)}</span>
+                </div>
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                  {r.startTime && <span style={{ fontSize: "11px", color: C.muted }}>{r.startTime}〜{r.endTime}</span>}
+                  <span style={{ fontSize: "11px", color: C.muted }}>合計{r.totalHon}本（本{r.honShimei} P{r.pShimei} F{r.free}）</span>
+                  {r.option > 0 && <span style={{ fontSize: "11px", color: C.muted }}>OP {fmtYen(r.option)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
