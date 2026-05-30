@@ -894,14 +894,24 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
         }
       }
 
+      // 延長の傾向
+      const extRecs = recent.filter((r) => r.totalHon > 0);
+      let extDirection = "";
+      if (extRecs.length > 0) {
+        const avgExtPerHon = extRecs.reduce((s, r) => s + (r.extCount || 0), 0) / extRecs.reduce((s, r) => s + r.totalHon, 0);
+        if (avgExtPerHon >= 0.5) {
+          extDirection = "延長が多く、接客満足度が高い。一度来てもらえればリピートに直結するため、集客・露出を増やすことが最優先。写メ日記の更新頻度アップと、初回来店の動機づけとなる魅力的な見せ方を強化する";
+        }
+      }
+
       // 指名構成の傾向
       let shimeiDirection = "";
       if (avgHon <= 1) shimeiDirection = "本指名が少ないため「また会いたい」リピート獲得を重視する";
       else if (avgFree >= avgHon * 2) shimeiDirection = "フリー客が多いため個性・魅力を際立たせて指名転換を狙う";
       else shimeiDirection = "本指名とフリーのバランスが取れているため固定ファンの深耕を図る";
 
-      const directions = [effDirection, shimeiDirection].filter(Boolean).join("／");
-      return `\n\n【執筆・アドバイス方向性の参考（内部情報のみ・出力に数字を含めないこと）】\n・方向性：${directions}\n・この情報はトーン・戦略の判断にのみ使うこと。出勤時間・本数・稼働率・売上などの数字や「不人気」のような否定表現は絶対に出力しないこと。改善提案は必ず前向きで具体的な表現にすること。`;
+      const directions = [extDirection, effDirection, shimeiDirection].filter(Boolean).join("／");
+      return `\n\n【執筆・アドバイス方向性の参考（内部情報のみ・出力に数字を含めないこと）】\n・方向性：${directions}\n・この情報はトーン・戦略の判断にのみ使うこと。出勤時間・本数・延長回数・稼働率・売上などの数字や否定的な評価表現は絶対に出力しないこと。改善提案は必ず前向きで具体的な表現にすること。`;
     } catch { return ""; }
   }
   async function handleImageSelect(e) {
@@ -1455,6 +1465,9 @@ function SalaryPage({ loggedInCast, casts }) {
   const [honShimei, setHonShimei] = useState("");
   const [pShimei, setPShimei] = useState("");
   const [free, setFree] = useState("");
+  const [courseMin, setCourseMin] = useState("");
+  const [extCount, setExtCount] = useState("");
+  const [extMin, setExtMin] = useState("");
   const [option, setOption] = useState("");
   const [gross, setGross] = useState("");
   const [dorm, setDorm] = useState("");
@@ -1473,6 +1486,9 @@ function SalaryPage({ loggedInCast, casts }) {
       pShimei: Number(pShimei) || 0,
       free: Number(free) || 0,
       totalHon,
+      courseMin: Number(courseMin) || 0,
+      extCount: Number(extCount) || 0,
+      extMin: Number(extMin) || 0,
       option: Number(option) || 0,
       gross: Number(gross) || 0,
       dorm: Number(dorm) || 0,
@@ -1521,6 +1537,25 @@ function SalaryPage({ loggedInCast, casts }) {
           </div>
         </div>
 
+        {/* コース時間・延長 */}
+        <div style={{ marginBottom: "14px" }}>
+          <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700", display: "block", marginBottom: "6px" }}>コース・延長</label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+            <div>
+              <div style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>コース合計（分）</div>
+              <input type="number" min="0" value={courseMin} onChange={(e) => setCourseMin(e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+            </div>
+            <div>
+              <div style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>延長（回）</div>
+              <input type="number" min="0" value={extCount} onChange={(e) => setExtCount(e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+            </div>
+            <div>
+              <div style={{ fontSize: "11px", color: C.muted, marginBottom: "4px" }}>延長合計（分）</div>
+              <input type="number" min="0" value={extMin} onChange={(e) => setExtMin(e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+            </div>
+          </div>
+        </div>
+
         {/* オプション代 */}
         <Field label="オプション代（円）">
           <input type="number" min="0" value={option} onChange={(e) => setOption(e.target.value)} placeholder="0" style={inp} />
@@ -1565,6 +1600,7 @@ function SalaryPage({ loggedInCast, casts }) {
                 <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                   {r.startTime && <span style={{ fontSize: "11px", color: C.muted }}>{r.startTime}〜{r.endTime}</span>}
                   <span style={{ fontSize: "11px", color: C.muted }}>合計{r.totalHon}本（本{r.honShimei} P{r.pShimei} F{r.free}）</span>
+                  {(r.extCount > 0 || r.extMin > 0) && <span style={{ fontSize: "11px", color: C.muted }}>延長{r.extCount}回/{r.extMin}分</span>}
                   {r.option > 0 && <span style={{ fontSize: "11px", color: C.muted }}>OP {fmtYen(r.option)}</span>}
                 </div>
               </div>
