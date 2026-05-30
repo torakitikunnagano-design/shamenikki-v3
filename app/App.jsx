@@ -861,12 +861,14 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
       const recs = JSON.parse(localStorage.getItem(`shamenikki_salary_${castId}`)) || [];
       if (recs.length === 0) return "";
       const recent = recs.slice(0, 5);
-      const lines = recent.map((r) =>
-        `${r.date}：合計${r.totalHon}本（本指名${r.honShimei} P指名${r.pShimei} フリー${r.free}）手取り${r.takeHome.toLocaleString()}円`
-      );
       const avgHon = Math.round(recent.reduce((s, r) => s + r.honShimei, 0) / recent.length);
       const avgFree = Math.round(recent.reduce((s, r) => s + r.free, 0) / recent.length);
-      return `\n\n【直近の成績データ（参考）】\n${lines.join("\n")}\n※本指名平均${avgHon}本・フリー平均${avgFree}本`;
+      const avgTotal = Math.round(recent.reduce((s, r) => s + r.totalHon, 0) / recent.length);
+      let direction = "";
+      if (avgHon <= 1) direction = "本指名がまだ少ないため、「また会いたい」と思わせるリピート狙いの温かみのある文章にする";
+      else if (avgFree >= avgHon * 2) direction = "フリー客が多いため、指名を増やすための個性・魅力を前面に出す文章にする";
+      else direction = "本指名・フリーのバランスを維持しながら、固定ファンを増やす親しみやすい文章にする";
+      return `\n\n【執筆方向性の参考（内部情報・出力に数字を含めないこと）】\n・直近の傾向：${direction}\n・この情報はAIが文章のトーンや戦略を決めるためだけに使うこと。本数・金額・売上などの数字は絶対に出力しないこと。`;
     } catch { return ""; }
   }
   async function handleImageSelect(e) {
@@ -961,7 +963,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
             model: "grok-4.3", max_tokens: 800,
             messages: [
               { role: "system", content: REWRITE_PROMPTS[type] },
-              { role: "user", content: `以下の写メ日記をリライトしてください。内容・情報は維持しつつ、指定スタイルの文章に書き換えてください。${getSalaryContext()}\n\n${diary}` }
+              { role: "user", content: `以下の写メ日記をリライトしてください。内容・情報は維持しつつ、指定スタイルの文章に書き換えてください。${getSalaryContext()}\n\n【厳守事項】本数・指名数・手取り・売上などの数字は絶対に本文に含めないこと。方向性の参考情報はトーン判断にのみ使うこと。\n\n${diary}` }
             ]
           })
         });
@@ -1014,7 +1016,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
                 role: "user",
                 content: [
                   { type: "image_url", image_url: { url: base64 } },
-                  { type: "text", text: `あなたはヘブンの写メ日記専門の画像アドバイザーです。お客様が「会いたい」と思える写真にするため、具体的で読みやすいアドバイスをしてください。\n\nキャスト名：${castName || "未設定"}${getSalaryContext()}\n\n以下の4項目を順番通りに出力してください。専門的すぎる説明や長い項目分けは不要です。\n\n🎯 指名度判定\n下記4段階のうち1つを選び、理由を一言添えてください。\n◎ 呼ばれやすい ／ ○ まあ呼ばれる ／ △ もう一歩 ／ ✕ 改善が必要\n例）○ まあ呼ばれる ― 笑顔が自然で親しみやすいが、背景が散らかっていてもったいない\n\n📷 全体の印象\n・この写真を一言で表すと（率直に）\n\n✨ 良い点（2個）\n①（良いポイントと、なぜ魅力的かを一文で）\n②（同上）\n\n📸 改善ポイント（3〜4個）\n①（問題点）→（どう直すと良いか具体的に一文で）\n②（同上）\n③（同上）\n④（あれば）\n\n※女の子がすぐ実践できる内容で。角度・明るさ・ポーズ・構図・加工などを中心に。直近の成績データがある場合は、本指名が少なければリピートを増やす見せ方、フリーが多ければ指名につながる魅力のアドバイスを意識してください。` },
+                  { type: "text", text: `あなたはヘブンの写メ日記専門の画像アドバイザーです。お客様が「会いたい」と思える写真にするため、具体的で読みやすいアドバイスをしてください。\n\nキャスト名：${castName || "未設定"}${getSalaryContext()}\n\n【厳守事項】アドバイス文に本数・指名数・手取り・売上などの数字は絶対に含めないこと。方向性の参考情報はアドバイスの視点（リピート重視か指名獲得重視か）を決めるためにのみ使うこと。\n\n以下の4項目を順番通りに出力してください。専門的すぎる説明や長い項目分けは不要です。\n\n🎯 指名度判定\n下記4段階のうち1つを選び、理由を一言添えてください。\n◎ 呼ばれやすい ／ ○ まあ呼ばれる ／ △ もう一歩 ／ ✕ 改善が必要\n例）○ まあ呼ばれる ― 笑顔が自然で親しみやすいが、背景が散らかっていてもったいない\n\n📷 全体の印象\n・この写真を一言で表すと（率直に）\n\n✨ 良い点（2個）\n①（良いポイントと、なぜ魅力的かを一文で）\n②（同上）\n\n📸 改善ポイント（3〜4個）\n①（問題点）→（どう直すと良いか具体的に一文で）\n②（同上）\n③（同上）\n④（あれば）\n\n※女の子がすぐ実践できる内容で。角度・明るさ・ポーズ・構図・加工などを中心に。` },
                 ],
               }],
             }),
