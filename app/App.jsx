@@ -81,6 +81,21 @@ const ADMIN_PASSWORD = "1234";
 const AUTO_LOGIN_KEY = "shamenikki_autologin";
 const CREDS_KEY      = "shamenikki_creds";
 
+// Supabaseに送るキャストデータ（heaven_passは絶対に含めない）
+function toSupabaseCast(c) {
+  return {
+    name:         c.name,
+    is_active:    c.is_active,
+    work_start:   c.work_start   || "",
+    strong:       c.strong       || "未分析",
+    weak:         c.weak         || "未分析",
+    heaven_id:    c.heaven_id    || "",
+    type:         c.type         ?? null,
+    disclose:     c.disclose     ?? null,
+    shindan_note: c.shindan_note ?? null,
+  };
+}
+
 // ============================================================
 // localStorage 永続化フック
 // ============================================================
@@ -204,6 +219,52 @@ function App() {
       } catch {}
     }
     initSettings();
+  }, []);
+
+  // Supabase casts 初期化（起動時1回）
+  useEffect(() => {
+    async function initCasts() {
+      try {
+        const { data, error } = await supabase.from("casts").select("*");
+        if (error) throw error;
+
+        if (data.length === 0) {
+          // Supabaseが空 → localStorageの内容をシード（heaven_passは送らない）
+          try {
+            const stored = localStorage.getItem("shamenikki_casts");
+            if (stored) {
+              const local = JSON.parse(stored);
+              if (local.length > 0) {
+                await supabase.from("casts").upsert(local.map(toSupabaseCast), { onConflict: "name" });
+              }
+            }
+          } catch {}
+        } else {
+          // Supabaseにデータあり → localStorageのheaven_passをname照合でマージ
+          try {
+            const stored = localStorage.getItem("shamenikki_casts");
+            const localCasts = stored ? JSON.parse(stored) : [];
+            const merged = data.map((sc) => {
+              const lc = localCasts.find((l) => l.name === sc.name);
+              return {
+                name:         sc.name,
+                is_active:    sc.is_active,
+                work_start:   sc.work_start   || "",
+                strong:       sc.strong       || "未分析",
+                weak:         sc.weak         || "未分析",
+                heaven_id:    sc.heaven_id    || "",
+                heaven_pass:  lc?.heaven_pass || "",
+                type:         sc.type         ?? undefined,
+                disclose:     sc.disclose     ?? undefined,
+                shindan_note: sc.shindan_note ?? undefined,
+              };
+            });
+            setCasts(merged);
+          } catch {}
+        }
+      } catch {}
+    }
+    initCasts();
   }, []);
 
   // casts がロードされたら自動ログイン判定
@@ -722,6 +783,12 @@ function ShindanPage({ casts, setCasts, loggedInCast, onComplete }) {
       const text = data.choices?.[0]?.message?.content || "";
       setResult({ type: typeGuess, detail: text });
       setCasts((prev) => prev.map((c) => c.name === castName ? { ...c, type: typeGuess, disclose, shindan_note: disclose === "YES" ? note : null } : c));
+      try {
+        supabase.from("casts").upsert(
+          toSupabaseCast({ ...cast, type: typeGuess, disclose, shindan_note: disclose === "YES" ? note : null }),
+          { onConflict: "name" }
+        ).then(() => {}).catch(() => {});
+      } catch {}
     } catch { setResult({ type: typeGuess, detail: "分析中にエラーが発生しました。" }); }
     saveLock({ type: typeGuess, retries: lockData.retries + 1 });
     setLoading(false);
@@ -1883,11 +1950,20 @@ function CastPage({ casts, setCasts, scores }) {
     setLockRefresh((n) => n + 1);
   }
 
-  function toggle(name) { setCasts(casts.map((c) => c.name === name ? { ...c, is_active: !c.is_active } : c)); }
+  function toggle(name) {
+    const updated = casts.map((c) => c.name === name ? { ...c, is_active: !c.is_active } : c);
+    setCasts(updated);
+    const toggled = updated.find((c) => c.name === name);
+    if (toggled) {
+      try { supabase.from("casts").upsert(toSupabaseCast(toggled), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
+    }
+  }
   function addCast() {
     if (!newName.trim()) return;
-    setCasts([...casts, { name: newName.trim(), is_active: true, work_start: newStart, strong: "未分析", weak: "未分析", heaven_id: "", heaven_pass: "" }]);
+    const newCast = { name: newName.trim(), is_active: true, work_start: newStart, strong: "未分析", weak: "未分析", heaven_id: "", heaven_pass: "" };
+    setCasts([...casts, newCast]);
     setNewName(""); setNewStart("");
+    try { supabase.from("casts").upsert(toSupabaseCast(newCast), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
   }
 
   function parseBulkLines(text) {
@@ -1915,15 +1991,21 @@ function CastPage({ casts, setCasts, scores }) {
       added.push({ name, is_active: true, work_start: "", strong: "未分析", weak: "未分析", heaven_id: heavenId, heaven_pass: "" });
       existingNames.add(name);
     });
-    if (added.length > 0) setCasts((prev) => [...prev, ...added]);
+    if (added.length > 0) {
+      setCasts((prev) => [...prev, ...added]);
+      try { supabase.from("casts").upsert(added.map(toSupabaseCast), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
+    }
     setBulkDone({ added: added.map((c) => c.name), skipped });
     setBulkText("");
   }
   function openModal(c) { setModal(c); setModalId(c.heaven_id || ""); setModalPass(c.heaven_pass || ""); setModalSaved(false); }
   function saveModal() {
-    setCasts(casts.map((x) => x.name === modal.name ? { ...x, heaven_id: modalId, heaven_pass: modalPass } : x));
+    const updatedCast = { ...modal, heaven_id: modalId, heaven_pass: modalPass };
+    setCasts(casts.map((x) => x.name === modal.name ? updatedCast : x));
     setModalSaved(true);
     setTimeout(() => setModal(null), 1000);
+    // Supabaseにはheaven_passを送らない（toSupabaseCastが除外する）
+    try { supabase.from("casts").upsert(toSupabaseCast({ ...modal, heaven_id: modalId }), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
   }
 
   return (
