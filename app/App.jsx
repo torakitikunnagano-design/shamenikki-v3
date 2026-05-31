@@ -187,7 +187,6 @@ function App() {
   const [courses, setCourses] = useLocalStorage("shamenikki_courses", initCourses);
   const [shifts, setShifts] = useLocalStorage("shamenikki_shifts", {});
   const [loggedInCast, setLoggedInCast] = useState(null);
-  const autoLoginDone = useRef(false);
 
   // Supabase courses 初期化（起動時1回）
   useEffect(() => {
@@ -553,28 +552,6 @@ function App() {
     initSalaryRecords();
   }, []);
 
-  // casts がロードされたら自動ログイン判定
-  useEffect(() => {
-    if (autoLoginDone.current || loggedInCast) return;
-    try {
-      const saved = localStorage.getItem(AUTO_LOGIN_KEY);
-      if (!saved) return;
-      const { castName, autoLogin: flag } = JSON.parse(saved);
-      if (!flag || !castName) return;
-      const cast = casts.find((c) => c.name === castName && c.is_active);
-      if (cast) {
-        autoLoginDone.current = true;
-        setLoggedInCast(castName);
-        const castId = cast.heaven_id || castName;
-        try {
-          const typeData = localStorage.getItem(`cast_type_${castId}`);
-          if (typeData && JSON.parse(typeData)?.type) { setCastPage("score"); return; }
-        } catch {}
-        setShowShindan(true);
-      }
-    } catch {}
-  }, [casts, loggedInCast]);
-
   function tryUnlock() {
     if (passInput === ADMIN_PASSWORD) {
       setAdminUnlocked(true); setPassError(false); setPassInput("");
@@ -770,17 +747,17 @@ function CastLoginScreen({ casts, onLogin }) {
   const [error, setError]           = useState("");
   const [loading, setLoading]       = useState(false);
 
-  // マウント時にlocalStorageからIDだけ読み込んでinputの初期値に設定
+  // マウント時にIDを復元。旧バージョンのauto_loginデータ（heavenPass含む）も除去する
   useEffect(() => {
+    try { localStorage.removeItem(AUTO_LOGIN_KEY); } catch {} // 旧パスワードデータを掃除
     try {
       const saved = localStorage.getItem(CREDS_KEY);
       if (saved) {
         const creds = JSON.parse(saved);
         setHeavenId(creds.heavenId || "");
-        // パスワードは復元しない（毎回入力）
       }
     } catch {}
-  }, []); // マウント時のみ実行
+  }, []);
 
   function handleLogin() {
     if (!heavenId || !heavenPass) { setError("IDとパスワードを入力してください"); return; }
@@ -789,14 +766,8 @@ function CastLoginScreen({ casts, onLogin }) {
     setTimeout(() => {
       setLoading(false);
       if (matched) {
-        // ログイン成功: IDのみlocalStorageに保存（パスワードは保存しない）
+        // ログイン成功: IDのみ保存。パスワードはどこにも保存しない
         localStorage.setItem(CREDS_KEY, JSON.stringify({ heavenId }));
-        localStorage.setItem(AUTO_LOGIN_KEY, JSON.stringify({
-          castName: matched.name,
-          heavenId,
-          heavenPass,
-          autoLogin: true,
-        }));
         onLogin(matched.name);
       } else {
         setError("IDまたはパスワードが一致しません");
@@ -806,7 +777,6 @@ function CastLoginScreen({ casts, onLogin }) {
 
   function clearSavedId() {
     localStorage.removeItem(CREDS_KEY);
-    localStorage.removeItem(AUTO_LOGIN_KEY);
     setHeavenId("");
   }
 
