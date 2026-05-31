@@ -385,6 +385,52 @@ function App() {
     initCastTypes();
   }, []);
 
+  // Supabase support_settings 初期化（起動時1回）
+  useEffect(() => {
+    async function initSupportSettings() {
+      try {
+        const { data, error } = await supabase.from("support_settings").select("*");
+        if (error) throw error;
+
+        if (data.length === 0) {
+          // Supabaseが空 → localStorageの support_settings_* を走査してシード
+          try {
+            const rows = Object.keys(localStorage)
+              .filter((k) => k.startsWith("support_settings_"))
+              .map((k) => {
+                try {
+                  const val = JSON.parse(localStorage.getItem(k));
+                  return {
+                    cast_id:       k.slice("support_settings_".length),
+                    image_support: typeof val.imageSupport === "boolean" ? val.imageSupport : true,
+                    text_support:  typeof val.textSupport  === "boolean" ? val.textSupport  : true,
+                    title_assist:  typeof val.titleAssist  === "boolean" ? val.titleAssist  : true,
+                    updated_at:    new Date().toISOString(),
+                  };
+                } catch { return null; }
+              })
+              .filter(Boolean);
+            if (rows.length > 0) {
+              await supabase.from("support_settings").upsert(rows, { onConflict: "cast_id" });
+            }
+          } catch {}
+        } else {
+          // Supabaseにデータあり → 各行をlocalStorageに書き戻す（ハイドレート）
+          data.forEach((row) => {
+            try {
+              localStorage.setItem(`support_settings_${row.cast_id}`, JSON.stringify({
+                imageSupport: row.image_support,
+                textSupport:  row.text_support,
+                titleAssist:  row.title_assist,
+              }));
+            } catch {}
+          });
+        }
+      } catch {}
+    }
+    initSupportSettings();
+  }, []);
+
   // casts がロードされたら自動ログイン判定
   useEffect(() => {
     if (autoLoginDone.current || loggedInCast) return;
@@ -1086,6 +1132,14 @@ function useSupportSettings(castId) {
     setSupport((prev) => {
       const next = { ...prev, ...patch };
       if (key) { try { localStorage.setItem(key, JSON.stringify(next)); } catch {} }
+      if (castId) {
+        try {
+          supabase.from("support_settings").upsert(
+            { cast_id: castId, image_support: next.imageSupport, text_support: next.textSupport, title_assist: next.titleAssist, updated_at: new Date().toISOString() },
+            { onConflict: "cast_id" }
+          ).then(() => {}).catch(() => {});
+        } catch {}
+      }
       return next;
     });
   }
