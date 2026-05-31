@@ -81,6 +81,45 @@ const ADMIN_PASSWORD = "1234";
 const AUTO_LOGIN_KEY = "shamenikki_autologin";
 const CREDS_KEY      = "shamenikki_creds";
 
+// 給料レコード → salary_records 行
+function toSupabaseRecord(rec, castId) {
+  return {
+    id:         rec.id,
+    cast_id:    castId,
+    date:       rec.date,
+    start_time: rec.startTime || "",
+    end_time:   rec.endTime   || "",
+    hon_shimei: rec.honShimei || 0,
+    p_shimei:   rec.pShimei   || 0,
+    free:       rec.free      || 0,
+    total_hon:  rec.totalHon  || 0,
+    course_min: rec.courseMin || 0,
+    ext_count:  rec.extCount  || 0,
+    ext_min:    rec.extMin    || 0,
+    option_amt: rec.option    || 0,
+    gross:      rec.gross     || 0,
+    dorm:       rec.dorm      || 0,
+    misc:       rec.misc      || 0,
+    transport:  rec.transport || 0,
+    take_home:  rec.takeHome  || 0,
+  };
+}
+
+// hons 配列 → salary_sessions 行の配列
+function toSupabaseSessions(rec) {
+  return (rec.hons || []).map((h, seq) => ({
+    salary_record_id: rec.id,
+    seq,
+    course_min:  Number(h.courseMin)  || 0,
+    shimei:      h.shimei             || "",
+    fee:         Number(h.fee)         || 0,
+    shimei_ryou: Number(h.shimeiRyou) || 0,
+    op:          Number(h.op)          || 0,
+    ext_count:   Number(h.extCount)   || 0,
+    ext_min:     Number(h.extMin)     || 0,
+  }));
+}
+
 // Supabaseに送るキャストデータ（heaven_passは絶対に含めない）
 function toSupabaseCast(c) {
   return {
@@ -429,6 +468,89 @@ function App() {
       } catch {}
     }
     initSupportSettings();
+  }, []);
+
+  // Supabase salary 初期化（起動時1回）
+  useEffect(() => {
+    async function initSalaryRecords() {
+      try {
+        const { data: recordsData, error } = await supabase.from("salary_records").select("*");
+        if (error) throw error;
+
+        if (recordsData.length === 0) {
+          // Supabaseが空 → localStorageの shamenikki_salary_* を走査してシード
+          try {
+            const salaryKeys = Object.keys(localStorage).filter((k) => k.startsWith("shamenikki_salary_"));
+            for (const key of salaryKeys) {
+              const castId = key.slice("shamenikki_salary_".length);
+              const recs = JSON.parse(localStorage.getItem(key)) || [];
+              for (const rec of recs) {
+                // 親レコードを先に upsert
+                await supabase.from("salary_records").upsert(toSupabaseRecord(rec, castId));
+                // 既存sessionを削除してから再挿入（重複防止）
+                await supabase.from("salary_sessions").delete().eq("salary_record_id", rec.id);
+                const sessions = toSupabaseSessions(rec);
+                if (sessions.length > 0) {
+                  await supabase.from("salary_sessions").insert(sessions);
+                }
+              }
+            }
+          } catch {}
+        } else {
+          // Supabaseにデータあり → sessionsも取得してlocalStorageに書き戻す（ハイドレート）
+          try {
+            const { data: sessionsData } = await supabase.from("salary_sessions").select("*");
+            // sessions を salary_record_id でグループ化
+            const sessionsMap = {};
+            (sessionsData || []).forEach((s) => {
+              if (!sessionsMap[s.salary_record_id]) sessionsMap[s.salary_record_id] = [];
+              sessionsMap[s.salary_record_id].push(s);
+            });
+            // records を cast_id でグループ化
+            const castMap = {};
+            recordsData.forEach((r) => {
+              if (!castMap[r.cast_id]) castMap[r.cast_id] = [];
+              const hons = (sessionsMap[r.id] || [])
+                .sort((a, b) => a.seq - b.seq)
+                .map((s) => ({
+                  courseMin:  String(s.course_min),
+                  shimei:     s.shimei,
+                  fee:        String(s.fee),
+                  shimeiRyou: String(s.shimei_ryou),
+                  op:         String(s.op),
+                  extCount:   String(s.ext_count),
+                  extMin:     String(s.ext_min),
+                }));
+              castMap[r.cast_id].push({
+                id:        r.id,
+                date:      r.date,
+                startTime: r.start_time,
+                endTime:   r.end_time,
+                honShimei: r.hon_shimei,
+                pShimei:   r.p_shimei,
+                free:      r.free,
+                totalHon:  r.total_hon,
+                courseMin: r.course_min,
+                extCount:  r.ext_count,
+                extMin:    r.ext_min,
+                option:    r.option_amt,
+                gross:     r.gross,
+                dorm:      r.dorm,
+                misc:      r.misc,
+                transport: r.transport,
+                takeHome:  r.take_home,
+                hons,
+              });
+            });
+            // cast_id ごとに localStorage に書き戻す
+            Object.entries(castMap).forEach(([castId, recs]) => {
+              try { localStorage.setItem(`shamenikki_salary_${castId}`, JSON.stringify(recs)); } catch {}
+            });
+          } catch {}
+        }
+      } catch {}
+    }
+    initSalaryRecords();
   }, []);
 
   // casts がロードされたら自動ログイン判定
@@ -1909,7 +2031,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   const totalOp        = activeHons.reduce((s, h) => s + (Number(h.op) || 0), 0);
   const takeHome = (Number(gross) || 0) - (Number(dorm) || 0) - (Number(misc) || 0) - (Number(transport) || 0);
 
-  function saveRecord() {
+  async function saveRecord() {
     const rec = {
       id: Date.now(),
       date: today,
@@ -1929,13 +2051,23 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
     };
     const next = [rec, ...records].slice(0, 30);
     setRecords(next);
-    localStorage.setItem(storageKey, JSON.stringify(next));
+    localStorage.setItem(storageKey, JSON.stringify(next)); // 従来通りlocalStorageに保存
     setHons(Array.from({ length: 12 }, mkHon));
     if (!staffShift) { setStartTime(""); setEndTime(""); }
     setGross(""); setDorm(""); setMisc(""); setTransport("");
     setSlipOcrDone(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+
+    // Supabase sync：親レコードを先にupsert → 既存sessionsをdelete → 再挿入
+    try {
+      await supabase.from("salary_records").upsert(toSupabaseRecord(rec, castId));
+      await supabase.from("salary_sessions").delete().eq("salary_record_id", rec.id);
+      const sessions = toSupabaseSessions(rec);
+      if (sessions.length > 0) {
+        await supabase.from("salary_sessions").insert(sessions);
+      }
+    } catch {}
   }
 
   const fmtYen = (n) => n.toLocaleString("ja-JP") + "円";
