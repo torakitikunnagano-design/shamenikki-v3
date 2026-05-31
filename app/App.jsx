@@ -350,6 +350,41 @@ function App() {
     initShifts();
   }, []);
 
+  // Supabase cast_types 初期化（起動時1回）
+  useEffect(() => {
+    async function initCastTypes() {
+      try {
+        const { data, error } = await supabase.from("cast_types").select("*");
+        if (error) throw error;
+
+        if (data.length === 0) {
+          // Supabaseが空 → localStorageの cast_type_* を走査してシード
+          try {
+            const rows = Object.keys(localStorage)
+              .filter((k) => k.startsWith("cast_type_"))
+              .map((k) => {
+                try {
+                  const val = JSON.parse(localStorage.getItem(k));
+                  if (!val?.type) return null;
+                  return { cast_id: k.slice("cast_type_".length), type: val.type, retries: val.retries ?? 0, updated_at: new Date().toISOString() };
+                } catch { return null; }
+              })
+              .filter(Boolean);
+            if (rows.length > 0) {
+              await supabase.from("cast_types").upsert(rows, { onConflict: "cast_id" });
+            }
+          } catch {}
+        } else {
+          // Supabaseにデータあり → 各行をlocalStorageに書き戻す（ハイドレート）
+          data.forEach((row) => {
+            try { localStorage.setItem(`cast_type_${row.cast_id}`, JSON.stringify({ type: row.type, retries: row.retries })); } catch {}
+          });
+        }
+      } catch {}
+    }
+    initCastTypes();
+  }, []);
+
   // casts がロードされたら自動ログイン判定
   useEffect(() => {
     if (autoLoginDone.current || loggedInCast) return;
@@ -808,6 +843,14 @@ function useCastTypeLock(castId) {
     setLockData((prev) => {
       const next = { ...prev, ...updates };
       if (key) { try { localStorage.setItem(key, JSON.stringify(next)); } catch {} }
+      if (castId) {
+        try {
+          supabase.from("cast_types").upsert(
+            { cast_id: castId, type: next.type, retries: next.retries, updated_at: new Date().toISOString() },
+            { onConflict: "cast_id" }
+          ).then(() => {}).catch(() => {});
+        } catch {}
+      }
       return next;
     });
   }
@@ -815,6 +858,9 @@ function useCastTypeLock(castId) {
   function resetLock() {
     setLockData({ type: null, retries: 0 });
     if (key) { try { localStorage.removeItem(key); } catch {} }
+    if (castId) {
+      try { supabase.from("cast_types").delete().eq("cast_id", castId).then(() => {}).catch(() => {}); } catch {}
+    }
   }
 
   return [lockData, saveLock, resetLock];
@@ -2031,7 +2077,9 @@ function CastPage({ casts, setCasts, scores }) {
   const [bulkDone, setBulkDone] = useState(null);
 
   function resetDiagLock(c) {
-    try { localStorage.removeItem(`cast_type_${c.heaven_id || c.name}`); } catch {}
+    const castId = c.heaven_id || c.name;
+    try { localStorage.removeItem(`cast_type_${castId}`); } catch {}
+    try { supabase.from("cast_types").delete().eq("cast_id", castId).then(() => {}).catch(() => {}); } catch {}
     setLockRefresh((n) => n + 1);
   }
 
