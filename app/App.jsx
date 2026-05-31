@@ -1049,6 +1049,7 @@ function ShindanPage({ casts, setCasts, loggedInCast, onComplete }) {
         })
       });
       const data = await res.json();
+      if (!res.ok) console.error("[xAI shindan]", res.status, JSON.stringify(data));
       const text = data.choices?.[0]?.message?.content || "";
       setResult({ type: typeGuess, detail: text });
       setCasts((prev) => prev.map((c) => c.name === castName ? { ...c, type: typeGuess, disclose, shindan_note: disclose === "YES" ? note : null } : c));
@@ -1452,6 +1453,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
           })
         });
         const rwData = await rwRes.json();
+        if (!rwRes.ok) console.error("[xAI rewrite]", rwRes.status, JSON.stringify(rwData));
         const rewritten = rwData.choices?.[0]?.message?.content;
         if (rewritten) { finalDiary = rewritten; setDiary(rewritten); }
       } catch { /* use original */ }
@@ -1511,6 +1513,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
 
       if (scoreRes) {
         const scoreData = await scoreRes.json();
+        if (!scoreRes.ok) console.error("[xAI score]", scoreRes.status, JSON.stringify(scoreData));
         scoreText = scoreData.choices?.[0]?.message?.content || "結果を取得できませんでした";
         const scoreMatch = scoreText.match(/(\d+)点/);
         sc = scoreMatch ? Number(scoreMatch[1]) : 50;
@@ -1520,12 +1523,14 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
 
       if (titleRes) {
         const titleData = await titleRes.json();
+        if (!titleRes.ok) console.error("[xAI title]", titleRes.status, JSON.stringify(titleData));
         const generated = titleData.choices?.[0]?.message?.content;
         if (generated) setTitle(generated.trim());
       }
 
       if (imgRes) {
         const imgData = await imgRes.json();
+        if (!imgRes.ok) console.error("[xAI image]", imgRes.status, JSON.stringify(imgData));
         setImageResult(imgData.choices?.[0]?.message?.content || null);
       }
     } catch { if (textSupport) setResult("エラーが発生しました。もう一度お試しください。"); }
@@ -1856,6 +1861,7 @@ function TitlePage({ casts }) {
         })
       });
       const data = await res.json();
+      if (!res.ok) console.error("[xAI title-analyze]", res.status, JSON.stringify(data));
       setResult(data.choices?.[0]?.message?.content || "エラー");
     } catch { setResult("エラーが発生しました"); }
     setLoading(false);
@@ -1974,6 +1980,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
         }),
       });
       const data = await res.json();
+      if (!res.ok) console.error("[xAI ocr]", res.status, JSON.stringify(data));
       const text = data.choices?.[0]?.message?.content || "";
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error("parse failed");
