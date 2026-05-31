@@ -1241,10 +1241,23 @@ function useSupportSettings(castId) {
   return [support.imageSupport, support.textSupport, support.titleAssist, update];
 }
 
+// 画面幅が狭い（スマホ相当）かどうかを返すフック
+function useIsNarrow() {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const check = () => setNarrow(window.innerWidth < 600);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+  return narrow;
+}
+
 // ============================================================
 // AI採点（画像指導統合）
 // ============================================================
 function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPass, onRetryDiagnosis }) {
+  const narrow = useIsNarrow();
   const castName = loggedInCast || "";
   const cast = casts.find((c) => c.name === castName);
   const castId = cast?.heaven_id || castName;
@@ -1531,11 +1544,11 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
   return (
     <div style={{ display: "grid", gap: "16px" }}>
       {confirmedTypeInfo && (
-        <div style={{ ...card, textAlign: "center", padding: "28px 20px", background: `linear-gradient(135deg, ${confirmedTypeInfo.color}14, ${confirmedTypeInfo.color}08)`, borderColor: `${confirmedTypeInfo.color}50` }}>
-          <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "12px", letterSpacing: "0.1em" }}>あなたのタイプ</p>
-          <p style={{ fontSize: "44px", marginBottom: "8px" }}>{confirmedTypeInfo.emoji}</p>
-          <p style={{ fontSize: "26px", fontWeight: "700", color: confirmedTypeInfo.color, marginBottom: "8px" }}>{confirmedType}</p>
-          <p style={{ fontSize: "13px", color: C.sub, lineHeight: "1.7", marginBottom: typeRetries < 2 && onRetryDiagnosis ? "16px" : "0" }}>{confirmedTypeInfo.desc}</p>
+        <div style={{ ...card, textAlign: "center", padding: narrow ? "12px 16px" : "28px 20px", background: `linear-gradient(135deg, ${confirmedTypeInfo.color}14, ${confirmedTypeInfo.color}08)`, borderColor: `${confirmedTypeInfo.color}50` }}>
+          <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: narrow ? "4px" : "12px", letterSpacing: "0.1em" }}>あなたのタイプ</p>
+          <p style={{ fontSize: narrow ? "28px" : "44px", marginBottom: narrow ? "2px" : "8px" }}>{confirmedTypeInfo.emoji}</p>
+          <p style={{ fontSize: narrow ? "20px" : "26px", fontWeight: "700", color: confirmedTypeInfo.color, marginBottom: narrow ? "4px" : "8px" }}>{confirmedType}</p>
+          <p style={{ fontSize: narrow ? "12px" : "13px", color: C.sub, lineHeight: narrow ? "1.5" : "1.7", marginBottom: typeRetries < 2 && onRetryDiagnosis ? (narrow ? "10px" : "16px") : "0" }}>{confirmedTypeInfo.desc}</p>
           {typeRetries < 2 && onRetryDiagnosis && (
             <button onClick={onRetryDiagnosis} style={{ padding: "7px 20px", borderRadius: "20px", border: `1.5px solid ${C.muted}40`, background: "white", color: C.muted, fontSize: "12px", cursor: "pointer", fontWeight: "700" }}>
               やり直す
