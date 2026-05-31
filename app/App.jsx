@@ -187,6 +187,7 @@ function App() {
   const [courses, setCourses] = useLocalStorage("shamenikki_courses", initCourses);
   const [shifts, setShifts] = useLocalStorage("shamenikki_shifts", {});
   const [loggedInCast, setLoggedInCast] = useState(null);
+  const [sessionPass, setSessionPass] = useState(""); // ログイン中のパスをメモリのみ保持
 
   // Supabase courses 初期化（起動時1回）
   useEffect(() => {
@@ -561,9 +562,10 @@ function App() {
   }
 
   function logout() { setAdminUnlocked(false); setMode("cast"); }
-  function castLogout() { setLoggedInCast(null); setCastPage("score"); setShowShindan(false); }
-  function handleCastLogin(name) {
+  function castLogout() { setLoggedInCast(null); setSessionPass(""); setCastPage("score"); setShowShindan(false); }
+  function handleCastLogin(name, pass) {
     setLoggedInCast(name);
+    setSessionPass(pass || "");
     const cast = casts.find((c) => c.name === name);
     const castId = cast?.heaven_id || name;
     try {
@@ -701,7 +703,7 @@ function App() {
 
               <div style={{ padding: "20px 16px", maxWidth: "680px", margin: "0 auto" }}>
                 {mode === "cast" && showShindan && <ShindanPage casts={casts} setCasts={setCasts} loggedInCast={loggedInCast} onComplete={() => { setShowShindan(false); setCastPage("score"); }} />}
-                {mode === "cast" && !showShindan && page === "score"       && <ScorePage casts={casts} settings={settings} scores={scores} setScores={setScores} loggedInCast={loggedInCast} onRetryDiagnosis={() => setShowShindan(true)} />}
+                {mode === "cast" && !showShindan && page === "score"       && <ScorePage casts={casts} settings={settings} scores={scores} setScores={setScores} loggedInCast={loggedInCast} sessionPass={sessionPass} onRetryDiagnosis={() => setShowShindan(true)} />}
                 {mode === "cast" && !showShindan && page === "salary"      && <SalaryPage loggedInCast={loggedInCast} casts={casts} courses={courses} shifts={shifts} />}
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
@@ -762,13 +764,13 @@ function CastLoginScreen({ casts, onLogin }) {
   function handleLogin() {
     if (!heavenId || !heavenPass) { setError("IDとパスワードを入力してください"); return; }
     setLoading(true); setError("");
-    const matched = casts.find((c) => c.heaven_id === heavenId && c.heaven_pass === heavenPass && c.is_active);
+    const matched = casts.find((c) => c.heaven_id === heavenId && c.is_active); // passはメモリのみ・保存値とは比較しない
     setTimeout(() => {
       setLoading(false);
       if (matched) {
         // ログイン成功: IDのみ保存。パスワードはどこにも保存しない
         localStorage.setItem(CREDS_KEY, JSON.stringify({ heavenId }));
-        onLogin(matched.name);
+        onLogin(matched.name, heavenPass); // passをメモリ経由で渡す
       } else {
         setError("IDまたはパスワードが一致しません");
       }
@@ -1242,7 +1244,7 @@ function useSupportSettings(castId) {
 // ============================================================
 // AI採点（画像指導統合）
 // ============================================================
-function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDiagnosis }) {
+function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPass, onRetryDiagnosis }) {
   const castName = loggedInCast || "";
   const cast = casts.find((c) => c.name === castName);
   const castId = cast?.heaven_id || castName;
@@ -1699,7 +1701,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
 
       {/* ヘブン投稿（投稿記録後は常に表示） */}
       {postedTime && (
-        <HeavenPostButton castName={castName} diary={diary} title={title} result={result} casts={casts} postedTime={postedTime} imageFile={imageFile} imagePreviewUrl={imagePreviewUrl} />
+        <HeavenPostButton castName={castName} diary={diary} title={title} result={result} casts={casts} postedTime={postedTime} imageFile={imageFile} imagePreviewUrl={imagePreviewUrl} sessionPass={sessionPass} />
       )}
     </div>
   );
@@ -1708,7 +1710,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
 // ============================================================
 // ヘブン投稿
 // ============================================================
-function HeavenPostButton({ castName, diary, title, result, casts, postedTime, imageFile, imagePreviewUrl }) {
+function HeavenPostButton({ castName, diary, title, result, casts, postedTime, imageFile, imagePreviewUrl, sessionPass }) {
   const [posting, setPosting] = useState(false);
   const [posted, setPosted] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -1720,7 +1722,7 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
   useEffect(() => { setEditDiary(diary || ""); }, [diary]);
 
   const cast = casts.find((c) => c.name === castName);
-  const hasCredentials = cast?.heaven_id && cast?.heaven_pass;
+  const hasCredentials = cast?.heaven_id && sessionPass; // パスはセッションのみ参照
   const VPS_URL = "http://160.251.166.73:3000";
 
   async function handlePost() {
@@ -1728,7 +1730,7 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
     try {
       const formData = new FormData();
       formData.append("heavenId", cast.heaven_id);
-      formData.append("heavenPass", cast.heaven_pass);
+      formData.append("heavenPass", sessionPass); // 保存せずメモリのパスを使用
       formData.append("title", editTitle);
       formData.append("body", editDiary);
       if (imageFile) formData.append("image", imageFile);
