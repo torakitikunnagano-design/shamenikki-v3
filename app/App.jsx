@@ -161,6 +161,51 @@ function App() {
     initCourses();
   }, []);
 
+  // Supabase settings 初期化（起動時1回）
+  useEffect(() => {
+    async function initSettings() {
+      try {
+        // ① 初回シード：localStorageの実設定をSupabaseのデフォルト行に上書き（1回だけ）
+        const synced = localStorage.getItem("shamenikki_settings_synced");
+        if (!synced) {
+          try {
+            const stored = localStorage.getItem("shamenikki_settings");
+            if (stored) {
+              const local = JSON.parse(stored);
+              await supabase.from("settings").upsert({
+                id: 1,
+                daily_post_goal:  local.daily_post_goal,
+                repeat_limit_min: local.repeat_limit_min,
+                min_text_length:  local.min_text_length,
+                image_required:   local.image_required,
+                before_work_min:  local.before_work_min,
+                after_work_min:   local.after_work_min,
+                show_guarantee:   local.show_guarantee ?? true,
+                updated_at:       new Date().toISOString(),
+              });
+              localStorage.setItem("shamenikki_settings_synced", "1");
+            }
+          } catch {}
+        }
+
+        // ② ①の後にSupabaseから読み込み（デフォルト行でユーザー設定を上書きしない）
+        const { data, error } = await supabase.from("settings").select("*").eq("id", 1).single();
+        if (!error && data) {
+          setSettings({
+            daily_post_goal:  data.daily_post_goal,
+            repeat_limit_min: data.repeat_limit_min,
+            min_text_length:  data.min_text_length,
+            image_required:   data.image_required,
+            before_work_min:  data.before_work_min,
+            after_work_min:   data.after_work_min,
+            show_guarantee:   data.show_guarantee,
+          });
+        }
+      } catch {}
+    }
+    initSettings();
+  }, []);
+
   // casts がロードされたら自動ログイン判定
   useEffect(() => {
     if (autoLoginDone.current || loggedInCast) return;
@@ -2229,7 +2274,23 @@ function CoursesPage({ courses, setCourses }) {
 // ============================================================
 function SettingsPage({ settings, setSettings }) {
   const [local, setLocal] = useState({ ...settings, show_guarantee: settings.show_guarantee ?? true });
-  function save() { setSettings(local); alert("保存しました！"); }
+  async function save() {
+    setSettings(local); // localStorageに書き込み（useLocalStorage経由）
+    alert("保存しました！");
+    try {
+      await supabase.from("settings").upsert({
+        id: 1,
+        daily_post_goal:  local.daily_post_goal,
+        repeat_limit_min: local.repeat_limit_min,
+        min_text_length:  local.min_text_length,
+        image_required:   local.image_required,
+        before_work_min:  local.before_work_min,
+        after_work_min:   local.after_work_min,
+        show_guarantee:   local.show_guarantee ?? true,
+        updated_at:       new Date().toISOString(),
+      });
+    } catch {}
+  }
 
   const fields = [
     { key: "daily_post_goal",  label: "1日の目標投稿数",    unit: "件" },
