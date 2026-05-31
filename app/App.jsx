@@ -310,6 +310,46 @@ function App() {
     initScores();
   }, []);
 
+  // Supabase shifts 初期化（起動時1回）
+  useEffect(() => {
+    async function initShifts() {
+      try {
+        const { data, error } = await supabase.from("shifts").select("*");
+        if (error) throw error;
+
+        if (data.length === 0) {
+          // Supabaseが空 → localStorageの内容をシード
+          try {
+            const stored = localStorage.getItem("shamenikki_shifts");
+            if (stored) {
+              const local = JSON.parse(stored);
+              const rows = Object.entries(local).map(([key, val]) => ({
+                cast_name:  key.slice(0, -11),   // 末尾11文字("_YYYY-MM-DD")を除いた部分
+                date:       key.slice(-10),        // 末尾10文字がYYYY-MM-DD
+                start_time: val.startTime || "",
+                end_time:   val.endTime   || "",
+              }));
+              if (rows.length > 0) {
+                await supabase.from("shifts").upsert(rows, { onConflict: "cast_name,date" });
+              }
+            }
+          } catch {}
+        } else {
+          // Supabaseにデータあり → { "cast_name_date": {startTime, endTime} } に復元
+          const rebuilt = {};
+          data.forEach((row) => {
+            rebuilt[`${row.cast_name}_${row.date}`] = {
+              startTime: row.start_time,
+              endTime:   row.end_time,
+            };
+          });
+          setShifts(rebuilt);
+        }
+      } catch {}
+    }
+    initShifts();
+  }, []);
+
   // casts がロードされたら自動ログイン判定
   useEffect(() => {
     if (autoLoginDone.current || loggedInCast) return;
@@ -2484,20 +2524,34 @@ function ShiftsPage({ casts, shifts, setShifts }) {
     setLocalShifts((prev) => ({ ...prev, [castName]: { ...prev[castName], [field]: value } }));
   }
 
-  function saveAll() {
+  async function saveAll() {
     const next = { ...shifts };
+    const toUpsert = [];
+    const toDelete = [];
+
     activeCasts.forEach((c) => {
       const key = `${c.name}_${date}`;
       const s = localShifts[c.name] || {};
       if (s.startTime || s.endTime) {
         next[key] = { startTime: s.startTime || "", endTime: s.endTime || "" };
+        toUpsert.push({ cast_name: c.name, date, start_time: s.startTime || "", end_time: s.endTime || "" });
       } else {
         delete next[key];
+        toDelete.push(c.name);
       }
     });
-    setShifts(next);
+
+    setShifts(next); // localStorageに書き込み（useLocalStorage経由）
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+
+    // Supabase sync
+    if (toUpsert.length > 0) {
+      try { await supabase.from("shifts").upsert(toUpsert, { onConflict: "cast_name,date" }); } catch {}
+    }
+    for (const castName of toDelete) {
+      try { await supabase.from("shifts").delete().eq("cast_name", castName).eq("date", date); } catch {}
+    }
   }
 
   return (
