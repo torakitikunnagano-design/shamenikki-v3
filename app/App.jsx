@@ -267,6 +267,49 @@ function App() {
     initCasts();
   }, []);
 
+  // Supabase scores 初期化（起動時1回）
+  useEffect(() => {
+    async function initScores() {
+      try {
+        const { data, error } = await supabase.from("scores").select("*").order("posted_at", { ascending: false });
+        if (error) throw error;
+
+        if (data.length === 0) {
+          // Supabaseが空 → localStorageの内容をシード
+          try {
+            const stored = localStorage.getItem("shamenikki_scores");
+            if (stored) {
+              const local = JSON.parse(stored);
+              if (local.length > 0) {
+                await supabase.from("scores").upsert(local.map((s) => ({
+                  id:         s.id,
+                  cast_name:  s.cast_name,
+                  diary:      s.diary,
+                  result:     s.result,
+                  posted_at:  s.posted_at,
+                  has_image:  s.has_image,
+                  score:      s.score,
+                })));
+              }
+            }
+          } catch {}
+        } else {
+          // Supabaseにデータあり → それを使う
+          setScores(data.map((s) => ({
+            id:        s.id,
+            cast_name: s.cast_name,
+            diary:     s.diary,
+            result:    s.result,
+            posted_at: s.posted_at,
+            has_image: s.has_image,
+            score:     s.score,
+          })));
+        }
+      } catch {}
+    }
+    initScores();
+  }, []);
+
   // casts がロードされたら自動ログイン判定
   useEffect(() => {
     if (autoLoginDone.current || loggedInCast) return;
@@ -1240,7 +1283,9 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, onRetryDi
       }
     } catch { if (textSupport) setResult("エラーが発生しました。もう一度お試しください。"); }
     finally {
-      setScores((prev) => [{ id: Date.now(), cast_name: castName, diary: finalDiary, result: scoreText, posted_at: autoPostedAtISO, has_image: !!imageFile, score: sc }, ...prev]);
+      const newScore = { id: Date.now(), cast_name: castName, diary: finalDiary, result: scoreText, posted_at: autoPostedAtISO, has_image: !!imageFile, score: sc };
+      setScores((prev) => [newScore, ...prev]);
+      try { supabase.from("scores").upsert(newScore).then(() => {}).catch(() => {}); } catch {}
       setLoading(false);
     }
   }
