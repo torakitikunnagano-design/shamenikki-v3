@@ -39,7 +39,7 @@ const inp = {
   border: `1.5px solid ${C.border}`,
   background: "#fff8fc",
   color: C.text,
-  fontSize: "14px",
+  fontSize: "16px",      // iOS auto-zoom防止（16px未満だとフォーカス時に拡大される）
   outline: "none",
   boxSizing: "border-box",
   transition: "border-color 0.2s",
@@ -596,7 +596,7 @@ function App() {
   const nav     = mode === "cast" ? castNav     : adminNav;
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "'Noto Sans JP', 'Hiragino Kaku Gothic Pro', sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "'Noto Sans JP', 'Hiragino Kaku Gothic Pro', sans-serif", overflowX: "hidden", maxWidth: "100%" }}>
 
       {/* ヘッダー */}
       <header style={{
