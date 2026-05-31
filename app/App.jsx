@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { supabase } from "../lib/supabaseClient";
 
 // ============================================================
 // ポップ女子向け カラーテーマ（ピンク・パープル・ホワイト）
@@ -133,6 +134,32 @@ function App() {
   const [shifts, setShifts] = useLocalStorage("shamenikki_shifts", {});
   const [loggedInCast, setLoggedInCast] = useState(null);
   const autoLoginDone = useRef(false);
+
+  // Supabase courses 初期化（起動時1回）
+  useEffect(() => {
+    async function initCourses() {
+      try {
+        const { data, error } = await supabase.from("courses").select("*").order("minutes");
+        if (error) throw error;
+        if (data.length > 0) {
+          // Supabaseにデータあり → それを使う
+          setCourses(data.map((r) => ({ id: r.id, minutes: r.minutes })));
+        } else {
+          // Supabaseが空 → localStorageの内容を一度だけシード
+          try {
+            const stored = localStorage.getItem("shamenikki_courses");
+            if (stored) {
+              const local = JSON.parse(stored);
+              if (local.length > 0) {
+                await supabase.from("courses").upsert(local.map((c) => ({ id: c.id, minutes: c.minutes })));
+              }
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+    initCourses();
+  }, []);
 
   // casts がロードされたら自動ログイン判定
   useEffect(() => {
@@ -2112,26 +2139,30 @@ function CoursesPage({ courses, setCourses }) {
   const [editId, setEditId] = useState(null);
   const [editMin, setEditMin] = useState("");
 
-  function addCourse() {
+  async function addCourse() {
     const m = Number(newMin);
     if (!m || m <= 0) return;
     if (courses.find((c) => c.minutes === m)) return;
-    setCourses([...courses, { id: Date.now(), minutes: m }].sort((a, b) => a.minutes - b.minutes));
+    const newCourse = { id: Date.now(), minutes: m };
+    setCourses([...courses, newCourse].sort((a, b) => a.minutes - b.minutes));
     setNewMin("");
+    try { await supabase.from("courses").upsert({ id: newCourse.id, minutes: newCourse.minutes }); } catch {}
   }
 
   function deleteCourse(id) {
     setCourses(courses.filter((c) => c.id !== id));
+    try { supabase.from("courses").delete().eq("id", id).then(() => {}).catch(() => {}); } catch {}
   }
 
   function startEdit(c) { setEditId(c.id); setEditMin(String(c.minutes)); }
 
-  function saveEdit(id) {
+  async function saveEdit(id) {
     const m = Number(editMin);
     if (!m || m <= 0) return;
     setCourses(courses.map((c) => c.id === id ? { ...c, minutes: m } : c).sort((a, b) => a.minutes - b.minutes));
     setEditId(null);
     setEditMin("");
+    try { await supabase.from("courses").upsert({ id, minutes: m }); } catch {}
   }
 
   return (
