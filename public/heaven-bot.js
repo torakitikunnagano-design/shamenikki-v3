@@ -42,7 +42,7 @@ app.post('/post', async (req, res) => {
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(60000);
     await page.setUserAgent(UA);
-    page.on('dialog', async d => { log('DIALOG: ' + d.message()); try { await d.accept(); } catch (_) {} });
+    page.on('dialog', async d => { log('DIALOG: ' + encodeURIComponent(d.message())); try { await d.accept(); } catch (_) {} });
 
     log('login...');
     await page.goto('https://spgirl.cityheaven.net/J1Login.php', WAIT);
@@ -67,6 +67,7 @@ app.post('/post', async (req, res) => {
     await page.waitForSelector('#diaryTitle', { timeout: 30000 });
     await page.click('#diaryTitle');
     await page.type('#diaryTitle', title || '');
+    log('titleVal=' + encodeURIComponent(await page.$eval('#diaryTitle', el => el.value)));
 
     log('set body...');
     await page.waitForFunction(() => window.CKEDITOR && CKEDITOR.instances && CKEDITOR.instances.diary && CKEDITOR.instances.diary.status === 'ready', { timeout: 30000 });
@@ -75,6 +76,7 @@ app.post('/post', async (req, res) => {
       CKEDITOR.instances.diary.setData(esc.replace(/\n/g, '<br>'));
       if (CKEDITOR.instances.diary.updateElement) CKEDITOR.instances.diary.updateElement();
     }, body || '');
+    log('bodyLen=' + await page.evaluate(() => (window.CKEDITOR && CKEDITOR.instances.diary ? (CKEDITOR.instances.diary.getData() || '').length : -1)));
 
     // ===== preview =====
     log('click preview...');
