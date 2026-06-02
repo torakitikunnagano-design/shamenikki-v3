@@ -46,7 +46,7 @@ app.post('/post', async (req, res) => {
     await page.setUserAgent(UA);
     page.on('dialog', async d => {
       const msg = d.message();
-      log('DIALOG:' + encodeURIComponent(msg).slice(0, 50));
+      log('DIALOG:' + encodeURIComponent(msg).slice(0, 200));
       if (msg.includes('投稿')) posted = true;
       try { await d.accept(); } catch (_) {}
     });
@@ -59,11 +59,15 @@ app.post('/post', async (req, res) => {
 
     log('open diary...');
     await page.goto('https://spgirl.cityheaven.net/J4KeitaiDiaryPost.php?gid=' + heavenId, WAIT);
+    await new Promise(r => setTimeout(r, 3000));
 
     if (tmp) {
       await page.waitForSelector('#picSelect', { timeout: 30000 });
       await (await page.$('#picSelect')).uploadFile(tmp);
+      await page.$eval('#picSelect', el => { el.dispatchEvent(new Event('change', { bubbles: true })); }).catch(() => {});
       await new Promise(r => setTimeout(r, 10000));
+      const pf = await page.$eval('#picSelect', el => (el.files ? el.files.length : -1)).catch(() => 'na');
+      log('picFiles=' + pf);
       log('image set');
     }
 
