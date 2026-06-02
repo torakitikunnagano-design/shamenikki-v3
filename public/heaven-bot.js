@@ -22,7 +22,8 @@ async function findBtn(page, matchFn) {
 }
 async function dumpButtons(page) {
   return await page.$$eval('a, button, input[type=button], input[type=submit]', els =>
-    els.map(e => (e.textContent || e.value || '').trim()).filter(Boolean).slice(0, 50));
+    els.map(e => ({ tag: e.tagName, cls: (e.className || '').toString().slice(0, 30), txt: (e.textContent || e.value || '').trim().slice(0, 20), href: (e.getAttribute && e.getAttribute('href')) || '' }))
+       .filter(o => /保存|プレビュー|投稿|戻る|公開|削除/.test(o.txt)));
 }
 
 app.post('/post', async (req, res) => {
@@ -76,16 +77,18 @@ app.post('/post', async (req, res) => {
 
     log('click preview...');
     await new Promise(r => setTimeout(r, 1500));
-    let previewBtn = await findBtn(page, t => t.includes('プレビュー'));
-    if (!previewBtn) previewBtn = await findBtn(page, t => t.includes('一時保存'));
-    if (!previewBtn) { log('btns=' + JSON.stringify(await dumpButtons(page))); throw new Error('preview button not found'); }
+    log('BTNS=' + JSON.stringify(await dumpButtons(page)));
+    let previewBtn = await findBtn(page, t => t.includes('プレビュー')) || await findBtn(page, t => t.includes('一時保存'));
+    if (!previewBtn) throw new Error('preview button not found');
+    const pinfo = await page.evaluate(el => ({ tag: el.tagName, cls: (el.className || '').toString(), href: el.getAttribute('href'), html: el.outerHTML.slice(0, 140) }), previewBtn);
+    log('CLICKING=' + JSON.stringify(pinfo));
     await Promise.all([previewBtn.click(), page.waitForNavigation(WAIT)]);
     log('preview url=' + page.url());
 
     log('click post...');
-    let postBtn = await findBtn(page, t => t === '投稿');
-    if (!postBtn) postBtn = await findBtn(page, t => t.includes('投稿') && t.length <= 4);
-    if (!postBtn) { log('btns=' + JSON.stringify(await dumpButtons(page))); throw new Error('post button not found'); }
+    log('BTNS2=' + JSON.stringify(await dumpButtons(page)));
+    let postBtn = await findBtn(page, t => t === '投稿') || await findBtn(page, t => t.includes('投稿') && t.length <= 4);
+    if (!postBtn) throw new Error('post button not found');
     await Promise.all([postBtn.click(), page.waitForNavigation(WAIT)]);
     log('POSTED url=' + page.url());
 
