@@ -1793,12 +1793,42 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
             <img src={imagePreviewUrl} alt="添付" style={{ width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "10px", border: `1.5px solid ${C.border}`, display: "block", background: "#fdf0f8" }} />
           </div>
         )}
-        <div style={{ marginTop: "14px" }}>
-          <label style={{ fontSize: "11px", color: C.muted, display: "block", marginBottom: "6px", fontWeight: "700", letterSpacing: "0.06em" }}>公開範囲</label>
-          <select value={limitedKind} onChange={(e) => setLimitedKind(e.target.value)} style={{ ...inp }}>
-            <option value="00">全公開</option>
-            <option value="02">マイガール限定</option>
-          </select>
+        <div style={{ marginTop: "16px" }}>
+          <p style={{ fontSize: "11px", color: C.sub, fontWeight: "700", letterSpacing: "0.06em", marginBottom: "10px" }}>公開範囲</p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+            {[
+              { value: "00", label: "全公開", sub: null },
+              { value: "02", label: "マイガール限定", sub: "マイガールにだけ公開" },
+            ].map(({ value, label, sub }) => {
+              const active = limitedKind === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setLimitedKind(value)}
+                  style={{
+                    padding: "14px 10px",
+                    borderRadius: "14px",
+                    border: active ? "none" : `1.5px solid ${C.border}`,
+                    background: active ? "linear-gradient(135deg, #ff6b9d, #d946ef)" : "white",
+                    color: active ? "white" : C.muted,
+                    fontWeight: "700",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    boxShadow: active ? "0 4px 16px rgba(255,107,157,0.35)" : "none",
+                    transition: "all 0.2s",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "4px",
+                  }}
+                >
+                  <span>{active ? "✓ " : ""}{label}</span>
+                  {sub && <span style={{ fontSize: "10px", fontWeight: "400", opacity: 0.85 }}>{sub}</span>}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
