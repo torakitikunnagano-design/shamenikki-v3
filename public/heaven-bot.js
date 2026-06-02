@@ -10,75 +10,84 @@ app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const WAIT = { waitUntil: 'domcontentloaded', timeout: 60000 };
 
 app.post('/post', async (req, res) => {
   const { heavenId, heavenPass, title, body, imageBase64, imageType } = req.body || {};
   let browser, tmp;
+  const log = (m) => console.log('[heaven-bot] ' + m);
   try {
     if (imageBase64) {
       const ext = (imageType && imageType.includes('png')) ? 'png' : 'jpg';
       tmp = path.join(os.tmpdir(), 'hv_' + Date.now() + '.' + ext);
       fs.writeFileSync(tmp, Buffer.from(String(imageBase64).replace(/^data:image\/\w+;base64,/, ''), 'base64'));
-    }
+      log('image saved');
+    } else { log('NO image received'); }
 
     browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     const page = await browser.newPage();
+    page.setDefaultNavigationTimeout(60000);
     await page.setUserAgent(UA);
 
-    // login
-    await page.goto('https://spgirl.cityheaven.net/J1Login.php', { waitUntil: 'networkidle2' });
+    log('login...');
+    await page.goto('https://spgirl.cityheaven.net/J1Login.php', WAIT);
     await page.type('input[name="txt_account"]', heavenId);
     await page.type('input[name="txt_password"]', heavenPass);
-    await Promise.all([page.click('input[type="submit"]'), page.waitForNavigation({ waitUntil: 'networkidle2' })]);
+    await Promise.all([page.click('input[type="submit"]'), page.waitForNavigation(WAIT)]);
+    log('login done url=' + page.url());
 
-    // diary write page
-    await page.goto('https://spgirl.cityheaven.net/J4KeitaiDiaryPost.php?gid=' + heavenId, { waitUntil: 'networkidle2' });
+    log('open diary page...');
+    await page.goto('https://spgirl.cityheaven.net/J4KeitaiDiaryPost.php?gid=' + heavenId, WAIT);
+    log('diary url=' + page.url());
 
-    // image (cityheaven requires one)
     if (tmp) {
-      await page.waitForSelector('#picSelect', { timeout: 20000 });
-      const input = await page.$('#picSelect');
-      await input.uploadFile(tmp);
+      log('upload image...');
+      await page.waitForSelector('#picSelect', { timeout: 30000 });
+      await (await page.$('#picSelect')).uploadFile(tmp);
       await new Promise(r => setTimeout(r, 8000));
+      log('image uploaded');
     }
 
-    // title
-    await page.waitForSelector('#diaryTitle', { timeout: 20000 });
+    log('set title...');
+    await page.waitForSelector('#diaryTitle', { timeout: 30000 });
     await page.click('#diaryTitle');
     await page.type('#diaryTitle', title || '');
 
-    // body via CKEditor
-    await page.waitForFunction(() => window.CKEDITOR && CKEDITOR.instances && CKEDITOR.instances.diary && CKEDITOR.instances.diary.status === 'ready', { timeout: 20000 });
+    log('set body...');
+    await page.waitForFunction(() => window.CKEDITOR && CKEDITOR.instances && CKEDITOR.instances.diary && CKEDITOR.instances.diary.status === 'ready', { timeout: 30000 });
     await page.evaluate((raw) => {
       const esc = String(raw).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       CKEDITOR.instances.diary.setData(esc.replace(/\n/g, '<br>'));
       if (CKEDITOR.instances.diary.updateElement) CKEDITOR.instances.diary.updateElement();
     }, body || '');
 
-    // click 一時保存&プレビュー
+    log('click preview...');
     await new Promise(r => setTimeout(r, 1500));
     await Promise.all([
       page.evaluate(() => {
         const a = [...document.querySelectorAll('a.button_top_menu')].find(e => /一時保存|プレビュー/.test(e.textContent));
         if (a) a.click();
       }),
-      page.waitForNavigation({ waitUntil: 'networkidle2' })
+      page.waitForNavigation(WAIT)
     ]);
+    log('preview url=' + page.url());
 
-    // preview page -> click 投稿
-    await page.waitForFunction(() => [...document.querySelectorAll('a.button_top_menu')].some(e => e.textContent.trim() === '投稿'), { timeout: 20000 });
+    log('click post...');
+    await page.waitForFunction(() => [...document.querySelectorAll('a.button_top_menu')].some(e => e.textContent.trim() === '投稿'), { timeout: 30000 });
     await Promise.all([
       page.evaluate(() => {
         const a = [...document.querySelectorAll('a.button_top_menu')].find(e => e.textContent.trim() === '投稿');
         if (a) a.click();
       }),
-      page.waitForNavigation({ waitUntil: 'networkidle2' })
+      page.waitForNavigation(WAIT)
     ]);
+    log('POSTED url=' + page.url());
 
     await browser.close();
     if (tmp && fs.existsSync(tmp)) fs.unlinkSync(tmp);
     res.json({ success: true, message: 'posted' });
   } catch (e) {
+    log('ERROR: ' + e.message);
     if (browser) { try { await browser.close(); } catch (_) {} }
     if (tmp && fs.existsSync(tmp)) { try { fs.unlinkSync(tmp); } catch (_) {} }
     res.json({ success: false, message: e.message });
