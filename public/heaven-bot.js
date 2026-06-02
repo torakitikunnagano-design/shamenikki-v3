@@ -20,98 +20,83 @@ async function findBtn(page, matchFn) {
   }
   return null;
 }
-async function dumpButtons(page) {
-  return await page.$$eval('a, button, input[type=button], input[type=submit]', els =>
-    els.map(e => ({ tag: e.tagName, id: e.id || '', txt: (e.textContent || e.value || '').trim().slice(0, 16) }))
-       .filter(o => /保存|プレビュー|投稿|戻る|公開|削除/.test(o.txt)));
+async function waitUrlChange(page, before, ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (page.url() !== before) return true;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return false;
 }
 
 app.post('/post', async (req, res) => {
   const { heavenId, heavenPass, title, body, imageBase64, imageType } = req.body || {};
-  let browser, tmp;
+  let browser, tmp, posted = false;
   const log = (m) => console.log('[heaven-bot] ' + m);
   try {
     if (imageBase64) {
       const ext = (imageType && imageType.includes('png')) ? 'png' : 'jpg';
       tmp = path.join(os.tmpdir(), 'hv_' + Date.now() + '.' + ext);
       fs.writeFileSync(tmp, Buffer.from(String(imageBase64).replace(/^data:image\/\w+;base64,/, ''), 'base64'));
-      log('image saved');
-    } else { log('NO image received'); }
+    }
 
     browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(60000);
     await page.setUserAgent(UA);
-    page.on('dialog', async d => { log('DIALOG: ' + encodeURIComponent(d.message())); try { await d.accept(); } catch (_) {} });
+    page.on('dialog', async d => {
+      const msg = d.message();
+      if (msg.includes('投稿')) posted = true;
+      try { await d.accept(); } catch (_) {}
+    });
 
     log('login...');
     await page.goto('https://spgirl.cityheaven.net/J1Login.php', WAIT);
     await page.type('input[name="txt_account"]', heavenId);
     await page.type('input[name="txt_password"]', heavenPass);
     await Promise.all([page.click('input[type="submit"]'), page.waitForNavigation(WAIT)]);
-    log('login done url=' + page.url());
 
-    log('open diary page...');
+    log('open diary...');
     await page.goto('https://spgirl.cityheaven.net/J4KeitaiDiaryPost.php?gid=' + heavenId, WAIT);
-    log('diary url=' + page.url());
 
     if (tmp) {
-      log('upload image...');
       await page.waitForSelector('#picSelect', { timeout: 30000 });
       await (await page.$('#picSelect')).uploadFile(tmp);
       await new Promise(r => setTimeout(r, 8000));
-      log('image uploaded');
+      log('image set');
     }
 
-    log('set title...');
     await page.waitForSelector('#diaryTitle', { timeout: 30000 });
     await page.click('#diaryTitle');
     await page.type('#diaryTitle', title || '');
-    log('titleVal=' + encodeURIComponent(await page.$eval('#diaryTitle', el => el.value)));
 
-    log('set body...');
     await page.waitForFunction(() => window.CKEDITOR && CKEDITOR.instances && CKEDITOR.instances.diary && CKEDITOR.instances.diary.status === 'ready', { timeout: 30000 });
     await page.evaluate((raw) => {
       const esc = String(raw).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       CKEDITOR.instances.diary.setData(esc.replace(/\n/g, '<br>'));
       if (CKEDITOR.instances.diary.updateElement) CKEDITOR.instances.diary.updateElement();
     }, body || '');
-    log('bodyLen=' + await page.evaluate(() => (window.CKEDITOR && CKEDITOR.instances.diary ? (CKEDITOR.instances.diary.getData() || '').length : -1)));
+    log('title/body set');
 
-    // ===== preview =====
-    log('click preview...');
     await new Promise(r => setTimeout(r, 1500));
     const beforeUrl = page.url();
-    let clicked = false;
-    if (await page.$('#previewsbmt')) {
-      await page.click('#previewsbmt').then(() => { clicked = true; }).catch(e => log('preview click err: ' + e.message));
-    }
-    if (!clicked) {
-      const pb = await findBtn(page, t => t.includes('プレビュー')) || await findBtn(page, t => t.includes('一時保存'));
-      if (pb) await pb.click().catch(e => log('preview click err2: ' + e.message));
-    }
+    const pv = await page.$('#previewsbmt') || await findBtn(page, t => t.includes('プレビュー')) || await findBtn(page, t => t.includes('一時保存'));
+    if (!pv) throw new Error('preview button not found');
+    await pv.click().catch(e => log('preview click err:' + e.message));
+    const moved = await waitUrlChange(page, beforeUrl, 20000);
+    log('preview moved=' + moved);
+    if (!moved) throw new Error('preview did not load');
+
+    await new Promise(r => setTimeout(r, 1500));
+    const ps = await page.$('#postsbmt') || await findBtn(page, t => t === '投稿') || await findBtn(page, t => /投稿/.test(t) && t.length <= 4);
+    if (!ps) throw new Error('post button not found');
+    await ps.click().catch(e => log('post click err:' + e.message));
     await new Promise(r => setTimeout(r, 8000));
-    log('after preview url=' + page.url() + ' before=' + beforeUrl);
-    log('BTNS2=' + JSON.stringify(await dumpButtons(page)));
+    log('done posted=' + posted);
 
-    // ===== post =====
-    log('click post...');
-    let postBtn = await page.$('#postsbmt');
-    if (!postBtn) postBtn = await findBtn(page, t => t === '投稿') || await findBtn(page, t => t.includes('投稿') && t.length <= 4);
-    if (postBtn) {
-      const psinfo = await page.evaluate(el => ({ id: el.id, html: el.outerHTML.slice(0, 120) }), postBtn);
-      log('CLICKING post=' + JSON.stringify(psinfo));
-      await postBtn.click().catch(e => log('post click err: ' + e.message));
-      await new Promise(r => setTimeout(r, 8000));
-      log('after post url=' + page.url());
-    } else {
-      log('no post btn found');
-    }
-
-    const finalUrl = page.url();
     await browser.close();
     if (tmp && fs.existsSync(tmp)) fs.unlinkSync(tmp);
-    res.json({ success: true, message: 'done finalUrl=' + finalUrl });
+    res.json({ success: posted, message: posted ? 'posted' : 'finished_no_confirm' });
   } catch (e) {
     log('ERROR: ' + e.message);
     if (browser) { try { await browser.close(); } catch (_) {} }
