@@ -1,27 +1,46 @@
 import { NextResponse } from "next/server";
 
 const VPS_URL = "http://160.251.166.73:3000/post";
+const BASE64_LIMIT_BYTES = 3 * 1024 * 1024; // base64後 約3MB を上限
 
 export async function POST(request) {
   try {
-    // ブラウザから届いたFormDataを解析して必要な4フィールドだけ取り出す
     const formData = await request.formData();
-    const heavenId  = formData.get("heavenId")  || "";
+    const heavenId   = formData.get("heavenId")  || "";
     const heavenPass = formData.get("heavenPass") || "";
-    const title     = formData.get("title")     || "";
-    const body      = formData.get("body")      || "";
+    const title      = formData.get("title")     || "";
+    const body       = formData.get("body")      || "";
+    const imageFile  = formData.get("image");
 
-    // VPS(heaven-bot)はexpress.json()のみ対応のためJSONで送る（画像は使わない）
+    const payload = { heavenId, heavenPass, title, body };
+
+    if (imageFile && imageFile.size > 0) {
+      // ファイルを ArrayBuffer → Buffer → 純粋な base64 文字列に変換
+      const arrayBuf = await imageFile.arrayBuffer();
+      const base64 = Buffer.from(arrayBuf).toString("base64");
+
+      if (base64.length > BASE64_LIMIT_BYTES) {
+        console.error("[heaven-post] imageBase64 too large:", base64.length, "chars");
+        return NextResponse.json(
+          { success: false, message: "画像が大きすぎます。元の画像を小さくしてください。" },
+          { status: 413 }
+        );
+      }
+
+      payload.imageBase64 = base64;
+      payload.imageType   = imageFile.type || "image/jpeg";
+    }
+
+    // VPS(heaven-bot)へJSON送信
     const vpsRes = await fetch(VPS_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`,
       },
-      body: JSON.stringify({ heavenId, heavenPass, title, body }),
+      body: JSON.stringify(payload),
     });
 
-    // VPSのレスポンスをそのままブラウザへ返す
     const resText = await vpsRes.text();
     let data;
     try { data = JSON.parse(resText); }
