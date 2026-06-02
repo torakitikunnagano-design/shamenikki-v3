@@ -1820,7 +1820,10 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
+                    justifyContent: "center",
+                    textAlign: "center",
                     gap: "4px",
+                    width: "100%",
                   }}
                 >
                   <span>{active ? "✓ " : ""}{label}</span>
