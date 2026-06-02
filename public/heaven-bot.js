@@ -46,6 +46,7 @@ app.post('/post', async (req, res) => {
     await page.setUserAgent(UA);
     page.on('dialog', async d => {
       const msg = d.message();
+      log('DIALOG:' + encodeURIComponent(msg).slice(0, 60));
       if (msg.includes('投稿')) posted = true;
       try { await d.accept(); } catch (_) {}
     });
@@ -62,7 +63,10 @@ app.post('/post', async (req, res) => {
     if (tmp) {
       await page.waitForSelector('#picSelect', { timeout: 30000 });
       await (await page.$('#picSelect')).uploadFile(tmp);
-      await new Promise(r => setTimeout(r, 8000));
+      await page.waitForFunction(() => {
+        return [...document.querySelectorAll('img')].some(im => /blob:|base64|diary|upload|cdn|img\.cityheaven/i.test(im.src || ''));
+      }, { timeout: 12000 }).catch(() => {});
+      await new Promise(r => setTimeout(r, 5000));
       log('image set');
     }
 
@@ -78,16 +82,20 @@ app.post('/post', async (req, res) => {
     }, body || '');
     log('title/body set');
 
-    await new Promise(r => setTimeout(r, 1500));
-    const beforeUrl = page.url();
-    const pv = await page.$('#previewsbmt') || await findBtn(page, t => t.includes('プレビュー')) || await findBtn(page, t => t.includes('一時保存'));
-    if (!pv) throw new Error('preview button not found');
-    await pv.click().catch(e => log('preview click err:' + e.message));
-    const moved = await waitUrlChange(page, beforeUrl, 20000);
+    async function clickPreview() {
+      const before = page.url();
+      const pv = await page.$('#previewsbmt') || await findBtn(page, t => t.includes('プレビュー')) || await findBtn(page, t => t.includes('一時保存'));
+      if (!pv) throw new Error('preview button not found');
+      await pv.click().catch(e => log('preview click err:' + e.message));
+      return await waitUrlChange(page, before, 15000);
+    }
+    await new Promise(r => setTimeout(r, 2000));
+    let moved = await clickPreview();
+    if (!moved) { log('preview retry...'); await new Promise(r => setTimeout(r, 6000)); moved = await clickPreview(); }
     log('preview moved=' + moved);
     if (!moved) throw new Error('preview did not load');
 
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, 2000));
     const ps = await page.$('#postsbmt') || await findBtn(page, t => t === '投稿') || await findBtn(page, t => /投稿/.test(t) && t.length <= 4);
     if (!ps) throw new Error('post button not found');
     await ps.click().catch(e => log('post click err:' + e.message));
