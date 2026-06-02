@@ -1,35 +1,27 @@
 import { NextResponse } from "next/server";
 
 const VPS_URL = "http://160.251.166.73:3000/post";
-const VERCEL_LIMIT_BYTES = 4.5 * 1024 * 1024; // 4.5MB
 
 export async function POST(request) {
   try {
-    // Vercel serverless の本文サイズ上限チェック
-    const contentLength = parseInt(request.headers.get("content-length") || "0", 10);
-    if (contentLength > VERCEL_LIMIT_BYTES) {
-      console.error("[heaven-post] body too large:", contentLength, "bytes (limit 4.5MB)");
-      return NextResponse.json(
-        { success: false, message: "画像が大きすぎます（4.5MB以下にしてください）" },
-        { status: 413 }
-      );
-    }
+    // ブラウザから届いたFormDataを解析して必要な4フィールドだけ取り出す
+    const formData = await request.formData();
+    const heavenId  = formData.get("heavenId")  || "";
+    const heavenPass = formData.get("heavenPass") || "";
+    const title     = formData.get("title")     || "";
+    const body      = formData.get("body")      || "";
 
-    // 元のリクエストをそのまま生バイトで読み取り、Content-Type（multipartのboundary含む）も転送
-    const contentType = request.headers.get("content-type") || "";
-    const rawBody = await request.arrayBuffer();
-
-    // サーバー側からVPSへ転送（HTTP → Mixed Contentにならない）
+    // VPS(heaven-bot)はexpress.json()のみ対応のためJSONで送る（画像は使わない）
     const vpsRes = await fetch(VPS_URL, {
       method: "POST",
       headers: {
+        "Content-Type": "application/json",
         "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`,
-        "Content-Type": contentType,
       },
-      body: rawBody,
+      body: JSON.stringify({ heavenId, heavenPass, title, body }),
     });
 
-    // VPSのレスポンスを読んでそのままブラウザへ返す
+    // VPSのレスポンスをそのままブラウザへ返す
     const resText = await vpsRes.text();
     let data;
     try { data = JSON.parse(resText); }
