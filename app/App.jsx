@@ -1735,6 +1735,7 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
   const [postError, setPostError] = useState(null);
   const [editTitle, setEditTitle] = useState(title || "");
   const [editDiary, setEditDiary] = useState(diary || "");
+  const [limitedKind, setLimitedKind] = useState("00");
 
   useEffect(() => { setEditTitle(title || ""); }, [title]);
   useEffect(() => { setEditDiary(diary || ""); }, [diary]);
@@ -1751,6 +1752,7 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
       formData.append("title", editTitle);
       formData.append("body", editDiary);
       if (imageFile) formData.append("image", imageFile);
+      formData.append("limitedKind", limitedKind);
 
       // HTTPSアプリ→HTTPのVPS直接fetchはMixed Contentでブロックされるため
       // Next.jsのサーバーサイドプロキシ経由で転送する（同一オリジン）
@@ -1791,6 +1793,13 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
             <img src={imagePreviewUrl} alt="添付" style={{ width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "10px", border: `1.5px solid ${C.border}`, display: "block", background: "#fdf0f8" }} />
           </div>
         )}
+        <div style={{ marginTop: "14px" }}>
+          <label style={{ fontSize: "11px", color: C.muted, display: "block", marginBottom: "6px", fontWeight: "700", letterSpacing: "0.06em" }}>公開範囲</label>
+          <select value={limitedKind} onChange={(e) => setLimitedKind(e.target.value)} style={{ ...inp }}>
+            <option value="00">全公開</option>
+            <option value="02">マイガール限定</option>
+          </select>
+        </div>
       </div>
 
       {!hasCredentials && (

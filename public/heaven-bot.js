@@ -30,7 +30,7 @@ async function waitUrlChange(page, before, ms) {
 }
 
 app.post('/post', async (req, res) => {
-  const { heavenId, heavenPass, title, body, imageBase64, imageType } = req.body || {};
+  const { heavenId, heavenPass, title, body, imageBase64, imageType, limitedKind } = req.body || {};
   let browser, tmp, posted = false;
   const log = (m) => console.log('[heaven-bot] ' + m);
   try {
@@ -60,6 +60,8 @@ app.post('/post', async (req, res) => {
     log('open diary...');
     await page.goto('https://spgirl.cityheaven.net/J4KeitaiDiaryPost.php?gid=' + heavenId, WAIT);
     await new Promise(r => setTimeout(r, 3000));
+    await page.select('#limited_diary_kind', (limitedKind === '02' ? '02' : '00')).catch(() => {});
+    log('limitedKind=' + limitedKind);
 
     if (tmp) {
       await page.waitForSelector('#picSelect', { timeout: 30000 });

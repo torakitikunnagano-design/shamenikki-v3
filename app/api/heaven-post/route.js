@@ -6,13 +6,14 @@ const BASE64_LIMIT_BYTES = 3 * 1024 * 1024; // base64後 約3MB を上限
 export async function POST(request) {
   try {
     const formData = await request.formData();
-    const heavenId   = formData.get("heavenId")  || "";
-    const heavenPass = formData.get("heavenPass") || "";
-    const title      = formData.get("title")     || "";
-    const body       = formData.get("body")      || "";
-    const imageFile  = formData.get("image");
+    const heavenId    = formData.get("heavenId")    || "";
+    const heavenPass  = formData.get("heavenPass")  || "";
+    const title       = formData.get("title")       || "";
+    const body        = formData.get("body")        || "";
+    const limitedKind = formData.get("limitedKind") || "00";
+    const imageFile   = formData.get("image");
 
-    const payload = { heavenId, heavenPass, title, body };
+    const payload = { heavenId, heavenPass, title, body, limitedKind };
 
     if (imageFile && imageFile.size > 0) {
       // ファイルを ArrayBuffer → Buffer → 純粋な base64 文字列に変換
