@@ -22,7 +22,7 @@ async function findBtn(page, matchFn) {
 }
 async function dumpButtons(page) {
   return await page.$$eval('a, button, input[type=button], input[type=submit]', els =>
-    els.map(e => ({ tag: e.tagName, cls: (e.className || '').toString().slice(0, 30), txt: (e.textContent || e.value || '').trim().slice(0, 20), href: (e.getAttribute && e.getAttribute('href')) || '' }))
+    els.map(e => ({ tag: e.tagName, id: e.id || '', txt: (e.textContent || e.value || '').trim().slice(0, 16) }))
        .filter(o => /保存|プレビュー|投稿|戻る|公開|削除/.test(o.txt)));
 }
 
@@ -42,6 +42,7 @@ app.post('/post', async (req, res) => {
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(60000);
     await page.setUserAgent(UA);
+    page.on('dialog', async d => { log('DIALOG: ' + d.message()); try { await d.accept(); } catch (_) {} });
 
     log('login...');
     await page.goto('https://spgirl.cityheaven.net/J1Login.php', WAIT);
@@ -75,26 +76,40 @@ app.post('/post', async (req, res) => {
       if (CKEDITOR.instances.diary.updateElement) CKEDITOR.instances.diary.updateElement();
     }, body || '');
 
+    // ===== preview =====
     log('click preview...');
     await new Promise(r => setTimeout(r, 1500));
-    log('BTNS=' + JSON.stringify(await dumpButtons(page)));
-    let previewBtn = await findBtn(page, t => t.includes('プレビュー')) || await findBtn(page, t => t.includes('一時保存'));
-    if (!previewBtn) throw new Error('preview button not found');
-    const pinfo = await page.evaluate(el => ({ tag: el.tagName, cls: (el.className || '').toString(), href: el.getAttribute('href'), html: el.outerHTML.slice(0, 140) }), previewBtn);
-    log('CLICKING=' + JSON.stringify(pinfo));
-    await Promise.all([previewBtn.click(), page.waitForNavigation(WAIT)]);
-    log('preview url=' + page.url());
-
-    log('click post...');
+    const beforeUrl = page.url();
+    let clicked = false;
+    if (await page.$('#previewsbmt')) {
+      await page.click('#previewsbmt').then(() => { clicked = true; }).catch(e => log('preview click err: ' + e.message));
+    }
+    if (!clicked) {
+      const pb = await findBtn(page, t => t.includes('プレビュー')) || await findBtn(page, t => t.includes('一時保存'));
+      if (pb) await pb.click().catch(e => log('preview click err2: ' + e.message));
+    }
+    await new Promise(r => setTimeout(r, 8000));
+    log('after preview url=' + page.url() + ' before=' + beforeUrl);
     log('BTNS2=' + JSON.stringify(await dumpButtons(page)));
-    let postBtn = await findBtn(page, t => t === '投稿') || await findBtn(page, t => t.includes('投稿') && t.length <= 4);
-    if (!postBtn) throw new Error('post button not found');
-    await Promise.all([postBtn.click(), page.waitForNavigation(WAIT)]);
-    log('POSTED url=' + page.url());
 
+    // ===== post =====
+    log('click post...');
+    let postBtn = await page.$('#postsbmt');
+    if (!postBtn) postBtn = await findBtn(page, t => t === '投稿') || await findBtn(page, t => t.includes('投稿') && t.length <= 4);
+    if (postBtn) {
+      const psinfo = await page.evaluate(el => ({ id: el.id, html: el.outerHTML.slice(0, 120) }), postBtn);
+      log('CLICKING post=' + JSON.stringify(psinfo));
+      await postBtn.click().catch(e => log('post click err: ' + e.message));
+      await new Promise(r => setTimeout(r, 8000));
+      log('after post url=' + page.url());
+    } else {
+      log('no post btn found');
+    }
+
+    const finalUrl = page.url();
     await browser.close();
     if (tmp && fs.existsSync(tmp)) fs.unlinkSync(tmp);
-    res.json({ success: true, message: 'posted' });
+    res.json({ success: true, message: 'done finalUrl=' + finalUrl });
   } catch (e) {
     log('ERROR: ' + e.message);
     if (browser) { try { await browser.close(); } catch (_) {} }
