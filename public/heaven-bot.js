@@ -12,6 +12,15 @@ app.use(express.json({ limit: '20mb' }));
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const WAIT = { waitUntil: 'domcontentloaded', timeout: 60000 };
 
+async function findMenuBtn(page, text) {
+  const hs = await page.$$('a.button_top_menu');
+  for (const h of hs) {
+    const t = await page.evaluate(el => (el.textContent || '').trim(), h);
+    if (t.includes(text)) return h;
+  }
+  return null;
+}
+
 app.post('/post', async (req, res) => {
   const { heavenId, heavenPass, title, body, imageBase64, imageType } = req.body || {};
   let browser, tmp;
@@ -63,24 +72,15 @@ app.post('/post', async (req, res) => {
 
     log('click preview...');
     await new Promise(r => setTimeout(r, 1500));
-    await Promise.all([
-      page.evaluate(() => {
-        const a = [...document.querySelectorAll('a.button_top_menu')].find(e => /一時保存|プレビュー/.test(e.textContent));
-        if (a) a.click();
-      }),
-      page.waitForNavigation(WAIT)
-    ]);
+    const previewBtn = await findMenuBtn(page, 'プレビュー');
+    if (!previewBtn) throw new Error('preview button not found');
+    await Promise.all([previewBtn.click(), page.waitForNavigation(WAIT)]);
     log('preview url=' + page.url());
 
     log('click post...');
-    await page.waitForFunction(() => [...document.querySelectorAll('a.button_top_menu')].some(e => e.textContent.trim() === '投稿'), { timeout: 30000 });
-    await Promise.all([
-      page.evaluate(() => {
-        const a = [...document.querySelectorAll('a.button_top_menu')].find(e => e.textContent.trim() === '投稿');
-        if (a) a.click();
-      }),
-      page.waitForNavigation(WAIT)
-    ]);
+    const postBtn = await findMenuBtn(page, '投稿');
+    if (!postBtn) throw new Error('post button not found');
+    await Promise.all([postBtn.click(), page.waitForNavigation(WAIT)]);
     log('POSTED url=' + page.url());
 
     await browser.close();
