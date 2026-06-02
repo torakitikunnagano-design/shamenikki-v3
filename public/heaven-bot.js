@@ -46,7 +46,7 @@ app.post('/post', async (req, res) => {
     await page.setUserAgent(UA);
     page.on('dialog', async d => {
       const msg = d.message();
-      log('DIALOG:' + encodeURIComponent(msg).slice(0, 60));
+      log('DIALOG:' + encodeURIComponent(msg).slice(0, 50));
       if (msg.includes('投稿')) posted = true;
       try { await d.accept(); } catch (_) {}
     });
@@ -63,10 +63,7 @@ app.post('/post', async (req, res) => {
     if (tmp) {
       await page.waitForSelector('#picSelect', { timeout: 30000 });
       await (await page.$('#picSelect')).uploadFile(tmp);
-      await page.waitForFunction(() => {
-        return [...document.querySelectorAll('img')].some(im => /blob:|base64|diary|upload|cdn|img\.cityheaven/i.test(im.src || ''));
-      }, { timeout: 12000 }).catch(() => {});
-      await new Promise(r => setTimeout(r, 5000));
+      await new Promise(r => setTimeout(r, 10000));
       log('image set');
     }
 
@@ -82,16 +79,16 @@ app.post('/post', async (req, res) => {
     }, body || '');
     log('title/body set');
 
-    async function clickPreview() {
+    await new Promise(r => setTimeout(r, 2000));
+    let moved = false;
+    for (let i = 0; i < 5 && !moved; i++) {
+      if (i > 0) { log('preview retry ' + i); await new Promise(r => setTimeout(r, 5000)); }
       const before = page.url();
       const pv = await page.$('#previewsbmt') || await findBtn(page, t => t.includes('プレビュー')) || await findBtn(page, t => t.includes('一時保存'));
       if (!pv) throw new Error('preview button not found');
       await pv.click().catch(e => log('preview click err:' + e.message));
-      return await waitUrlChange(page, before, 15000);
+      moved = await waitUrlChange(page, before, 5000);
     }
-    await new Promise(r => setTimeout(r, 2000));
-    let moved = await clickPreview();
-    if (!moved) { log('preview retry...'); await new Promise(r => setTimeout(r, 6000)); moved = await clickPreview(); }
     log('preview moved=' + moved);
     if (!moved) throw new Error('preview did not load');
 
