@@ -1741,7 +1741,6 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
 
   const cast = casts.find((c) => c.name === castName);
   const hasCredentials = cast?.heaven_id && sessionPass; // パスはセッションのみ参照
-  const VPS_URL = "http://160.251.166.73:3000";
 
   async function handlePost() {
     setShowConfirm(false); setPosting(true);
@@ -1753,12 +1752,15 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
       formData.append("body", editDiary);
       if (imageFile) formData.append("image", imageFile);
 
-      const res = await fetch(`${VPS_URL}/post`, {
+      // HTTPSアプリ→HTTPのVPS直接fetchはMixed Contentでブロックされるため
+      // Next.jsのサーバーサイドプロキシ経由で転送する（同一オリジン）
+      const res = await fetch("/api/heaven-post", {
         method: "POST",
-        headers: { "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}` },
         body: formData,
+        // AuthorizationはAPIルート(サーバー側)で付与するためここでは不要
       });
       const data = await res.json();
+      if (!res.ok) console.error("[heaven-post]", res.status, JSON.stringify(data));
       if (data.success) { setPosted(true); setPostError(null); }
       else setPostError(data.message || "投稿に失敗しました");
     } catch (e) { setPostError("サーバーに接続できませんでした: " + e.message); }
