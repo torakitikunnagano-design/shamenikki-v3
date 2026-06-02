@@ -12,13 +12,17 @@ app.use(express.json({ limit: '20mb' }));
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const WAIT = { waitUntil: 'domcontentloaded', timeout: 60000 };
 
-async function findMenuBtn(page, text) {
-  const hs = await page.$$('a.button_top_menu');
+async function findBtn(page, matchFn) {
+  const hs = await page.$$('a, button, input[type=button], input[type=submit]');
   for (const h of hs) {
-    const t = await page.evaluate(el => (el.textContent || '').trim(), h);
-    if (t.includes(text)) return h;
+    const t = await page.evaluate(el => (el.textContent || el.value || '').trim(), h);
+    if (matchFn(t)) return h;
   }
   return null;
+}
+async function dumpButtons(page) {
+  return await page.$$eval('a, button, input[type=button], input[type=submit]', els =>
+    els.map(e => (e.textContent || e.value || '').trim()).filter(Boolean).slice(0, 50));
 }
 
 app.post('/post', async (req, res) => {
@@ -72,14 +76,16 @@ app.post('/post', async (req, res) => {
 
     log('click preview...');
     await new Promise(r => setTimeout(r, 1500));
-    const previewBtn = await findMenuBtn(page, 'プレビュー');
-    if (!previewBtn) throw new Error('preview button not found');
+    let previewBtn = await findBtn(page, t => t.includes('プレビュー'));
+    if (!previewBtn) previewBtn = await findBtn(page, t => t.includes('一時保存'));
+    if (!previewBtn) { log('btns=' + JSON.stringify(await dumpButtons(page))); throw new Error('preview button not found'); }
     await Promise.all([previewBtn.click(), page.waitForNavigation(WAIT)]);
     log('preview url=' + page.url());
 
     log('click post...');
-    const postBtn = await findMenuBtn(page, '投稿');
-    if (!postBtn) throw new Error('post button not found');
+    let postBtn = await findBtn(page, t => t === '投稿');
+    if (!postBtn) postBtn = await findBtn(page, t => t.includes('投稿') && t.length <= 4);
+    if (!postBtn) { log('btns=' + JSON.stringify(await dumpButtons(page))); throw new Error('post button not found'); }
     await Promise.all([postBtn.click(), page.waitForNavigation(WAIT)]);
     log('POSTED url=' + page.url());
 
