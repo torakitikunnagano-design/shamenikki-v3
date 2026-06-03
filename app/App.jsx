@@ -1822,12 +1822,19 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
                     alignItems: "center",
                     justifyContent: "center",
                     textAlign: "center",
-                    gap: "4px",
                     width: "100%",
+                    minHeight: "68px",
                   }}
                 >
-                  <span>{active ? "✓ " : ""}{label}</span>
-                  {sub && <span style={{ fontSize: "10px", fontWeight: "400", opacity: 0.85 }}>{sub}</span>}
+                  {/* ✓とラベルを横並びのflexで中央に */}
+                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
+                    {active && <span>✓</span>}
+                    <span>{label}</span>
+                  </span>
+                  {/* 高さを揃えるため常に描画、不要な場合は非表示 */}
+                  <span style={{ fontSize: "10px", fontWeight: "400", opacity: 0.85, marginTop: "4px", visibility: sub ? "visible" : "hidden" }}>
+                    {sub || "　"}
+                  </span>
                 </button>
               );
             })}
