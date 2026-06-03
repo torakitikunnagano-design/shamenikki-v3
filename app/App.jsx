@@ -585,8 +585,8 @@ function App() {
     { id: "guarantee", label: "保証管理", icon: "🎀" },
     { id: "cast",      label: "キャスト", icon: "👑" },
     { id: "shifts",    label: "出勤設定", icon: "🕐" },
-    { id: "ranking",   label: "ランキング", icon: "🌟" },
-    { id: "title",     label: "タイトル", icon: "✏️" },
+    // { id: "ranking", label: "ランキング", icon: "🌟" }, // 作り直し予定のため一時非表示
+    // { id: "title",   label: "タイトル",  icon: "✏️" }, // 作り直し予定のため一時非表示
     { id: "courses",   label: "コース設定", icon: "⏱️" },
     { id: "settings",  label: "設定",    icon: "⚙️" },
   ];
