@@ -1807,6 +1807,7 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
                   type="button"
                   onClick={() => setLimitedKind(value)}
                   style={{
+                    position: "relative",
                     padding: "14px 10px",
                     borderRadius: "14px",
                     border: active ? "none" : `1.5px solid ${C.border}`,
@@ -1826,13 +1827,14 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
                     minHeight: "68px",
                   }}
                 >
-                  {/* ✓とラベルを横並びのflexで中央に */}
-                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
-                    {active && <span>✓</span>}
-                    <span>{label}</span>
-                  </span>
-                  {/* 高さを揃えるため常に描画、不要な場合は非表示 */}
-                  <span style={{ fontSize: "10px", fontWeight: "400", opacity: 0.85, marginTop: "4px", visibility: sub ? "visible" : "hidden" }}>
+                  {/* ✓は左上に絶対配置 → ラベルの中央位置に影響しない */}
+                  {active && (
+                    <span style={{ position: "absolute", top: "8px", left: "10px", fontSize: "11px", lineHeight: 1 }}>✓</span>
+                  )}
+                  {/* ラベルのみ完全中央 */}
+                  <span style={{ display: "block" }}>{label}</span>
+                  {/* 高さ均等用：常に描画、subなしのボタンは非表示 */}
+                  <span style={{ fontSize: "10px", fontWeight: "400", opacity: 0.85, marginTop: "3px", visibility: sub ? "visible" : "hidden" }}>
                     {sub || "　"}
                   </span>
                 </button>
