@@ -1797,7 +1797,7 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
           <p style={{ fontSize: "11px", color: C.sub, fontWeight: "700", letterSpacing: "0.06em", marginBottom: "10px" }}>公開範囲</p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
             {[
-              { value: "00", label: "全公開", sub: null },
+              { value: "00", label: "全公開", sub: "全てのヘブンユーザーに公開" },
               { value: "02", label: "マイガール限定", sub: "マイガールにだけ公開" },
             ].map(({ value, label, sub }) => {
               const active = limitedKind === value;
