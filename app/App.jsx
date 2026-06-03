@@ -1468,16 +1468,14 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
     let sc = 0;
     try {
       // Step 2: AI採点・タイトル生成・画像分析を並列実行
-      const scoreReqPromise = textSupport
-        ? fetch("https://api.x.ai/v1/chat/completions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
-            body: JSON.stringify({
-              model: "grok-4.3", max_tokens: 1000, reasoning_effort: "none",
-              messages: [{ role: "user", content: `あなたはエンタメ業界のブログコンサルタントです。スタッフのブログ記事を分析・採点してください。\n\n【投稿ルール】\n最低文字数：${settings.min_text_length}文字 / 今回：${charCountFinal}文字 / 不足：${charShortFinal}文字\n画像必須：${settings.image_required ? "あり" : "なし"} / 画像：${imageFile ? "あり" : "なし"}\n\n必ず以下のフォーマットで返答してください：\n\n総合点：○○点\n\n投稿ルールチェック\n・文字数判定：達成 or 文字数不足\n・画像判定：達成 or 画像不足\n\n改善提案\n・\n・\n\n良い点\n・\n・\n\n改善点\n・\n・\n\n改善タイトル案\n・\n・\n\nキャラクター分析\n・\n\n【スタッフ名】${castName}\n【ブログ本文】${finalDiary}` }]
-            })
+      const scoreReqPromise = fetch("https://api.x.ai/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
+          body: JSON.stringify({
+            model: "grok-4.3", max_tokens: 1000, reasoning_effort: "none",
+            messages: [{ role: "user", content: `あなたはエンタメ業界のブログコンサルタントです。スタッフのブログ記事を分析・採点してください。\n\n【投稿ルール】\n最低文字数：${settings.min_text_length}文字 / 今回：${charCountFinal}文字 / 不足：${charShortFinal}文字\n画像必須：${settings.image_required ? "あり" : "なし"} / 画像：${imageFile ? "あり" : "なし"}\n\n必ず以下のフォーマットで返答してください：\n\n総合点：○○点\n\n投稿ルールチェック\n・文字数判定：達成 or 文字数不足\n・画像判定：達成 or 画像不足\n\n改善提案\n・\n・\n\n良い点\n・\n・\n\n改善点\n・\n・\n\n改善タイトル案\n・\n・\n\nキャラクター分析\n・\n\n【スタッフ名】${castName}\n【ブログ本文】${finalDiary}` }]
           })
-        : Promise.resolve(null);
+        });
 
       const titleGenPromise = titleAssist
         ? fetch("https://api.x.ai/v1/chat/completions", {
@@ -1535,7 +1533,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
         if (!imgRes.ok) console.error("[xAI image]", imgRes.status, JSON.stringify(imgData));
         setImageResult(imgData.choices?.[0]?.message?.content || null);
       }
-    } catch { if (textSupport) setResult("エラーが発生しました。もう一度お試しください。"); }
+    } catch { setResult("エラーが発生しました。もう一度お試しください。"); }
     finally {
       const newScore = { id: Date.now(), cast_name: castName, diary: finalDiary, result: scoreText, posted_at: autoPostedAtISO, has_image: !!imageFile, score: sc };
       setScores((prev) => [newScore, ...prev]);
@@ -1692,11 +1690,19 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
           <span style={{ fontSize: "13px", color: C.muted }}>🔒 投稿時刻は送信した瞬間に自動記録されます</span>
           {postedTime && <span style={{ marginLeft: "auto", color: C.green, fontWeight: "700", fontSize: "14px" }}>{postedTime}</span>}
         </div>
-        <Btn onClick={handleScore} loading={loading} label={loading ? "AIが分析中です…（数秒かかります）" : (textSupport || titleAssist) ? "AI採点する" : "投稿記録する"} color={C.accent} />
+        <Btn onClick={handleScore} loading={loading} label={loading ? "AIが分析中です…（数秒かかります）" : "AI採点する"} color={C.accent} />
       </div>
 
-      {/* AI採点結果（textSupport ON時のみ） */}
-      {textSupport && result && rating && (
+      {/* 採点中ローディング表示（採点開始後、結果が出るまで） */}
+      {loading && postedTime && (
+        <div style={{ ...card, textAlign: "center", padding: "32px" }}>
+          <p style={{ fontSize: "28px", marginBottom: "10px" }}>✨</p>
+          <p style={{ color: C.muted, margin: 0 }}>採点中です…少々お待ちください</p>
+        </div>
+      )}
+
+      {/* AI採点結果（手書き・AI生成どちらでも表示） */}
+      {result && rating && (
         <div style={{ display: "grid", gap: "12px" }}>
           <div style={{ ...card, display: "flex", alignItems: "center", gap: "16px", borderColor: `${rating.color}50` }}>
             <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: `${rating.color}18`, border: `2px solid ${rating.color}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", fontWeight: "700", color: rating.color, flexShrink: 0 }}>{rating.label}</div>
@@ -1726,8 +1732,8 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
         </div>
       )}
 
-      {/* ヘブン投稿（投稿記録後は常に表示） */}
-      {postedTime && (
+      {/* ヘブン投稿（採点完了後のみ表示 = 採点を見てから投稿する流れを保証） */}
+      {!loading && postedTime && (
         <HeavenPostButton castName={castName} diary={diary} title={title} result={result} casts={casts} postedTime={postedTime} imageFile={imageFile} imagePreviewUrl={imagePreviewUrl} sessionPass={sessionPass} />
       )}
     </div>
