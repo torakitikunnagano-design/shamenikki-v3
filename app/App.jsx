@@ -708,12 +708,7 @@ function App() {
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} />}
-                {mode === "admin" && page === "cast"      && (
-                  <>
-                    <CastPage casts={casts} setCasts={setCasts} scores={scores} />
-                    <ShiftsPage casts={casts} shifts={shifts} setShifts={setShifts} />
-                  </>
-                )}
+                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} />}
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
                 {mode === "admin" && page === "courses"   && <CoursesPage courses={courses} setCourses={setCourses} />}
@@ -2312,9 +2307,59 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
 }
 
 // ============================================================
+// キャスト1人分の出勤時間インライン編集
+// ============================================================
+function CastShiftSection({ castName, shifts, setShifts }) {
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const [date, setDate] = useState(today);
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    const s = shifts[`${castName}_${date}`] || {};
+    setStartTime(s.startTime || "");
+    setEndTime(s.endTime || "");
+    setSaved(false);
+  }, [date, castName, shifts]);
+
+  async function save() {
+    const key = `${castName}_${date}`;
+    const next = { ...shifts };
+    if (startTime || endTime) {
+      next[key] = { startTime: startTime || "", endTime: endTime || "" };
+      try { await supabase.from("shifts").upsert({ cast_name: castName, date, start_time: startTime || "", end_time: endTime || "" }, { onConflict: "cast_name,date" }); } catch {}
+    } else {
+      delete next[key];
+      try { await supabase.from("shifts").delete().eq("cast_name", castName).eq("date", date); } catch {}
+    }
+    setShifts(next);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  return (
+    <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: `1px solid ${C.border}` }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+        <p style={{ fontSize: "11px", color: C.blue, fontWeight: "700", margin: 0 }}>🕐 出勤時間</p>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ fontSize: "12px", padding: "4px 8px", borderRadius: "8px", border: `1px solid ${C.border}`, background: "#fff8fc", color: C.text, outline: "none" }} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+        <input type="time" value={startTime} onChange={(e) => { setStartTime(e.target.value); setSaved(false); }} style={{ ...inp, flex: 1, fontSize: "13px", padding: "8px 10px" }} />
+        <span style={{ color: C.muted, fontSize: "13px", flexShrink: 0 }}>〜</span>
+        <input type="time" value={endTime} onChange={(e) => { setEndTime(e.target.value); setSaved(false); }} style={{ ...inp, flex: 1, fontSize: "13px", padding: "8px 10px" }} />
+        <button onClick={save} style={{ padding: "8px 14px", borderRadius: "10px", border: "none", background: saved ? C.green : `linear-gradient(135deg, ${C.blue}, ${C.blue}cc)`, color: "white", fontWeight: "700", fontSize: "12px", cursor: "pointer", flexShrink: 0, boxShadow: `0 2px 8px ${C.blue}44`, transition: "background 0.2s" }}>
+          {saved ? "✓" : "保存"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // キャスト管理
 // ============================================================
-function CastPage({ casts, setCasts, scores }) {
+function CastPage({ casts, setCasts, scores, shifts, setShifts }) {
   const [modal, setModal] = useState(null);
   const [modalId, setModalId] = useState("");
   const [modalPass, setModalPass] = useState("");
@@ -2518,6 +2563,7 @@ function CastPage({ casts, setCasts, scores }) {
                   )}
                 </div>
               </div>
+              <CastShiftSection castName={c.name} shifts={shifts} setShifts={setShifts} />
             </div>
             );
           })}
