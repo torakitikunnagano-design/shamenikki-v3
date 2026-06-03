@@ -583,8 +583,8 @@ function App() {
 
   const adminNav = [
     { id: "guarantee", label: "保証管理", icon: "🎀" },
-    { id: "cast",      label: "キャスト", icon: "👑" },
-    { id: "shifts",    label: "出勤設定", icon: "🕐" },
+    { id: "cast",      label: "キャスト", icon: "👑" }, // 出勤設定を統合済み
+    // { id: "shifts",  label: "出勤設定", icon: "🕐" }, // キャストタブに統合
     // { id: "ranking", label: "ランキング", icon: "🌟" }, // 作り直し予定のため一時非表示
     // { id: "title",   label: "タイトル",  icon: "✏️" }, // 作り直し予定のため一時非表示
     { id: "courses",   label: "コース設定", icon: "⏱️" },
@@ -708,8 +708,12 @@ function App() {
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} />}
-                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} />}
-                {mode === "admin" && page === "shifts"    && <ShiftsPage casts={casts} shifts={shifts} setShifts={setShifts} />}
+                {mode === "admin" && page === "cast"      && (
+                  <>
+                    <CastPage casts={casts} setCasts={setCasts} scores={scores} />
+                    <ShiftsPage casts={casts} shifts={shifts} setShifts={setShifts} />
+                  </>
+                )}
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
                 {mode === "admin" && page === "courses"   && <CoursesPage courses={courses} setCourses={setCourses} />}
