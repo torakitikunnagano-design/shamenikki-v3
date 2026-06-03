@@ -28,6 +28,15 @@ async function waitUrlChange(page, before, ms) {
   }
   return false;
 }
+// 同一セレクタが複数ある場合に「画面に表示されている要素」だけを返す
+async function findVisible(page, selector) {
+  const handles = await page.$$(selector);
+  for (const h of handles) {
+    const visible = await page.evaluate(el => el.offsetParent !== null, h);
+    if (visible) return h;
+  }
+  return null;
+}
 
 app.post('/post', async (req, res) => {
   const { heavenId, heavenPass, title, body, imageBase64, imageType, limitedKind } = req.body || {};
@@ -113,6 +122,76 @@ app.post('/post', async (req, res) => {
     if (browser) { try { await browser.close(); } catch (_) {} }
     if (tmp && fs.existsSync(tmp)) { try { fs.unlinkSync(tmp); } catch (_) {} }
     res.json({ success: false, message: e.message });
+  }
+});
+
+// ============================================================
+// 店舗管理からキャスト一覧を吸い上げる
+// ============================================================
+app.post('/store-sync', async (req, res) => {
+  const { adminId, adminPass, shopdir } = req.body || {};
+  let browser;
+  try {
+    if (!adminId || !adminPass || !shopdir) {
+      return res.json({ ok: false, error: 'adminId, adminPass, shopdir are required' });
+    }
+
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const page = await browser.newPage();
+    page.setDefaultNavigationTimeout(60000);
+    await page.setUserAgent(UA);
+
+    // ログインページへ移動
+    await page.goto(`https://newmanager.cityheaven.net/C1Login.php?shopdir=${encodeURIComponent(shopdir)}`, WAIT);
+
+    // 表示されている #id に adminId を入力（#id が複数存在する前提）
+    const idInput = await findVisible(page, '#id');
+    if (!idInput) throw new Error('id input not found');
+    await idInput.click();
+    await idInput.type(adminId);
+
+    // 表示されている #pass に adminPass を入力（パスワードはログに出さない）
+    const passInput = await findVisible(page, '#pass');
+    if (!passInput) throw new Error('pass input not found');
+    await passInput.click();
+    await passInput.type(adminPass);
+
+    // 表示されている button[name="login"] をクリック
+    const loginBtn = await findVisible(page, 'button[name="login"]');
+    if (!loginBtn) throw new Error('login button not found');
+    await Promise.all([
+      loginBtn.click(),
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }),
+    ]);
+
+    // キャスト一覧ページへ移動
+    await page.goto(`https://newmanager.cityheaven.net/C8GirlMyPageRegist.php?shopdir=${encodeURIComponent(shopdir)}`, WAIT);
+
+    // a[href*="member_id="] を全取得 → heavenId と name を抽出・重複排除
+    const casts = await page.$$eval(
+      'a[href*="C8GirlMyPageRegist.php?member_id="]',
+      (anchors) => {
+        const seen = new Set();
+        return anchors.reduce((acc, a) => {
+          const m = (a.getAttribute('href') || '').match(/member_id=([^&]+)/);
+          if (!m) return acc;
+          const heavenId = m[1];
+          if (seen.has(heavenId)) return acc;
+          seen.add(heavenId);
+          const name = (a.textContent || '').replace(/新人/g, '').trim();
+          acc.push({ name, heavenId });
+          return acc;
+        }, []);
+      }
+    );
+
+    console.log('[store-sync] casts=' + casts.length);
+    res.json({ ok: true, casts });
+  } catch (e) {
+    console.log('[store-sync] ERROR: ' + e.message);
+    res.json({ ok: false, error: e.message });
+  } finally {
+    if (browser) { try { await browser.close(); } catch (_) {} }
   }
 });
 
