@@ -1275,6 +1275,8 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
   const [processing, setProcessing] = useState(false);
   const [rating, setRating] = useState(null);
   const [postedTime, setPostedTime] = useState(null);
+  const [titleWasAI, setTitleWasAI] = useState(false); // 今回の採点でタイトルがAI生成されたか
+  const [bodyWasAI, setBodyWasAI] = useState(false);   // 今回の採点で本文がAIリライトされたか
 
   useEffect(() => {
     return () => { if (originalPreviewUrl) URL.revokeObjectURL(originalPreviewUrl); };
@@ -1429,7 +1431,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
 
   async function handleScore() {
     if (!diary.trim()) return alert("写メ日記本文を入力してください");
-    setLoading(true); setResult(null); setRating(null); setImageResult(null);
+    setLoading(true); setResult(null); setRating(null); setImageResult(null); setTitleWasAI(false); setBodyWasAI(false);
     const autoPostedAt = new Date();
     const autoPostedAtISO = autoPostedAt.toISOString();
     const autoTimeStr = autoPostedAt.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
@@ -1455,7 +1457,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
         const rwData = await rwRes.json();
         if (!rwRes.ok) console.error("[xAI rewrite]", rwRes.status, JSON.stringify(rwData));
         const rewritten = rwData.choices?.[0]?.message?.content;
-        if (rewritten) { finalDiary = rewritten; setDiary(rewritten); }
+        if (rewritten) { finalDiary = rewritten; setDiary(rewritten); setBodyWasAI(true); }
       } catch { /* use original */ }
     }
 
@@ -1525,7 +1527,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
         const titleData = await titleRes.json();
         if (!titleRes.ok) console.error("[xAI title]", titleRes.status, JSON.stringify(titleData));
         const generated = titleData.choices?.[0]?.message?.content;
-        if (generated) setTitle(generated.trim());
+        if (generated) { setTitle(generated.trim()); setTitleWasAI(true); }
       }
 
       if (imgRes) {
@@ -1542,7 +1544,14 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
     }
   }
 
-  const sections = ["投稿ルールチェック", "改善提案", "良い点", "改善点", "改善タイトル案", "キャラクター分析"];
+  // 常に表示: 投稿ルールチェック
+  // 削除: 改善提案・良い点・改善点（画像AI分析と重複）
+  // 条件付き: 改善タイトル案(タイトルが手書きのとき) / キャラクター分析(本文が手書きのとき)
+  const sections = [
+    "投稿ルールチェック",
+    ...(!titleWasAI ? ["改善タイトル案"] : []),
+    ...(!bodyWasAI  ? ["キャラクター分析"] : []),
+  ];
   const imgStyle = { width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "12px", border: `1.5px solid ${C.border}`, display: "block", background: "#fdf0f8" };
 
   const confirmedTypeInfo = confirmedType ? TYPE_INFO[confirmedType] : null;
