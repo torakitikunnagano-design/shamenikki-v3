@@ -64,6 +64,7 @@ const initSettings = {
   after_work_min: 60,
   show_guarantee: true,
   salaryBasis: "gross",
+  no_duplicate_image: true,
 };
 
 const initCutDays = { diary: 1, late: 1, early: 1, absent: 2, complaint: 1 };
@@ -1540,7 +1541,15 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
       }
     } catch { setResult("エラーが発生しました。もう一度お試しください。"); }
     finally {
-      const newScore = { id: Date.now(), cast_name: castName, diary: finalDiary, result: scoreText, posted_at: autoPostedAtISO, has_image: !!imageFile, score: sc };
+      let imageHash = "";
+      if (imageFile) {
+        try {
+          const buf = await imageFile.arrayBuffer();
+          const hashBuf = await crypto.subtle.digest("SHA-256", buf);
+          imageHash = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+        } catch {}
+      }
+      const newScore = { id: Date.now(), cast_name: castName, diary: finalDiary, result: scoreText, posted_at: autoPostedAtISO, has_image: !!imageFile, image_hash: imageHash, score: sc };
       setScores((prev) => [newScore, ...prev]);
       try { supabase.from("scores").upsert(newScore).then(() => {}).catch(() => {}); } catch {}
       setLoading(false);
@@ -3029,6 +3038,12 @@ function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDay
             ))}
           </div>
           <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>保証プラマイ計算で「実収入」として使う金額の基準</p>
+        </div>
+
+        <div style={{ borderTop: `1.5px solid ${C.border}`, paddingTop: "16px" }}>
+          <p style={{ fontSize: "12px", color: C.muted, marginBottom: "12px", fontWeight: "700" }}>写メ日記ルール</p>
+          <Toggle checked={local.no_duplicate_image ?? true} onChange={(v) => setLocal((l) => ({ ...l, no_duplicate_image: v }))} label="期間内の同一画像の添付を禁止する" />
+          <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px", marginLeft: "54px" }}>ONにすると、同じ画像を保証期間内に2回以上使った場合に違反とみなします</p>
         </div>
 
         <div style={{ borderTop: `1.5px solid ${C.border}`, paddingTop: "16px" }}>
