@@ -2372,6 +2372,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
   const [bulkText, setBulkText] = useState("");
   const [bulkDone, setBulkDone] = useState(null);
   const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [syncMode, setSyncMode] = useState("casts"); // "casts" | "shifts"
   const [syncPass, setSyncPass] = useState("");
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
@@ -2459,34 +2460,36 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
       const data = await res.json();
       if (!res.ok || !data.casts) throw new Error(data.message || "同期に失敗しました");
 
-      const incoming = data.casts;
-      let addedCount = 0, updatedCount = 0;
-      const next = [...casts];
+      if (syncMode === "casts") {
+        const incoming = data.casts;
+        let addedCount = 0, updatedCount = 0;
+        const next = [...casts];
 
-      incoming.forEach(({ name, heavenId }) => {
-        // 1. heavenId一致 → name更新（他設定は保持）
-        const byId = next.findIndex((c) => c.heaven_id && c.heaven_id === heavenId);
-        if (byId !== -1) {
-          next[byId] = { ...next[byId], name };
-          updatedCount++;
-          return;
-        }
-        // 2. name一致 → heaven_id更新（他設定は保持）
-        const byName = next.findIndex((c) => c.name === name);
-        if (byName !== -1) {
-          next[byName] = { ...next[byName], heaven_id: heavenId };
-          updatedCount++;
-          return;
-        }
-        // 3. 新規追加
-        next.push({ name, is_active: true, work_start: "", strong: "未分析", weak: "未分析", heaven_id: heavenId, heaven_pass: "" });
-        addedCount++;
-      });
+        incoming.forEach(({ name, heavenId }) => {
+          // 1. heavenId一致 → name更新（他設定は保持）
+          const byId = next.findIndex((c) => c.heaven_id && c.heaven_id === heavenId);
+          if (byId !== -1) {
+            next[byId] = { ...next[byId], name };
+            updatedCount++;
+            return;
+          }
+          // 2. name一致 → heaven_id更新（他設定は保持）
+          const byName = next.findIndex((c) => c.name === name);
+          if (byName !== -1) {
+            next[byName] = { ...next[byName], heaven_id: heavenId };
+            updatedCount++;
+            return;
+          }
+          // 3. 新規追加
+          next.push({ name, is_active: true, work_start: "", strong: "未分析", weak: "未分析", heaven_id: heavenId, heaven_pass: "" });
+          addedCount++;
+        });
 
-      setCasts(next);
-      try { supabase.from("casts").upsert(next.map(toSupabaseCast), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
-
-      if (Array.isArray(data.shifts)) {
+        setCasts(next);
+        try { supabase.from("casts").upsert(next.map(toSupabaseCast), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
+        setSyncResult({ mode: "casts", addedCount, updatedCount, total: incoming.length });
+      } else {
+        if (!Array.isArray(data.shifts)) throw new Error("出勤データが取得できませんでした");
         setShifts((prev) => {
           const updated = { ...prev };
           data.shifts.forEach(({ name, days }) => {
@@ -2494,9 +2497,9 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
           });
           return updated;
         });
+        setSyncResult({ mode: "shifts", total: data.shifts.length });
       }
 
-      setSyncResult({ addedCount, updatedCount, total: incoming.length });
       setSyncPass("");
     } catch (e) {
       setSyncResult({ error: e.message });
@@ -2546,8 +2549,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
           <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(255,107,157,0.2)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
               <div>
-                <p style={{ fontWeight: "700", fontSize: "18px", color: C.text, margin: "0 0 4px" }}>店舗キャスト同期</p>
-                <p style={{ color: C.muted, fontSize: "12px", margin: 0 }}>VPSから最新キャスト情報を取得します</p>
+                <p style={{ fontWeight: "700", fontSize: "18px", color: C.text, margin: "0 0 4px" }}>{syncMode === "casts" ? "キャスト同期" : "出勤同期"}</p>
+                <p style={{ color: C.muted, fontSize: "12px", margin: 0 }}>{syncMode === "casts" ? "VPSから最新キャスト情報を取得します" : "VPSから最新出勤シフトを取得します"}</p>
               </div>
               <button onClick={() => { setSyncModalOpen(false); setSyncPass(""); setSyncResult(null); }} style={{ background: `${C.accent}15`, border: "none", width: "32px", height: "32px", borderRadius: "50%", fontSize: "18px", cursor: "pointer", color: C.accent, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
             </div>
@@ -2568,7 +2571,10 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
               {syncResult && !syncResult.error && (
                 <div style={{ padding: "12px 14px", borderRadius: "12px", background: `${C.green}12`, border: `1.5px solid ${C.green}40` }}>
                   <p style={{ color: C.green, fontWeight: "700", margin: "0 0 4px" }}>✅ 同期完了！</p>
-                  <p style={{ fontSize: "12px", color: C.sub, margin: 0 }}>新規追加: {syncResult.addedCount}人 / 更新: {syncResult.updatedCount}人（計{syncResult.total}人取得）</p>
+                  {syncResult.mode === "casts"
+                    ? <p style={{ fontSize: "12px", color: C.sub, margin: 0 }}>新規追加: {syncResult.addedCount}人 / 更新: {syncResult.updatedCount}人（計{syncResult.total}人取得）</p>
+                    : <p style={{ fontSize: "12px", color: C.sub, margin: 0 }}>{syncResult.total}人分の出勤シフトを更新しました</p>
+                  }
                 </div>
               )}
               <Btn onClick={doSync} loading={syncLoading} label={syncLoading ? "同期中..." : "同期する"} color={C.blue} />
@@ -2583,8 +2589,11 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
             {lbl}
           </button>
         ))}
-        <button onClick={() => { setSyncModalOpen(true); setSyncResult(null); }} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.blue}`, background: `${C.blue}15`, color: C.blue, fontWeight: "700", cursor: "pointer", fontSize: "13px", marginLeft: "auto", whiteSpace: "nowrap" }}>
-          🔄 同期
+        <button onClick={() => { setSyncMode("casts"); setSyncModalOpen(true); setSyncResult(null); }} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.blue}`, background: `${C.blue}15`, color: C.blue, fontWeight: "700", cursor: "pointer", fontSize: "13px", marginLeft: "auto", whiteSpace: "nowrap" }}>
+          👥 キャスト同期
+        </button>
+        <button onClick={() => { setSyncMode("shifts"); setSyncModalOpen(true); setSyncResult(null); }} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.green}`, background: `${C.green}15`, color: C.green, fontWeight: "700", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
+          🗓 出勤同期
         </button>
       </div>
 
