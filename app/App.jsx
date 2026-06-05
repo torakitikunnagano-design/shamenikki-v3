@@ -2368,7 +2368,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
   const [modalSaved, setModalSaved] = useState(false);
   const [guarantee, setGuarantee] = useLocalStorage("shamenikki_guarantee", {});
   const [gModal, setGModal] = useState(null); // cast name | null
-  const [gForm, setGForm] = useState({ type: "daily", dailyAmount: "", startDate: "", endDate: "" });
+  const [gForm, setGForm] = useState({ type: "total", dailyAmount: "", startDate: "", endDate: "" });
   const [gSaved, setGSaved] = useState(false);
   const [lockRefresh, setLockRefresh] = useState(0);
   const [syncLoading, setSyncLoading] = useState(null); // null | "casts" | "shifts"
@@ -2393,7 +2393,22 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
   }
   function openGuaranteeModal(castName) {
     const ex = guarantee[castName] || {};
-    setGForm({ type: ex.type || "daily", dailyAmount: ex.dailyAmount || "", startDate: ex.startDate || "", endDate: ex.endDate || "" });
+    // shifts[castName] の "M/D" 配列から開始日・終了日を自動算出（保存済み優先）
+    let autoStart = "", autoEnd = "";
+    const days = shifts[castName];
+    if (Array.isArray(days) && days.length > 0) {
+      const year = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).slice(0, 4);
+      const toYMD = (md) => { const [m, d] = md.split("/"); return `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`; };
+      const sorted = [...days].map((s) => s.date).filter(Boolean).sort((a, b) => toYMD(a) < toYMD(b) ? -1 : 1);
+      autoStart = toYMD(sorted[0]);
+      autoEnd   = toYMD(sorted[sorted.length - 1]);
+    }
+    setGForm({
+      type:        ex.type        || "total",
+      dailyAmount: ex.dailyAmount || "",
+      startDate:   ex.startDate   || autoStart,
+      endDate:     ex.endDate     || autoEnd,
+    });
     setGModal(castName);
     setGSaved(false);
   }
@@ -2534,7 +2549,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
             <div style={{ display: "grid", gap: "14px" }}>
               <Field label="保証タイプ">
                 <div style={{ display: "inline-flex", borderRadius: "10px", overflow: "hidden", border: `1.5px solid ${C.border}` }}>
-                  {[["daily", "日保証"], ["total", "トータル保証"]].map(([val, lbl]) => (
+                  {[["total", "トータル保証"], ["daily", "日保証"]].map(([val, lbl]) => (
                     <button key={val} onClick={() => setGForm((f) => ({ ...f, type: val }))} style={{ padding: "9px 16px", border: "none", background: gForm.type === val ? C.yellow : "transparent", color: gForm.type === val ? "white" : C.muted, fontWeight: "700", cursor: "pointer", fontSize: "13px", transition: "all 0.15s" }}>{lbl}</button>
                   ))}
                 </div>
