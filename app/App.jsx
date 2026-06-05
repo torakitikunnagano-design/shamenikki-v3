@@ -186,7 +186,7 @@ function App() {
   const [settings, setSettings] = useLocalStorage("shamenikki_settings", initSettings);
   const [courses, setCourses] = useLocalStorage("shamenikki_courses", initCourses);
   const [shifts, setShifts] = useLocalStorage("shamenikki_shifts", {});
-  const [syncConfig, setSyncConfig] = useLocalStorage("shamenikki_sync_config", { shopdir: "", adminId: "" });
+  const [syncConfig, setSyncConfig] = useLocalStorage("shamenikki_sync_config", { shopdir: "", adminId: "", adminPass: "" });
   const [loggedInCast, setLoggedInCast] = useState(null);
   const [sessionPass, setSessionPass] = useState(""); // ログイン中のパスをメモリのみ保持
 
@@ -2366,9 +2366,6 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
   const [modalPass, setModalPass] = useState("");
   const [modalSaved, setModalSaved] = useState(false);
   const [lockRefresh, setLockRefresh] = useState(0);
-  const [syncModalOpen, setSyncModalOpen] = useState(false);
-  const [syncMode, setSyncMode] = useState("casts"); // "casts" | "shifts"
-  const [syncPass, setSyncPass] = useState("");
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
   const [showTodayOnly, setShowTodayOnly] = useState(false);
@@ -2399,9 +2396,9 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
     try { supabase.from("casts").upsert(toSupabaseCast({ ...modal, heaven_id: modalId }), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
   }
 
-  async function doSync() {
-    if (!syncConfig?.adminId || !syncConfig?.shopdir) {
-      setSyncResult({ error: "設定画面で管理者IDと店舗ディレクトリを設定してください" });
+  async function doSync(mode) {
+    if (!syncConfig?.adminId || !syncConfig?.adminPass || !syncConfig?.shopdir) {
+      setSyncResult({ error: "設定画面で管理者ID・パスワード・shopdirを保存してください" });
       return;
     }
     setSyncLoading(true);
@@ -2410,12 +2407,12 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
       const res = await fetch("/api/store-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncPass, shopdir: syncConfig.shopdir }),
+        body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir }),
       });
       const data = await res.json();
       if (!res.ok || !data.casts) throw new Error(data.message || "同期に失敗しました");
 
-      if (syncMode === "casts") {
+      if (mode === "casts") {
         const incoming = data.casts;
         let addedCount = 0, updatedCount = 0;
         const next = [...casts];
@@ -2445,17 +2442,24 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
         setSyncResult({ mode: "casts", addedCount, updatedCount, total: incoming.length });
       } else {
         if (!Array.isArray(data.shifts)) throw new Error("出勤データが取得できませんでした");
+        // 同期データの date は "M/D" 形式 → CastShiftSection 用に "YYYY-MM-DD" キーも書く
+        const jstYear = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).slice(0, 4);
         setShifts((prev) => {
           const updated = { ...prev };
           data.shifts.forEach(({ name, days }) => {
-            if (name && Array.isArray(days)) updated[name] = days;
+            if (!name || !Array.isArray(days)) return;
+            updated[name] = days; // 今日出勤フィルタ用 (M/D 配列)
+            days.forEach(({ date, start, end }) => {
+              if (!date) return;
+              const [m, d] = date.split("/");
+              const ymd = `${jstYear}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+              updated[`${name}_${ymd}`] = { startTime: start || "", endTime: end || "" };
+            });
           });
           return updated;
         });
         setSyncResult({ mode: "shifts", total: data.shifts.length });
       }
-
-      setSyncPass("");
     } catch (e) {
       setSyncResult({ error: e.message });
     } finally {
@@ -2499,53 +2503,23 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
         </div>
       )}
 
-      {syncModalOpen && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-          <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(255,107,157,0.2)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-              <div>
-                <p style={{ fontWeight: "700", fontSize: "18px", color: C.text, margin: "0 0 4px" }}>{syncMode === "casts" ? "キャスト同期" : "出勤同期"}</p>
-                <p style={{ color: C.muted, fontSize: "12px", margin: 0 }}>{syncMode === "casts" ? "VPSから最新キャスト情報を取得します" : "VPSから最新出勤シフトを取得します"}</p>
-              </div>
-              <button onClick={() => { setSyncModalOpen(false); setSyncPass(""); setSyncResult(null); }} style={{ background: `${C.accent}15`, border: "none", width: "32px", height: "32px", borderRadius: "50%", fontSize: "18px", cursor: "pointer", color: C.accent, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
-            </div>
-            <div style={{ display: "grid", gap: "14px" }}>
-              {(!syncConfig?.adminId || !syncConfig?.shopdir) && (
-                <div style={{ padding: "12px 14px", borderRadius: "12px", background: `${C.yellow}15`, border: `1.5px solid ${C.yellow}40` }}>
-                  <p style={{ fontSize: "12px", color: C.sub, margin: 0 }}>⚠️ 設定画面で管理者IDと店舗ディレクトリを先に設定してください</p>
-                </div>
-              )}
-              <Field label="管理者パスワード">
-                <input type="password" value={syncPass} onChange={(e) => setSyncPass(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !syncLoading && doSync()} placeholder="パスワードを入力（保存されません）" style={inp} autoFocus />
-              </Field>
-              {syncResult?.error && (
-                <div style={{ padding: "12px 14px", borderRadius: "12px", background: `${C.red}12`, border: `1.5px solid ${C.red}40` }}>
-                  <p style={{ color: C.red, fontSize: "13px", margin: 0 }}>❌ {syncResult.error}</p>
-                </div>
-              )}
-              {syncResult && !syncResult.error && (
-                <div style={{ padding: "12px 14px", borderRadius: "12px", background: `${C.green}12`, border: `1.5px solid ${C.green}40` }}>
-                  <p style={{ color: C.green, fontWeight: "700", margin: "0 0 4px" }}>✅ 同期完了！</p>
-                  {syncResult.mode === "casts"
-                    ? <p style={{ fontSize: "12px", color: C.sub, margin: 0 }}>新規追加: {syncResult.addedCount}人 / 更新: {syncResult.updatedCount}人（計{syncResult.total}人取得）</p>
-                    : <p style={{ fontSize: "12px", color: C.sub, margin: 0 }}>{syncResult.total}人分の出勤シフトを更新しました</p>
-                  }
-                </div>
-              )}
-              <Btn onClick={doSync} loading={syncLoading} label={syncLoading ? "同期中..." : "同期する"} color={C.blue} />
-            </div>
-          </div>
-        </div>
-      )}
-
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
-        <button onClick={() => { setSyncMode("casts"); setSyncModalOpen(true); setSyncResult(null); }} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.blue}`, background: `${C.blue}15`, color: C.blue, fontWeight: "700", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
-          👥 キャスト同期
+        <button onClick={() => doSync("casts")} disabled={syncLoading} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.blue}`, background: syncLoading ? `${C.blue}08` : `${C.blue}15`, color: C.blue, fontWeight: "700", cursor: syncLoading ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
+          {syncLoading ? "同期中..." : "👥 キャスト同期"}
         </button>
-        <button onClick={() => { setSyncMode("shifts"); setSyncModalOpen(true); setSyncResult(null); }} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.green}`, background: `${C.green}15`, color: C.green, fontWeight: "700", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
-          🗓 出勤同期
+        <button onClick={() => doSync("shifts")} disabled={syncLoading} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.green}`, background: syncLoading ? `${C.green}08` : `${C.green}15`, color: C.green, fontWeight: "700", cursor: syncLoading ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
+          {syncLoading ? "同期中..." : "🗓 出勤同期"}
         </button>
       </div>
+      {syncResult && (
+        <div style={{ padding: "10px 14px", borderRadius: "12px", background: syncResult.error ? `${C.red}12` : `${C.green}12`, border: `1.5px solid ${syncResult.error ? C.red : C.green}40`, fontSize: "13px", color: syncResult.error ? C.red : C.green, fontWeight: "600" }}>
+          {syncResult.error
+            ? `⚠️ ${syncResult.error}`
+            : syncResult.mode === "casts"
+              ? `✅ キャスト${syncResult.total}人を同期（新規${syncResult.addedCount}人 / 更新${syncResult.updatedCount}人）`
+              : `✅ 出勤${syncResult.total}人を同期`}
+        </div>
+      )}
 
       <>
         <label style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", borderRadius: "12px", background: showTodayOnly ? `${C.blue}15` : C.surface, border: `1.5px solid ${showTodayOnly ? C.blue : C.border}`, cursor: "pointer", userSelect: "none" }}>
@@ -2812,7 +2786,7 @@ function CoursesPage({ courses, setCourses }) {
 // ============================================================
 function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig }) {
   const [local, setLocal] = useState({ ...settings, show_guarantee: settings.show_guarantee ?? true });
-  const [localSync, setLocalSync] = useState({ shopdir: syncConfig?.shopdir || "", adminId: syncConfig?.adminId || "" });
+  const [localSync, setLocalSync] = useState({ shopdir: syncConfig?.shopdir || "", adminId: syncConfig?.adminId || "", adminPass: syncConfig?.adminPass || "" });
   async function save() {
     setSettings(local); // localStorageに書き込み（useLocalStorage経由）
     setSyncConfig(localSync);
@@ -2865,11 +2839,14 @@ function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig }) {
         <div style={{ borderTop: `1.5px solid ${C.border}`, paddingTop: "16px" }}>
           <p style={{ fontSize: "12px", color: C.muted, marginBottom: "6px", fontWeight: "700" }}>店舗同期設定</p>
           <p style={{ fontSize: "11px", color: C.muted, marginBottom: "12px", lineHeight: 1.6 }}>
-            キャスト管理の「同期」ボタンで使用します。パスワードは同期時に毎回入力します。
+            キャスト管理の「同期」ボタンで使用します。保存後はボタン1つで即同期します。
           </p>
           <div style={{ display: "grid", gap: "12px" }}>
             <Field label="管理者ID">
               <input value={localSync.adminId} onChange={(e) => setLocalSync({ ...localSync, adminId: e.target.value })} placeholder="管理者IDを入力" style={inp} />
+            </Field>
+            <Field label="管理者パスワード">
+              <input type="password" value={localSync.adminPass} onChange={(e) => setLocalSync({ ...localSync, adminPass: e.target.value })} placeholder="パスワードを入力" style={inp} />
             </Field>
             <Field label="店舗ディレクトリ (shopdir)">
               <input value={localSync.shopdir} onChange={(e) => setLocalSync({ ...localSync, shopdir: e.target.value })} placeholder="例：tokyo-xxx" style={inp} />
