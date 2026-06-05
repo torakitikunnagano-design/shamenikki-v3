@@ -201,7 +201,76 @@ app.post('/store-sync', async (req, res) => {
     );
 
     console.log('[store-sync] casts=' + casts.length);
-    res.json({ ok: true, casts });
+
+    // シフト一覧ページへ移動（C9）
+    await page.goto(
+      `https://newmanager.cityheaven.net/C9ShukkinShiftList.php?shopdir=${encodeURIComponent(shopdir)}`,
+      WAIT
+    );
+
+    const shifts = await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll('tr'));
+
+      // 日付ヘッダー行を特定："6/5(金)" パターンのセルが 3 つ以上並ぶ最初の行
+      let dateCols = [];
+      let headerRowIdx = -1;
+
+      for (let ri = 0; ri < rows.length; ri++) {
+        const cells = Array.from(rows[ri].querySelectorAll('th, td'));
+        const found = [];
+        for (let ci = 0; ci < cells.length; ci++) {
+          const text = cells[ci].textContent.trim();
+          if (/^\d{1,2}\/\d{1,2}/.test(text)) {
+            const dateM = text.match(/^(\d{1,2}\/\d{1,2})/);
+            const wdM   = text.match(/\((\S)\)/);
+            found.push({ colIdx: ci, date: dateM[1], weekday: wdM ? wdM[1] : '' });
+          }
+        }
+        if (found.length >= 3) {
+          dateCols = found;
+          headerRowIdx = ri;
+          break;
+        }
+      }
+
+      if (dateCols.length === 0) return [];
+
+      const result = [];
+      for (let ri = headerRowIdx + 1; ri < rows.length; ri++) {
+        if (!rows[ri].textContent.includes('カンタン週間設定')) continue;
+
+        const cells = Array.from(rows[ri].querySelectorAll('th, td'));
+
+        // 1 列目から "新人" と "カンタン週間設定" を除去して名前を抽出
+        const rawName = cells[0] ? cells[0].textContent : '';
+        const name = rawName
+          .replace(/新人/g, '')
+          .replace(/カンタン週間設定/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (!name) continue;
+
+        const days = [];
+        for (const { colIdx, date, weekday } of dateCols) {
+          if (colIdx >= cells.length) continue;
+          const text = cells[colIdx].textContent.trim();
+
+          // "－－－" や空白はスキップ
+          if (!text || /^[－\-ー]+$/.test(text)) continue;
+
+          // 時刻抽出："出勤 10:30～02:00" 形式（全角・半角チルダ両対応）
+          const tm = text.match(/(\d{1,2}:\d{2})[～~](\d{1,2}:\d{2})/);
+          days.push({ date, weekday, start: tm ? tm[1] : '', end: tm ? tm[2] : '' });
+        }
+
+        if (days.length > 0) result.push({ name, days });
+      }
+
+      return result;
+    });
+
+    console.log('[store-sync] shifts=' + shifts.length);
+    res.json({ ok: true, casts, shifts });
   } catch (e) {
     console.log('[store-sync] ERROR: ' + e.message);
     res.json({ ok: false, error: e.message });
