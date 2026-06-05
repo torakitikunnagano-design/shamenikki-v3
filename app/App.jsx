@@ -63,6 +63,7 @@ const initSettings = {
   before_work_min: 60,
   after_work_min: 60,
   show_guarantee: true,
+  salaryBasis: "gross",
 };
 
 const initCutDays = { diary: 1, late: 1, early: 1, absent: 2, complaint: 1 };
@@ -713,7 +714,7 @@ function App() {
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} />}
-                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} />}
+                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} settings={settings} />}
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
                 {mode === "admin" && page === "courses"   && <CoursesPage courses={courses} setCourses={setCourses} />}
@@ -2364,7 +2365,7 @@ function CastShiftSection({ castName, shifts, setShifts }) {
 // ============================================================
 // キャスト管理
 // ============================================================
-function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
+function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, settings }) {
   const [modal, setModal] = useState(null);
   const [modalId, setModalId] = useState("");
   const [modalPass, setModalPass] = useState("");
@@ -2374,11 +2375,71 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
   const [gModal, setGModal] = useState(null); // cast name | null
   const [gForm, setGForm] = useState({ type: "total", dailyAmount: "", startDate: "", endDate: "" });
   const [gSaved, setGSaved] = useState(false);
+  const [cutDays] = useLocalStorage("shamenikki_cut_days", initCutDays);
   const [lockRefresh, setLockRefresh] = useState(0);
   const [syncLoading, setSyncLoading] = useState(null); // null | "casts" | "shifts"
   const [syncResult, setSyncResult] = useState(null);
   const [showTodayOnly, setShowTodayOnly] = useState(true);
   const todayKey = `${new Date().getMonth() + 1}/${new Date().getDate()}`;
+
+  function calcGuaranteeResult(castName) {
+    const g = guarantee[castName];
+    if (!g?.type || !g?.dailyAmount || !g?.startDate || !g?.endDate) return null;
+    const daily = Number(g.dailyAmount) || 0;
+    const { startDate, endDate } = g;
+    if (!startDate || !endDate || daily <= 0) return null;
+    const cast = casts.find((c) => c.name === castName);
+    const castId = cast?.heaven_id || castName;
+    let salaryRecs = [];
+    try { salaryRecs = JSON.parse(localStorage.getItem(`shamenikki_salary_${castId}`)) || []; } catch {}
+    const periodRecs = salaryRecs.filter((r) => r.date >= startDate && r.date <= endDate);
+    const basis = settings?.salaryBasis ?? "gross";
+    const earnedGross = periodRecs.reduce((s, r) => s + (basis === "net" ? (Number(r.takeHome) || 0) : (Number(r.gross) || 0)), 0);
+    const daysArr = shifts[castName];
+    const shiftDays = [];
+    if (Array.isArray(daysArr)) {
+      const year = startDate.slice(0, 4);
+      daysArr.forEach(({ date }) => {
+        if (!date) return;
+        const [m, d] = date.split("/");
+        const ymd = `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+        if (ymd >= startDate && ymd <= endDate) shiftDays.push(ymd);
+      });
+    }
+    const castViolations = (violations[castName] || []).filter(
+      (v) => v.date >= startDate && v.date <= endDate && v.type !== "diary"
+    );
+    if (g.type === "total") {
+      const workDays = shiftDays.length;
+      const guaranteeBase = daily * workDays;
+      const violationDays = castViolations.reduce((s, v) => s + (Number(cutDays?.[v.type]) || 0), 0);
+      const cutAmount = violationDays * daily;
+      const adjustedGuarantee = Math.max(0, guaranteeBase - cutAmount);
+      const supplement = Math.max(0, adjustedGuarantee - earnedGross);
+      const balance = earnedGross - adjustedGuarantee;
+      return { type: "total", daily, workDays, guaranteeBase, violationDays, cutAmount, adjustedGuarantee, earnedGross, supplement, balance };
+    } else {
+      let totalGuaranteeBase = 0;
+      let totalCutAmount = 0;
+      let totalSupplement = 0;
+      shiftDays.forEach((ymd) => {
+        const dayEarned = Number(periodRecs.find((r) => r.date === ymd)?.gross) || 0;
+        const dayViolDays = (violations[castName] || [])
+          .filter((v) => v.date === ymd && v.type !== "diary")
+          .reduce((s, v) => s + (Number(cutDays?.[v.type]) || 0), 0);
+        const dayCut = dayViolDays * daily;
+        const dayAdjusted = Math.max(0, daily - dayCut);
+        totalGuaranteeBase += daily;
+        totalCutAmount += dayCut;
+        totalSupplement += Math.max(0, dayAdjusted - dayEarned);
+      });
+      const workDays = shiftDays.length;
+      const violationDays = castViolations.reduce((s, v) => s + (Number(cutDays?.[v.type]) || 0), 0);
+      const adjustedGuarantee = Math.max(0, totalGuaranteeBase - totalCutAmount);
+      const balance = earnedGross - adjustedGuarantee;
+      return { type: "daily", daily, workDays, guaranteeBase: totalGuaranteeBase, violationDays, cutAmount: totalCutAmount, adjustedGuarantee, earnedGross, supplement: totalSupplement, balance };
+    }
+  }
 
   function resetDiagLock(c) {
     const castId = c.heaven_id || c.name;
@@ -2580,6 +2641,44 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
               <Field label="終了日">
                 <input type="date" value={gForm.endDate} onChange={(e) => setGForm((f) => ({ ...f, endDate: e.target.value }))} style={inp} />
               </Field>
+              {(() => {
+                const gr = calcGuaranteeResult(gModal);
+                if (!gr) return null;
+                const fmt = (n) => n.toLocaleString("ja-JP") + "円";
+                return (
+                  <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "12px", display: "grid", gap: "6px" }}>
+                    <p style={{ fontSize: "12px", fontWeight: "700", color: C.muted, margin: "0 0 4px" }}>計算内訳</p>
+                    <div style={{ display: "grid", gap: "5px", fontSize: "12px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: C.muted }}>保証枠（{gr.workDays}日 × {fmt(gr.daily)}）</span>
+                        <span style={{ fontWeight: "700" }}>{fmt(gr.guaranteeBase)}</span>
+                      </div>
+                      {gr.cutAmount > 0 && (
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ color: C.red }}>違反カット（{gr.violationDays}日分）</span>
+                          <span style={{ fontWeight: "700", color: C.red }}>−{fmt(gr.cutAmount)}</span>
+                        </div>
+                      )}
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: C.muted }}>調整後保証</span>
+                        <span style={{ fontWeight: "700" }}>{fmt(gr.adjustedGuarantee)}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: C.muted }}>実収入（{(settings?.salaryBasis ?? "gross") === "net" ? "手取り" : "総支給"}合計）</span>
+                        <span style={{ fontWeight: "700" }}>{fmt(gr.earnedGross)}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", borderTop: `1px solid ${C.border}`, paddingTop: "6px", marginTop: "2px" }}>
+                        <span style={{ fontWeight: "700", color: gr.supplement > 0 ? C.red : C.green }}>
+                          {gr.supplement > 0 ? "補填" : "保証クリア"}
+                        </span>
+                        <span style={{ fontWeight: "700", color: gr.supplement > 0 ? C.red : C.green }}>
+                          {gr.supplement > 0 ? fmt(gr.supplement) : `+${fmt(gr.balance)}`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
               {gSaved ? (
                 <div style={{ padding: "14px", borderRadius: "14px", background: `${C.green}15`, border: `1.5px solid ${C.green}40`, textAlign: "center" }}>
                   <p style={{ color: C.green, fontWeight: "700", margin: 0 }}>✅ 保存しました！</p>
@@ -2642,6 +2741,16 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
                   {todayShift && (
                     <p style={{ fontSize: "11px", color: C.blue, fontWeight: "700", margin: "6px 0 0" }}>本日 {todayShift.start}〜{todayShift.end}</p>
                   )}
+                  {(() => {
+                    if (!guarantee[c.name]?.dailyAmount) return null;
+                    const gr = calcGuaranteeResult(c.name);
+                    if (!gr) return null;
+                    const clr = gr.supplement > 0 ? C.red : C.green;
+                    const txt = gr.supplement > 0
+                      ? `補填 ${gr.supplement.toLocaleString("ja-JP")}円`
+                      : `保証クリア +${gr.balance.toLocaleString("ja-JP")}円`;
+                    return <p style={{ fontSize: "11px", color: clr, fontWeight: "700", margin: "4px 0 0" }}>{txt}</p>;
+                  })()}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
                   <button onClick={() => openModal(c)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.accent}40`, background: `${C.accent}12`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
@@ -2948,6 +3057,16 @@ function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDay
           <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px", paddingLeft: "54px", margin: "6px 0 0 54px" }}>
             OFFにするとキャストは保証状況を確認できません
           </p>
+        </div>
+
+        <div style={{ borderTop: `1.5px solid ${C.border}`, paddingTop: "16px" }}>
+          <p style={{ fontSize: "12px", color: C.muted, marginBottom: "10px", fontWeight: "700" }}>保証の計算基準</p>
+          <div style={{ display: "inline-flex", borderRadius: "10px", overflow: "hidden", border: `1.5px solid ${C.border}` }}>
+            {[["gross", "総支給"], ["net", "手取り"]].map(([val, lbl]) => (
+              <button key={val} onClick={() => setLocal((l) => ({ ...l, salaryBasis: val }))} style={{ padding: "9px 20px", border: "none", background: (local.salaryBasis ?? "gross") === val ? C.yellow : "transparent", color: (local.salaryBasis ?? "gross") === val ? "white" : C.muted, fontWeight: "700", cursor: "pointer", fontSize: "13px", transition: "all 0.15s" }}>{lbl}</button>
+            ))}
+          </div>
+          <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>保証プラマイ計算で「実収入」として使う金額の基準</p>
         </div>
 
         <div style={{ borderTop: `1.5px solid ${C.border}`, paddingTop: "16px" }}>
