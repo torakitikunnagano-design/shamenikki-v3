@@ -2367,6 +2367,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
   const [modalPass, setModalPass] = useState("");
   const [modalSaved, setModalSaved] = useState(false);
   const [guarantee, setGuarantee] = useLocalStorage("shamenikki_guarantee", {});
+  const [violations, setViolations] = useLocalStorage("shamenikki_violations", {});
   const [gModal, setGModal] = useState(null); // cast name | null
   const [gForm, setGForm] = useState({ type: "total", dailyAmount: "", startDate: "", endDate: "" });
   const [gSaved, setGSaved] = useState(false);
@@ -2416,6 +2417,19 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
     setGuarantee((prev) => ({ ...prev, [gModal]: { ...gForm } }));
     setGSaved(true);
     setTimeout(() => setGModal(null), 1000);
+  }
+  function addViolation(castName, type) {
+    const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+    setViolations((prev) => ({ ...prev, [castName]: [...(prev[castName] || []), { type, date: today }] }));
+  }
+  function removeLastViolation(castName, type) {
+    setViolations((prev) => {
+      const list = [...(prev[castName] || [])];
+      const idx = list.map((v) => v.type).lastIndexOf(type);
+      if (idx === -1) return prev;
+      list.splice(idx, 1);
+      return { ...prev, [castName]: list };
+    });
   }
   function openModal(c) { setModal(c); setModalId(c.heaven_id || ""); setModalPass(c.heaven_pass || ""); setModalSaved(false); }
   function saveModal() {
@@ -2642,6 +2656,22 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
                     </button>
                   )}
                 </div>
+              </div>
+              <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: `1px solid ${C.border}`, display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                {[["late", "遅刻"], ["early", "早退"], ["absent", "当日欠勤"], ["complaint", "クレーム"]].map(([type, label]) => {
+                  const count = (violations[c.name] || []).filter((v) => v.type === type).length;
+                  return (
+                    <div key={type} style={{ display: "flex", alignItems: "center", gap: "3px" }}>
+                      <button onClick={() => addViolation(c.name, type)} style={{ display: "flex", alignItems: "center", gap: "5px", padding: "5px 10px", borderRadius: "20px", border: `1.5px solid ${count > 0 ? C.red : C.border}`, background: count > 0 ? `${C.red}12` : "white", color: count > 0 ? C.red : C.muted, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
+                        {label}
+                        {count > 0 && <span style={{ background: C.red, color: "white", borderRadius: "20px", padding: "1px 6px", fontSize: "10px", fontWeight: "700", lineHeight: "1" }}>{count}</span>}
+                      </button>
+                      {count > 0 && (
+                        <button onClick={() => removeLastViolation(c.name, type)} style={{ width: "18px", height: "18px", borderRadius: "50%", border: `1px solid ${C.muted}40`, background: `${C.muted}15`, color: C.muted, cursor: "pointer", fontSize: "12px", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "700", padding: "0", lineHeight: "1" }}>−</button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               <CastShiftSection castName={c.name} shifts={shifts} setShifts={setShifts} />
             </div>
