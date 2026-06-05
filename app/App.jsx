@@ -2738,19 +2738,29 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                     {diagData?.type && <Tag label={`${diagData.type}${isLocked ? " 🔒" : ""}`} color={isLocked ? C.red : C.blue} />}
                     {guarantee[c.name]?.type && <Tag label={guarantee[c.name].type === "daily" ? "日保証" : "トータル保証"} color={C.yellow} />}
                   </div>
+                  {(() => {
+                    const g = guarantee[c.name];
+                    if (!g?.dailyAmount || !g?.endDate) return null;
+                    const gr = calcGuaranteeResult(c.name);
+                    if (!gr) return null;
+                    const todayJST = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+                    const diffDays = Math.round((new Date(g.endDate).getTime() - new Date(todayJST).getTime()) / 86400000);
+                    const daysLabel = diffDays < 0 ? "終了" : diffDays === 0 ? "残り0日（今日終了）" : `残り${diffDays}日`;
+                    const clr = gr.supplement > 0 ? C.red : C.green;
+                    const balanceTxt = gr.supplement > 0
+                      ? `補填 ${gr.supplement.toLocaleString("ja-JP")}円`
+                      : `保証クリア +${gr.balance.toLocaleString("ja-JP")}円`;
+                    return (
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", padding: "7px 12px", borderRadius: "10px", background: `${clr}12`, border: `1.5px solid ${clr}40` }}>
+                        <span style={{ fontSize: "11px", fontWeight: "700", color: diffDays < 0 ? C.muted : diffDays <= 2 ? C.red : C.text, whiteSpace: "nowrap" }}>{daysLabel}</span>
+                        <span style={{ color: C.border, fontSize: "12px" }}>|</span>
+                        <span style={{ fontSize: "12px", fontWeight: "700", color: clr }}>{balanceTxt}</span>
+                      </div>
+                    );
+                  })()}
                   {todayShift && (
                     <p style={{ fontSize: "11px", color: C.blue, fontWeight: "700", margin: "6px 0 0" }}>本日 {todayShift.start}〜{todayShift.end}</p>
                   )}
-                  {(() => {
-                    if (!guarantee[c.name]?.dailyAmount) return null;
-                    const gr = calcGuaranteeResult(c.name);
-                    if (!gr) return null;
-                    const clr = gr.supplement > 0 ? C.red : C.green;
-                    const txt = gr.supplement > 0
-                      ? `補填 ${gr.supplement.toLocaleString("ja-JP")}円`
-                      : `保証クリア +${gr.balance.toLocaleString("ja-JP")}円`;
-                    return <p style={{ fontSize: "11px", color: clr, fontWeight: "700", margin: "4px 0 0" }}>{txt}</p>;
-                  })()}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
                   <button onClick={() => openModal(c)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.accent}40`, background: `${C.accent}12`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
