@@ -261,8 +261,8 @@ app.post('/store-sync', async (req, res) => {
 
             if (!text || /^[－\-ー]+$/.test(text)) continue;
 
-            const tm = text.match(/(\d{1,2}:\d{2})[～~](\d{1,2}:\d{2})/);
-            days.push({ date, weekday, start: tm ? tm[1] : '', end: tm ? tm[2] : '' });
+            const tm = text.match(/(\d{1,2}:\d{2})\s*[〜～~]\s*(\d{1,2}:\d{2})/);
+            if (tm) days.push({ date, weekday, start: tm[1], end: tm[2] });
           }
 
           if (days.length > 0) result.push({ name, days });
