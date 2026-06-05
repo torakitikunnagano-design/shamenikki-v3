@@ -2366,7 +2366,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
   const [modalPass, setModalPass] = useState("");
   const [modalSaved, setModalSaved] = useState(false);
   const [lockRefresh, setLockRefresh] = useState(0);
-  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(null); // null | "casts" | "shifts"
   const [syncResult, setSyncResult] = useState(null);
   const [showTodayOnly, setShowTodayOnly] = useState(false);
   const todayKey = `${new Date().getMonth() + 1}/${new Date().getDate()}`;
@@ -2401,7 +2401,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
       setSyncResult({ error: "設定画面で管理者ID・パスワード・shopdirを保存してください" });
       return;
     }
-    setSyncLoading(true);
+    setSyncLoading(mode);
     setSyncResult(null);
     try {
       const res = await fetch("/api/store-sync", {
@@ -2463,7 +2463,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
     } catch (e) {
       setSyncResult({ error: e.message });
     } finally {
-      setSyncLoading(false);
+      setSyncLoading(null);
     }
   }
 
@@ -2504,11 +2504,11 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
       )}
 
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
-        <button onClick={() => doSync("casts")} disabled={syncLoading} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.blue}`, background: syncLoading ? `${C.blue}08` : `${C.blue}15`, color: C.blue, fontWeight: "700", cursor: syncLoading ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
-          {syncLoading ? "同期中..." : "👥 キャスト同期"}
+        <button onClick={() => doSync("casts")} disabled={syncLoading !== null} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.blue}`, background: syncLoading !== null ? `${C.blue}08` : `${C.blue}15`, color: C.blue, fontWeight: "700", cursor: syncLoading !== null ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
+          {syncLoading === "casts" ? "同期中..." : "👥 キャスト同期"}
         </button>
-        <button onClick={() => doSync("shifts")} disabled={syncLoading} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.green}`, background: syncLoading ? `${C.green}08` : `${C.green}15`, color: C.green, fontWeight: "700", cursor: syncLoading ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
-          {syncLoading ? "同期中..." : "🗓 出勤同期"}
+        <button onClick={() => doSync("shifts")} disabled={syncLoading !== null} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.green}`, background: syncLoading !== null ? `${C.green}08` : `${C.green}15`, color: C.green, fontWeight: "700", cursor: syncLoading !== null ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
+          {syncLoading === "shifts" ? "同期中..." : "🗓 出勤同期"}
         </button>
       </div>
       {syncResult && (
