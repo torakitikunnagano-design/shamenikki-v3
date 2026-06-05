@@ -2698,7 +2698,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                     if (!gr) return null;
                     const todayJST = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
                     const diffDays = Math.round((new Date(g.endDate).getTime() - new Date(todayJST).getTime()) / 86400000);
-                    const daysLabel = diffDays < 0 ? "終了" : diffDays === 0 ? "残り0日（今日終了）" : `残り${diffDays}日`;
+                    const daysLabel = diffDays < 0 ? "期間終了" : diffDays === 0 ? "本日最終日" : `残り${diffDays}日`;
                     const clr = gr.supplement > 0 ? C.red : C.green;
                     const balanceTxt = gr.supplement > 0
                       ? `補填 ${gr.supplement.toLocaleString("ja-JP")}円`
