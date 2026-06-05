@@ -186,6 +186,7 @@ function App() {
   const [settings, setSettings] = useLocalStorage("shamenikki_settings", initSettings);
   const [courses, setCourses] = useLocalStorage("shamenikki_courses", initCourses);
   const [shifts, setShifts] = useLocalStorage("shamenikki_shifts", {});
+  const [syncConfig, setSyncConfig] = useLocalStorage("shamenikki_sync_config", { shopdir: "", adminId: "" });
   const [loggedInCast, setLoggedInCast] = useState(null);
   const [sessionPass, setSessionPass] = useState(""); // ログイン中のパスをメモリのみ保持
 
@@ -708,11 +709,11 @@ function App() {
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} />}
-                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} />}
+                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} />}
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
                 {mode === "admin" && page === "courses"   && <CoursesPage courses={courses} setCourses={setCourses} />}
-                {mode === "admin" && page === "settings"  && <SettingsPage settings={settings} setSettings={setSettings} />}
+                {mode === "admin" && page === "settings"  && <SettingsPage settings={settings} setSettings={setSettings} syncConfig={syncConfig} setSyncConfig={setSyncConfig} />}
               </div>
             </>
           )}
@@ -2359,7 +2360,7 @@ function CastShiftSection({ castName, shifts, setShifts }) {
 // ============================================================
 // キャスト管理
 // ============================================================
-function CastPage({ casts, setCasts, scores, shifts, setShifts }) {
+function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
   const [modal, setModal] = useState(null);
   const [modalId, setModalId] = useState("");
   const [modalPass, setModalPass] = useState("");
@@ -2370,6 +2371,10 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts }) {
   const [lockRefresh, setLockRefresh] = useState(0);
   const [bulkText, setBulkText] = useState("");
   const [bulkDone, setBulkDone] = useState(null);
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [syncPass, setSyncPass] = useState("");
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
 
   function resetDiagLock(c) {
     const castId = c.heaven_id || c.name;
@@ -2436,6 +2441,57 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts }) {
     try { supabase.from("casts").upsert(toSupabaseCast({ ...modal, heaven_id: modalId }), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
   }
 
+  async function doSync() {
+    if (!syncConfig?.adminId || !syncConfig?.shopdir) {
+      setSyncResult({ error: "設定画面で管理者IDと店舗ディレクトリを設定してください" });
+      return;
+    }
+    setSyncLoading(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch("/api/store-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncPass, shopdir: syncConfig.shopdir }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.casts) throw new Error(data.message || "同期に失敗しました");
+
+      const incoming = data.casts;
+      let addedCount = 0, updatedCount = 0;
+      const next = [...casts];
+
+      incoming.forEach(({ name, heavenId }) => {
+        // 1. heavenId一致 → name更新（他設定は保持）
+        const byId = next.findIndex((c) => c.heaven_id && c.heaven_id === heavenId);
+        if (byId !== -1) {
+          next[byId] = { ...next[byId], name };
+          updatedCount++;
+          return;
+        }
+        // 2. name一致 → heaven_id更新（他設定は保持）
+        const byName = next.findIndex((c) => c.name === name);
+        if (byName !== -1) {
+          next[byName] = { ...next[byName], heaven_id: heavenId };
+          updatedCount++;
+          return;
+        }
+        // 3. 新規追加
+        next.push({ name, is_active: true, work_start: "", strong: "未分析", weak: "未分析", heaven_id: heavenId, heaven_pass: "" });
+        addedCount++;
+      });
+
+      setCasts(next);
+      try { supabase.from("casts").upsert(next.map(toSupabaseCast), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
+      setSyncResult({ addedCount, updatedCount, total: incoming.length });
+      setSyncPass("");
+    } catch (e) {
+      setSyncResult({ error: e.message });
+    } finally {
+      setSyncLoading(false);
+    }
+  }
+
   return (
     <div style={{ display: "grid", gap: "16px" }}>
       <Header title="キャスト管理" sub="得意・苦手分析と成長サポート" color={C.green} />
@@ -2472,12 +2528,51 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts }) {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+      {syncModalOpen && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(255,107,157,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+              <div>
+                <p style={{ fontWeight: "700", fontSize: "18px", color: C.text, margin: "0 0 4px" }}>店舗キャスト同期</p>
+                <p style={{ color: C.muted, fontSize: "12px", margin: 0 }}>VPSから最新キャスト情報を取得します</p>
+              </div>
+              <button onClick={() => { setSyncModalOpen(false); setSyncPass(""); setSyncResult(null); }} style={{ background: `${C.accent}15`, border: "none", width: "32px", height: "32px", borderRadius: "50%", fontSize: "18px", cursor: "pointer", color: C.accent, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+            </div>
+            <div style={{ display: "grid", gap: "14px" }}>
+              {(!syncConfig?.adminId || !syncConfig?.shopdir) && (
+                <div style={{ padding: "12px 14px", borderRadius: "12px", background: `${C.yellow}15`, border: `1.5px solid ${C.yellow}40` }}>
+                  <p style={{ fontSize: "12px", color: C.sub, margin: 0 }}>⚠️ 設定画面で管理者IDと店舗ディレクトリを先に設定してください</p>
+                </div>
+              )}
+              <Field label="管理者パスワード">
+                <input type="password" value={syncPass} onChange={(e) => setSyncPass(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !syncLoading && doSync()} placeholder="パスワードを入力（保存されません）" style={inp} autoFocus />
+              </Field>
+              {syncResult?.error && (
+                <div style={{ padding: "12px 14px", borderRadius: "12px", background: `${C.red}12`, border: `1.5px solid ${C.red}40` }}>
+                  <p style={{ color: C.red, fontSize: "13px", margin: 0 }}>❌ {syncResult.error}</p>
+                </div>
+              )}
+              {syncResult && !syncResult.error && (
+                <div style={{ padding: "12px 14px", borderRadius: "12px", background: `${C.green}12`, border: `1.5px solid ${C.green}40` }}>
+                  <p style={{ color: C.green, fontWeight: "700", margin: "0 0 4px" }}>✅ 同期完了！</p>
+                  <p style={{ fontSize: "12px", color: C.sub, margin: 0 }}>新規追加: {syncResult.addedCount}人 / 更新: {syncResult.updatedCount}人（計{syncResult.total}人取得）</p>
+                </div>
+              )}
+              <Btn onClick={doSync} loading={syncLoading} label={syncLoading ? "同期中..." : "同期する"} color={C.blue} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
         {[["list", "キャスト一覧"], ["add", "新規追加"], ["bulk", "一括登録"]].map(([t, lbl]) => (
           <button key={t} onClick={() => { setTab(t); setBulkDone(null); }} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${tab === t ? C.accent : C.border}`, background: tab === t ? `${C.accent}18` : "white", color: tab === t ? C.accent : C.muted, fontWeight: "700", cursor: "pointer", fontSize: "13px", transition: "all 0.2s" }}>
             {lbl}
           </button>
         ))}
+        <button onClick={() => { setSyncModalOpen(true); setSyncResult(null); }} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.blue}`, background: `${C.blue}15`, color: C.blue, fontWeight: "700", cursor: "pointer", fontSize: "13px", marginLeft: "auto", whiteSpace: "nowrap" }}>
+          🔄 同期
+        </button>
       </div>
 
       {tab === "add" && (
@@ -2783,10 +2878,12 @@ function CoursesPage({ courses, setCourses }) {
 // ============================================================
 // 設定
 // ============================================================
-function SettingsPage({ settings, setSettings }) {
+function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig }) {
   const [local, setLocal] = useState({ ...settings, show_guarantee: settings.show_guarantee ?? true });
+  const [localSync, setLocalSync] = useState({ shopdir: syncConfig?.shopdir || "", adminId: syncConfig?.adminId || "" });
   async function save() {
     setSettings(local); // localStorageに書き込み（useLocalStorage経由）
+    setSyncConfig(localSync);
     alert("保存しました！");
     try {
       await supabase.from("settings").upsert({
@@ -2831,6 +2928,21 @@ function SettingsPage({ settings, setSettings }) {
           <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px", paddingLeft: "54px", margin: "6px 0 0 54px" }}>
             OFFにするとキャストは保証状況を確認できません
           </p>
+        </div>
+
+        <div style={{ borderTop: `1.5px solid ${C.border}`, paddingTop: "16px" }}>
+          <p style={{ fontSize: "12px", color: C.muted, marginBottom: "6px", fontWeight: "700" }}>店舗同期設定</p>
+          <p style={{ fontSize: "11px", color: C.muted, marginBottom: "12px", lineHeight: 1.6 }}>
+            キャスト管理の「同期」ボタンで使用します。パスワードは同期時に毎回入力します。
+          </p>
+          <div style={{ display: "grid", gap: "12px" }}>
+            <Field label="管理者ID">
+              <input value={localSync.adminId} onChange={(e) => setLocalSync({ ...localSync, adminId: e.target.value })} placeholder="管理者IDを入力" style={inp} />
+            </Field>
+            <Field label="店舗ディレクトリ (shopdir)">
+              <input value={localSync.shopdir} onChange={(e) => setLocalSync({ ...localSync, shopdir: e.target.value })} placeholder="例：tokyo-xxx" style={inp} />
+            </Field>
+          </div>
         </div>
 
         <Btn onClick={save} loading={false} label="保存する" color={C.accent} />
