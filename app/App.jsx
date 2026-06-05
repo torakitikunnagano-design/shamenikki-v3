@@ -2525,7 +2525,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
       )}
 
       <>
-        <div style={{ display: "inline-flex", borderRadius: "12px", overflow: "hidden", border: `1.5px solid ${C.border}`, background: C.surface }}>
+        <div style={{ display: "inline-flex", borderRadius: "12px", overflow: "hidden", border: `1.5px solid ${C.border}`, background: C.surface, justifySelf: "start" }}>
           {[["today", "今日出勤", true], ["all", "全キャスト", false]].map(([key, label, val]) => (
             <button key={key} onClick={() => setShowTodayOnly(val)} style={{ padding: "9px 20px", border: "none", background: showTodayOnly === val ? C.blue : "transparent", color: showTodayOnly === val ? "white" : C.muted, fontWeight: "700", cursor: "pointer", fontSize: "13px", transition: "background 0.15s, color 0.15s" }}>
               {label}
