@@ -2706,7 +2706,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                     const daysClr = diffDays < 0 ? C.muted : diffDays <= 2 ? C.red : clr;
                     return (
                       <div style={{ marginTop: "10px", padding: "10px 14px", borderRadius: "12px", background: `${clr}15`, border: `2px solid ${clr}35` }}>
-                        <span style={{ display: "inline-block", fontSize: "10px", fontWeight: "700", color: daysClr, background: `${daysClr}22`, padding: "2px 9px", borderRadius: "20px", marginBottom: "5px" }}>{daysLabel}</span>
+                        <p style={{ fontSize: "14px", fontWeight: "700", color: daysClr, margin: "0 0 4px" }}>{daysLabel}</p>
                         <p style={{ fontSize: "20px", fontWeight: "700", color: clr, margin: 0, lineHeight: 1.2 }}>{balanceTxt}</p>
                       </div>
                     );
