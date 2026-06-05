@@ -65,6 +65,8 @@ const initSettings = {
   show_guarantee: true,
 };
 
+const initCutDays = { diary: 1, late: 1, early: 1, absent: 2, complaint: 1 };
+
 const initCourses = [
   { id: 1, minutes: 60 },
   { id: 2, minutes: 90 },
@@ -187,6 +189,7 @@ function App() {
   const [courses, setCourses] = useLocalStorage("shamenikki_courses", initCourses);
   const [shifts, setShifts] = useLocalStorage("shamenikki_shifts", {});
   const [syncConfig, setSyncConfig] = useLocalStorage("shamenikki_sync_config", { shopdir: "", adminId: "", adminPass: "" });
+  const [cutDays, setCutDays] = useLocalStorage("shamenikki_cut_days", initCutDays);
   const [loggedInCast, setLoggedInCast] = useState(null);
   const [sessionPass, setSessionPass] = useState(""); // ログイン中のパスをメモリのみ保持
 
@@ -714,7 +717,7 @@ function App() {
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
                 {mode === "admin" && page === "courses"   && <CoursesPage courses={courses} setCourses={setCourses} />}
-                {mode === "admin" && page === "settings"  && <SettingsPage settings={settings} setSettings={setSettings} syncConfig={syncConfig} setSyncConfig={setSyncConfig} />}
+                {mode === "admin" && page === "settings"  && <SettingsPage settings={settings} setSettings={setSettings} syncConfig={syncConfig} setSyncConfig={setSyncConfig} cutDays={cutDays} setCutDays={setCutDays} />}
               </div>
             </>
           )}
@@ -2893,12 +2896,14 @@ function CoursesPage({ courses, setCourses }) {
 // ============================================================
 // 設定
 // ============================================================
-function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig }) {
+function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDays, setCutDays }) {
   const [local, setLocal] = useState({ ...settings, show_guarantee: settings.show_guarantee ?? true });
   const [localSync, setLocalSync] = useState({ shopdir: syncConfig?.shopdir || "", adminId: syncConfig?.adminId || "", adminPass: syncConfig?.adminPass || "" });
+  const [localCut, setLocalCut] = useState({ diary: cutDays?.diary ?? 1, late: cutDays?.late ?? 1, early: cutDays?.early ?? 1, absent: cutDays?.absent ?? 2, complaint: cutDays?.complaint ?? 1 });
   async function save() {
     setSettings(local); // localStorageに書き込み（useLocalStorage経由）
     setSyncConfig(localSync);
+    setCutDays(localCut);
     alert("保存しました！");
     try {
       await supabase.from("settings").upsert({
@@ -2943,6 +2948,26 @@ function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig }) {
           <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px", paddingLeft: "54px", margin: "6px 0 0 54px" }}>
             OFFにするとキャストは保証状況を確認できません
           </p>
+        </div>
+
+        <div style={{ borderTop: `1.5px solid ${C.border}`, paddingTop: "16px" }}>
+          <p style={{ fontSize: "12px", color: C.muted, marginBottom: "12px", fontWeight: "700" }}>保証カット設定（違反1件あたりの日数）</p>
+          <div style={{ display: "grid", gap: "10px" }}>
+            {[
+              { key: "diary",     label: "写メ日記ルール違反" },
+              { key: "late",      label: "遅刻" },
+              { key: "early",     label: "早退" },
+              { key: "absent",    label: "当日欠勤" },
+              { key: "complaint", label: "クレーム" },
+            ].map(({ key, label }) => (
+              <Field key={key} label={label}>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <input type="number" min="0" value={localCut[key]} onChange={(e) => setLocalCut((prev) => ({ ...prev, [key]: Number(e.target.value) }))} style={{ ...inp, flex: 1 }} />
+                  <span style={{ color: C.muted, fontSize: "13px", whiteSpace: "nowrap" }}>日カット</span>
+                </div>
+              </Field>
+            ))}
+          </div>
         </div>
 
         <div style={{ borderTop: `1.5px solid ${C.border}`, paddingTop: "16px" }}>
