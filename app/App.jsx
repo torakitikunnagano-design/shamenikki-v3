@@ -2402,7 +2402,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       });
       const hashCounts = {};
       for (const p of periodPosts) hashCounts[p.image_hash] = (hashCounts[p.image_hash] || 0) + 1;
-      duplicateViolationCount = Object.values(hashCounts).filter((c) => c >= 2).length;
+      duplicateViolationCount = Object.values(hashCounts).some((c) => c >= 2) ? 1 : 0;
     }
 
     const totalViolations = dayViolationCount + duplicateViolationCount;
