@@ -2366,6 +2366,10 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
   const [modalId, setModalId] = useState("");
   const [modalPass, setModalPass] = useState("");
   const [modalSaved, setModalSaved] = useState(false);
+  const [guarantee, setGuarantee] = useLocalStorage("shamenikki_guarantee", {});
+  const [gModal, setGModal] = useState(null); // cast name | null
+  const [gForm, setGForm] = useState({ type: "daily", dailyAmount: "", startDate: "", endDate: "" });
+  const [gSaved, setGSaved] = useState(false);
   const [lockRefresh, setLockRefresh] = useState(0);
   const [syncLoading, setSyncLoading] = useState(null); // null | "casts" | "shifts"
   const [syncResult, setSyncResult] = useState(null);
@@ -2386,6 +2390,17 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
     if (toggled) {
       try { supabase.from("casts").upsert(toSupabaseCast(toggled), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
     }
+  }
+  function openGuaranteeModal(castName) {
+    const ex = guarantee[castName] || {};
+    setGForm({ type: ex.type || "daily", dailyAmount: ex.dailyAmount || "", startDate: ex.startDate || "", endDate: ex.endDate || "" });
+    setGModal(castName);
+    setGSaved(false);
+  }
+  function saveGuaranteeModal() {
+    setGuarantee((prev) => ({ ...prev, [gModal]: { ...gForm } }));
+    setGSaved(true);
+    setTimeout(() => setGModal(null), 1000);
   }
   function openModal(c) { setModal(c); setModalId(c.heaven_id || ""); setModalPass(c.heaven_pass || ""); setModalSaved(false); }
   function saveModal() {
@@ -2506,6 +2521,45 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
         </div>
       )}
 
+      {gModal && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(255,107,157,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+              <div>
+                <p style={{ fontWeight: "700", fontSize: "18px", color: C.text, margin: "0 0 4px" }}>{gModal}</p>
+                <p style={{ color: C.yellow, fontSize: "12px", margin: 0 }}>保証設定</p>
+              </div>
+              <button onClick={() => setGModal(null)} style={{ background: `${C.accent}15`, border: "none", width: "32px", height: "32px", borderRadius: "50%", fontSize: "18px", cursor: "pointer", color: C.accent, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+            </div>
+            <div style={{ display: "grid", gap: "14px" }}>
+              <Field label="保証タイプ">
+                <div style={{ display: "inline-flex", borderRadius: "10px", overflow: "hidden", border: `1.5px solid ${C.border}` }}>
+                  {[["daily", "日保証"], ["total", "トータル保証"]].map(([val, lbl]) => (
+                    <button key={val} onClick={() => setGForm((f) => ({ ...f, type: val }))} style={{ padding: "9px 16px", border: "none", background: gForm.type === val ? C.yellow : "transparent", color: gForm.type === val ? "white" : C.muted, fontWeight: "700", cursor: "pointer", fontSize: "13px", transition: "all 0.15s" }}>{lbl}</button>
+                  ))}
+                </div>
+              </Field>
+              <Field label="日保証額（円/日）">
+                <input type="number" value={gForm.dailyAmount} onChange={(e) => setGForm((f) => ({ ...f, dailyAmount: e.target.value }))} placeholder="例：10000" style={inp} inputMode="numeric" />
+              </Field>
+              <Field label="開始日">
+                <input type="date" value={gForm.startDate} onChange={(e) => setGForm((f) => ({ ...f, startDate: e.target.value }))} style={inp} />
+              </Field>
+              <Field label="終了日">
+                <input type="date" value={gForm.endDate} onChange={(e) => setGForm((f) => ({ ...f, endDate: e.target.value }))} style={inp} />
+              </Field>
+              {gSaved ? (
+                <div style={{ padding: "14px", borderRadius: "14px", background: `${C.green}15`, border: `1.5px solid ${C.green}40`, textAlign: "center" }}>
+                  <p style={{ color: C.green, fontWeight: "700", margin: 0 }}>✅ 保存しました！</p>
+                </div>
+              ) : (
+                <Btn onClick={saveGuaranteeModal} loading={false} label="保存する" color={C.yellow} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
         <button onClick={() => doSync("casts")} disabled={syncLoading !== null} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.blue}`, background: syncLoading !== null ? `${C.blue}08` : `${C.blue}15`, color: C.blue, fontWeight: "700", cursor: syncLoading !== null ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
           {syncLoading === "casts" ? "同期中..." : "👥 キャスト同期"}
@@ -2551,6 +2605,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
                     <Tag label={`苦手：${c.weak}`} color={C.yellow} />
                     {c.heaven_id ? <Tag label="ヘブン✓" color={C.accent} /> : <Tag label="ヘブン未設定" color={C.muted} />}
                     {diagData?.type && <Tag label={`${diagData.type}${isLocked ? " 🔒" : ""}`} color={isLocked ? C.red : C.blue} />}
+                    {guarantee[c.name]?.type && <Tag label={guarantee[c.name].type === "daily" ? "日保証" : "トータル保証"} color={C.yellow} />}
                   </div>
                   {todayShift && (
                     <p style={{ fontSize: "11px", color: C.blue, fontWeight: "700", margin: "6px 0 0" }}>本日 {todayShift.start}〜{todayShift.end}</p>
@@ -2559,6 +2614,9 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
                   <button onClick={() => openModal(c)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.accent}40`, background: `${C.accent}12`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     ID設定
+                  </button>
+                  <button onClick={() => openGuaranteeModal(c.name)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}12`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                    保証設定
                   </button>
                   <button onClick={() => toggle(c.name)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${c.is_active ? C.red : C.green}40`, background: `${c.is_active ? C.red : C.green}12`, color: c.is_active ? C.red : C.green, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
                     {c.is_active ? "停止" : "再開"}
