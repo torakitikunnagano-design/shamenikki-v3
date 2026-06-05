@@ -714,7 +714,7 @@ function App() {
                 {mode === "cast" && !showShindan && page === "salary"      && <SalaryPage loggedInCast={loggedInCast} casts={casts} courses={courses} shifts={shifts} />}
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
-                {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} />}
+                {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} shifts={shifts} cutDays={cutDays} />}
                 {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} settings={settings} />}
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
@@ -2325,6 +2325,123 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
 // キャスト1人分の出勤時間インライン編集
 // ============================================================
 // ============================================================
+// 保証計算ヘルパー（CastPage / GuaranteePage から共用）
+// ============================================================
+function calcDiaryViolations(castName, startDate, endDate, shiftDays, ctx) {
+  const { scores, settings, shifts } = ctx;
+  const goal          = settings?.daily_post_goal   ?? 5;
+  const repeatLimitMs = (settings?.repeat_limit_min ?? 60) * 60000;
+  const minLen        = settings?.min_text_length   ?? 100;
+  const imgRequired   = settings?.image_required    ?? true;
+  const beforeMin     = settings?.before_work_min   ?? 60;
+  const afterMin      = settings?.after_work_min    ?? 60;
+  const noDuplicate   = settings?.no_duplicate_image ?? true;
+
+  function toMins(t) { const p = t.split(":"); return Number(p[0]) * 60 + (Number(p[1]) || 0); }
+  function getJSTMins(iso) { const jstMs = new Date(iso).getTime() + 9 * 3600000; return Math.floor((jstMs / 60000) % 1440); }
+
+  let dayViolationCount = 0;
+  for (const ymd of shiftDays) {
+    const dayPosts = scores.filter((s) => {
+      if (s.cast_name !== castName) return false;
+      try { return new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) === ymd; } catch { return false; }
+    });
+    if (dayPosts.length === 0) continue;
+    let filteredPosts = dayPosts;
+    const si = shifts[`${castName}_${ymd}`];
+    if (si?.startTime && si?.endTime) {
+      const rawS = toMins(si.startTime), rawE = toMins(si.endTime);
+      const winS = rawS - beforeMin, winE = rawE + afterMin;
+      const overnight = rawE < rawS;
+      filteredPosts = dayPosts.filter((s) => {
+        try { const pm = getJSTMins(s.posted_at); return overnight ? (pm >= winS || pm <= winE) : (pm >= winS && pm <= winE); }
+        catch { return true; }
+      });
+    }
+    const validPosts = filteredPosts.filter((s) => {
+      if ((s.diary?.length ?? 0) < minLen) return false;
+      if (imgRequired && !s.has_image) return false;
+      return true;
+    });
+    const sorted = [...validPosts].sort((a, b) => new Date(a.posted_at) - new Date(b.posted_at));
+    let count = 0, last = 0;
+    for (const p of sorted) {
+      try { const t = new Date(p.posted_at).getTime(); if (count === 0 || t - last >= repeatLimitMs) { count++; last = t; } } catch {}
+    }
+    if (count < goal) dayViolationCount++;
+  }
+  let duplicateViolationCount = 0;
+  if (noDuplicate) {
+    const periodPosts = scores.filter((s) => {
+      if (s.cast_name !== castName || !s.image_hash) return false;
+      try { const d = new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }); return d >= startDate && d <= endDate; } catch { return false; }
+    });
+    const hashCounts = {};
+    for (const p of periodPosts) hashCounts[p.image_hash] = (hashCounts[p.image_hash] || 0) + 1;
+    duplicateViolationCount = Object.values(hashCounts).some((c) => c >= 2) ? 1 : 0;
+  }
+  const totalViolations = dayViolationCount + duplicateViolationCount;
+  return { dayViolationCount, duplicateViolationCount, totalViolations };
+}
+
+function calcGuaranteeResult(castName, ctx) {
+  const { casts, guarantee, violations, cutDays, shifts, settings, scores } = ctx;
+  const g = guarantee[castName];
+  if (!g?.type || !g?.dailyAmount || !g?.startDate || !g?.endDate) return null;
+  const daily = Number(g.dailyAmount) || 0;
+  const { startDate, endDate } = g;
+  if (!startDate || !endDate || daily <= 0) return null;
+  const cast = casts.find((c) => c.name === castName);
+  const castId = cast?.heaven_id || castName;
+  let salaryRecs = [];
+  try { salaryRecs = JSON.parse(localStorage.getItem(`shamenikki_salary_${castId}`)) || []; } catch {}
+  const periodRecs = salaryRecs.filter((r) => r.date >= startDate && r.date <= endDate);
+  const basis = settings?.salaryBasis ?? "gross";
+  const earnedGross = periodRecs.reduce((s, r) => s + (basis === "net" ? (Number(r.takeHome) || 0) : (Number(r.gross) || 0)), 0);
+  const daysArr = shifts[castName];
+  const shiftDays = [];
+  if (Array.isArray(daysArr)) {
+    const year = startDate.slice(0, 4);
+    daysArr.forEach(({ date }) => {
+      if (!date) return;
+      const [m, d] = date.split("/");
+      const ymd = `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+      if (ymd >= startDate && ymd <= endDate) shiftDays.push(ymd);
+    });
+  }
+  const castViolations = (violations[castName] || []).filter(
+    (v) => v.date >= startDate && v.date <= endDate && v.type !== "diary"
+  );
+  const { dayViolationCount, duplicateViolationCount, totalViolations: diaryViolCount } = calcDiaryViolations(castName, startDate, endDate, shiftDays, ctx);
+  const diaryViolDays = diaryViolCount * (Number(cutDays?.diary) || 0);
+  const workDays = shiftDays.length;
+  const guaranteeBase = daily * workDays;
+  const manualViolDays = castViolations.reduce((s, v) => s + (Number(cutDays?.[v.type]) || 0), 0);
+  const violationDays = manualViolDays + diaryViolDays;
+  if (g.type === "total") {
+    const cutAmount = violationDays * daily;
+    const adjustedGuarantee = Math.max(0, guaranteeBase - cutAmount);
+    const supplement = Math.max(0, adjustedGuarantee - earnedGross);
+    const balance = earnedGross - adjustedGuarantee;
+    return { type: "total", daily, workDays, guaranteeBase, manualViolDays, diaryViolCount, diaryViolDays, dayViolationCount, duplicateViolationCount, violationDays, cutAmount, adjustedGuarantee, earnedGross, supplement, balance, startDate, endDate };
+  } else {
+    let totalCutAmount = 0;
+    shiftDays.forEach((ymd) => {
+      const dayViolDaysManual = (violations[castName] || [])
+        .filter((v) => v.date === ymd && v.type !== "diary")
+        .reduce((s, v) => s + (Number(cutDays?.[v.type]) || 0), 0);
+      totalCutAmount += dayViolDaysManual * daily;
+    });
+    totalCutAmount += diaryViolDays * daily;
+    const cutAmount = totalCutAmount;
+    const adjustedGuarantee = Math.max(0, guaranteeBase - cutAmount);
+    const supplement = Math.max(0, adjustedGuarantee - earnedGross);
+    const balance = earnedGross - adjustedGuarantee;
+    return { type: "daily", daily, workDays, guaranteeBase, manualViolDays, diaryViolCount, diaryViolDays, dayViolationCount, duplicateViolationCount, violationDays, cutAmount, adjustedGuarantee, earnedGross, supplement, balance, startDate, endDate };
+  }
+}
+
+// ============================================================
 // キャスト管理
 // ============================================================
 function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, settings }) {
@@ -2344,127 +2461,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const [showTodayOnly, setShowTodayOnly] = useState(true);
   const todayKey = `${new Date().getMonth() + 1}/${new Date().getDate()}`;
 
-  function calcDiaryViolations(castName, startDate, endDate, shiftDays) {
-    const goal         = settings?.daily_post_goal  ?? 5;
-    const repeatLimitMs = (settings?.repeat_limit_min ?? 60) * 60000;
-    const minLen       = settings?.min_text_length  ?? 100;
-    const imgRequired  = settings?.image_required   ?? true;
-    const beforeMin    = settings?.before_work_min  ?? 60;
-    const afterMin     = settings?.after_work_min   ?? 60;
-    const noDuplicate  = settings?.no_duplicate_image ?? true;
-
-    function toMins(t) { const p = t.split(":"); return Number(p[0]) * 60 + (Number(p[1]) || 0); }
-    function getJSTMins(iso) { const jstMs = new Date(iso).getTime() + 9 * 3600000; return Math.floor((jstMs / 60000) % 1440); }
-
-    let dayViolationCount = 0;
-    for (const ymd of shiftDays) {
-      const dayPosts = scores.filter((s) => {
-        if (s.cast_name !== castName) return false;
-        try { return new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) === ymd; } catch { return false; }
-      });
-      if (dayPosts.length === 0) continue; // データなし → 安全側でスキップ
-
-      // 時間帯フィルタ（シフト時間が分かる日のみ）
-      let filteredPosts = dayPosts;
-      const si = shifts[`${castName}_${ymd}`];
-      if (si?.startTime && si?.endTime) {
-        const rawS = toMins(si.startTime), rawE = toMins(si.endTime);
-        const winS = rawS - beforeMin, winE = rawE + afterMin;
-        const overnight = rawE < rawS;
-        filteredPosts = dayPosts.filter((s) => {
-          try { const pm = getJSTMins(s.posted_at); return overnight ? (pm >= winS || pm <= winE) : (pm >= winS && pm <= winE); }
-          catch { return true; }
-        });
-      }
-
-      // 内容フィルタ（文字数・画像）
-      const validPosts = filteredPosts.filter((s) => {
-        if ((s.diary?.length ?? 0) < minLen) return false;
-        if (imgRequired && !s.has_image) return false;
-        return true;
-      });
-
-      // 連投除外（countValid）
-      const sorted = [...validPosts].sort((a, b) => new Date(a.posted_at) - new Date(b.posted_at));
-      let count = 0, last = 0;
-      for (const p of sorted) {
-        try { const t = new Date(p.posted_at).getTime(); if (count === 0 || t - last >= repeatLimitMs) { count++; last = t; } } catch {}
-      }
-      if (count < goal) dayViolationCount++;
-    }
-
-    // 同一画像違反（期間全体）
-    let duplicateViolationCount = 0;
-    if (noDuplicate) {
-      const periodPosts = scores.filter((s) => {
-        if (s.cast_name !== castName || !s.image_hash) return false;
-        try { const d = new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }); return d >= startDate && d <= endDate; } catch { return false; }
-      });
-      const hashCounts = {};
-      for (const p of periodPosts) hashCounts[p.image_hash] = (hashCounts[p.image_hash] || 0) + 1;
-      duplicateViolationCount = Object.values(hashCounts).some((c) => c >= 2) ? 1 : 0;
-    }
-
-    const totalViolations = dayViolationCount + duplicateViolationCount;
-    return { dayViolationCount, duplicateViolationCount, totalViolations };
-  }
-
-  function calcGuaranteeResult(castName) {
-    const g = guarantee[castName];
-    if (!g?.type || !g?.dailyAmount || !g?.startDate || !g?.endDate) return null;
-    const daily = Number(g.dailyAmount) || 0;
-    const { startDate, endDate } = g;
-    if (!startDate || !endDate || daily <= 0) return null;
-    const cast = casts.find((c) => c.name === castName);
-    const castId = cast?.heaven_id || castName;
-    let salaryRecs = [];
-    try { salaryRecs = JSON.parse(localStorage.getItem(`shamenikki_salary_${castId}`)) || []; } catch {}
-    const periodRecs = salaryRecs.filter((r) => r.date >= startDate && r.date <= endDate);
-    const basis = settings?.salaryBasis ?? "gross";
-    const earnedGross = periodRecs.reduce((s, r) => s + (basis === "net" ? (Number(r.takeHome) || 0) : (Number(r.gross) || 0)), 0);
-    const daysArr = shifts[castName];
-    const shiftDays = [];
-    if (Array.isArray(daysArr)) {
-      const year = startDate.slice(0, 4);
-      daysArr.forEach(({ date }) => {
-        if (!date) return;
-        const [m, d] = date.split("/");
-        const ymd = `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-        if (ymd >= startDate && ymd <= endDate) shiftDays.push(ymd);
-      });
-    }
-    const castViolations = (violations[castName] || []).filter(
-      (v) => v.date >= startDate && v.date <= endDate && v.type !== "diary"
-    );
-    const { dayViolationCount, duplicateViolationCount, totalViolations: diaryViolCount } = calcDiaryViolations(castName, startDate, endDate, shiftDays);
-    const diaryViolDays = diaryViolCount * (Number(cutDays?.diary) || 0);
-    const workDays = shiftDays.length;
-    const guaranteeBase = daily * workDays;
-    const manualViolDays = castViolations.reduce((s, v) => s + (Number(cutDays?.[v.type]) || 0), 0);
-    const violationDays = manualViolDays + diaryViolDays;
-
-    if (g.type === "total") {
-      const cutAmount = violationDays * daily;
-      const adjustedGuarantee = Math.max(0, guaranteeBase - cutAmount);
-      const supplement = Math.max(0, adjustedGuarantee - earnedGross);
-      const balance = earnedGross - adjustedGuarantee;
-      return { type: "total", daily, workDays, guaranteeBase, manualViolDays, diaryViolCount, diaryViolDays, dayViolationCount, duplicateViolationCount, violationDays, cutAmount, adjustedGuarantee, earnedGross, supplement, balance };
-    } else {
-      let totalCutAmount = 0;
-      shiftDays.forEach((ymd) => {
-        const dayViolDaysManual = (violations[castName] || [])
-          .filter((v) => v.date === ymd && v.type !== "diary")
-          .reduce((s, v) => s + (Number(cutDays?.[v.type]) || 0), 0);
-        totalCutAmount += dayViolDaysManual * daily;
-      });
-      totalCutAmount += diaryViolDays * daily;
-      const cutAmount = totalCutAmount;
-      const adjustedGuarantee = Math.max(0, guaranteeBase - cutAmount);
-      const supplement = Math.max(0, adjustedGuarantee - earnedGross);
-      const balance = earnedGross - adjustedGuarantee;
-      return { type: "daily", daily, workDays, guaranteeBase, manualViolDays, diaryViolCount, diaryViolDays, dayViolationCount, duplicateViolationCount, violationDays, cutAmount, adjustedGuarantee, earnedGross, supplement, balance };
-    }
-  }
+  const guaranteeCtx = { casts, guarantee, violations, cutDays, shifts, settings, scores };
 
   function resetDiagLock(c) {
     const castId = c.heaven_id || c.name;
@@ -2667,7 +2664,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                 <input type="date" value={gForm.endDate} onChange={(e) => setGForm((f) => ({ ...f, endDate: e.target.value }))} style={inp} />
               </Field>
               {(() => {
-                const gr = calcGuaranteeResult(gModal);
+                const gr = calcGuaranteeResult(gModal, guaranteeCtx);
                 if (!gr) return null;
                 const fmt = (n) => n.toLocaleString("ja-JP") + "円";
                 return (
@@ -2778,7 +2775,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   {(() => {
                     const g = guarantee[c.name];
                     if (!g?.dailyAmount || !g?.endDate) return null;
-                    const gr = calcGuaranteeResult(c.name);
+                    const gr = calcGuaranteeResult(c.name, guaranteeCtx);
                     if (!gr) return null;
                     const todayJST = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
                     const diffDays = Math.round((new Date(g.endDate).getTime() - new Date(todayJST).getTime()) / 86400000);
@@ -2844,10 +2841,32 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
 // ============================================================
 // 保証管理（管理者）
 // ============================================================
-function GuaranteePage({ casts, scores, settings }) {
-  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
-  const todayPosts = scores.filter((s) => new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) === today);
+function GuaranteePage({ casts, scores, settings, shifts, cutDays }) {
+  const [guarantee] = useLocalStorage("shamenikki_guarantee", {});
+  const [violations] = useLocalStorage("shamenikki_violations", {});
+  const [detailCast, setDetailCast] = useState(null);
 
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const todayKey = `${new Date().getMonth() + 1}/${new Date().getDate()}`;
+  const fmt = (n) => n.toLocaleString("ja-JP") + "円";
+  const toMD = (ymd) => { const [, m, d] = ymd.split("-"); return `${Number(m)}/${Number(d)}`; };
+
+  // 保証計算コンテキスト
+  const ctx = { casts, guarantee, violations, cutDays, shifts, settings, scores };
+
+  // 保証設定があるキャストの計算結果
+  const guaranteeRows = casts
+    .map((c) => ({ name: c.name, gr: calcGuaranteeResult(c.name, ctx) }))
+    .filter((r) => r.gr !== null)
+    .sort((a, b) => b.gr.supplement - a.gr.supplement);
+
+  const totalTarget    = guaranteeRows.length;
+  const totalSupplement = guaranteeRows.reduce((s, r) => s + r.gr.supplement, 0);
+  const supplementCount = guaranteeRows.filter((r) => r.gr.supplement > 0).length;
+  const clearCount      = totalTarget - supplementCount;
+
+  // 今日の投稿達成判定（既存の保証条件チェック）
+  const todayPosts = scores.filter((s) => new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) === today);
   function countValid(posts) {
     const sorted = [...posts].sort((a, b) => new Date(a.posted_at) - new Date(b.posted_at));
     let count = 0, last = 0;
@@ -2857,8 +2876,7 @@ function GuaranteePage({ casts, scores, settings }) {
     }
     return count;
   }
-
-  const rows = casts.filter((c) => c.is_active).map((c) => {
+  const diaryRows = casts.filter((c) => c.is_active && Array.isArray(shifts[c.name]) && shifts[c.name].some((s) => s.date === todayKey)).map((c) => {
     const posts = todayPosts.filter((p) => p.cast_name === c.name);
     const valid = countValid(posts);
     const latest = posts[posts.length - 1];
@@ -2869,13 +2887,111 @@ function GuaranteePage({ casts, scores, settings }) {
     const countOk = valid >= settings.daily_post_goal;
     return { ...c, valid, textLen, hasImg, textOk, imgOk, countOk, ok: countOk && textOk && imgOk };
   });
+  const doneCount = diaryRows.filter((r) => r.ok).length;
 
-  const doneCount = rows.filter((r) => r.ok).length;
+  // 詳細モーダル用データ
+  const detailGr = detailCast ? calcGuaranteeResult(detailCast, ctx) : null;
 
   return (
     <div style={{ display: "grid", gap: "16px" }}>
-      <Header title="保証条件チェック" sub="保証達成状況の自動判定" color={C.yellow} />
+      <Header title="保証管理" sub="保証プラマイと今日の達成状況" color={C.yellow} />
 
+      {/* 保証ダッシュボード */}
+      {totalTarget > 0 && (
+        <>
+          <div style={{ ...card, borderColor: `${C.yellow}40`, background: `${C.yellow}06` }}>
+            <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, marginBottom: "10px", letterSpacing: "0.06em" }}>店全体サマリー</p>
+            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px 16px", alignItems: "center" }}>
+              <span style={{ fontSize: "12px", color: C.muted }}>保証対象</span>
+              <span style={{ fontWeight: "700", fontSize: "14px" }}>{totalTarget}人</span>
+              <span style={{ fontSize: "12px", color: C.muted }}>店の補填合計</span>
+              <span style={{ fontWeight: "700", fontSize: "24px", color: totalSupplement > 0 ? C.red : C.green }}>
+                {totalSupplement > 0 ? fmt(totalSupplement) : "補填なし"}
+              </span>
+              <span style={{ fontSize: "12px", color: C.muted }}>内訳</span>
+              <span style={{ fontSize: "12px" }}>
+                <span style={{ color: C.red, fontWeight: "700" }}>補填 {supplementCount}人</span>
+                <span style={{ color: C.muted, margin: "0 6px" }}>／</span>
+                <span style={{ color: C.green, fontWeight: "700" }}>クリア {clearCount}人</span>
+              </span>
+            </div>
+          </div>
+
+          {/* キャスト一覧（補填多い順） */}
+          <div style={{ display: "grid", gap: "8px" }}>
+            {guaranteeRows.map(({ name, gr }) => {
+              const diffDays = Math.round((new Date(gr.endDate).getTime() - new Date(today).getTime()) / 86400000);
+              const daysLabel = diffDays < 0 ? "期間終了" : diffDays === 0 ? "本日最終日" : `残り${diffDays}日`;
+              const daysClr = diffDays < 0 ? C.muted : diffDays <= 2 ? C.red : C.text;
+              const isSuppl = gr.supplement > 0;
+              const clr = isSuppl ? C.red : C.green;
+              return (
+                <div key={name} onClick={() => setDetailCast(detailCast === name ? null : name)}
+                  style={{ ...card, borderColor: `${clr}35`, cursor: "pointer", userSelect: "none" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                        <p style={{ fontWeight: "700", fontSize: "15px", margin: 0 }}>{name}</p>
+                        <span style={{ fontSize: "10px", color: daysClr, fontWeight: "700", background: `${daysClr}18`, padding: "2px 8px", borderRadius: "20px" }}>{daysLabel}</span>
+                      </div>
+                      <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 8px" }}>{toMD(gr.startDate)}〜{toMD(gr.endDate)}</p>
+                      <p style={{ fontSize: "20px", fontWeight: "700", color: clr, margin: "0 0 4px", lineHeight: 1.2 }}>
+                        {isSuppl ? `補填 ${fmt(gr.supplement)}` : `クリア +${fmt(gr.balance)}`}
+                      </p>
+                      <p style={{ fontSize: "11px", color: C.muted, margin: 0 }}>
+                        実収入 {fmt(gr.earnedGross)} ／ 調整後保証 {fmt(gr.adjustedGuarantee)}
+                      </p>
+                    </div>
+                    <span style={{ fontSize: "16px", color: C.muted, marginLeft: "8px", marginTop: "4px" }}>{detailCast === name ? "▲" : "▼"}</span>
+                  </div>
+
+                  {/* インライン内訳（タップで展開） */}
+                  {detailCast === name && detailGr && (
+                    <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: `1px solid ${C.border}`, display: "grid", gap: "5px", fontSize: "12px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: C.muted }}>保証枠（{gr.workDays}日 × {fmt(gr.daily)}）</span>
+                        <span style={{ fontWeight: "700" }}>{fmt(gr.guaranteeBase)}</span>
+                      </div>
+                      {gr.cutAmount > 0 && (
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ color: C.red }}>違反カット合計（{gr.violationDays}日分）</span>
+                          <span style={{ fontWeight: "700", color: C.red }}>−{fmt(gr.cutAmount)}</span>
+                        </div>
+                      )}
+                      {gr.manualViolDays > 0 && (
+                        <div style={{ paddingLeft: "10px" }}>
+                          <span style={{ color: C.red, fontSize: "11px" }}>└ 手動違反（{gr.manualViolDays}日分）</span>
+                        </div>
+                      )}
+                      {gr.diaryViolDays > 0 && (
+                        <div style={{ paddingLeft: "10px" }}>
+                          <span style={{ color: C.red, fontSize: "11px" }}>└ 写メ日記違反（{gr.diaryViolCount}件{gr.duplicateViolationCount > 0 ? `・同一画像含む` : ""}→ {gr.diaryViolDays}日カット）</span>
+                        </div>
+                      )}
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: C.muted }}>調整後保証</span>
+                        <span style={{ fontWeight: "700" }}>{fmt(gr.adjustedGuarantee)}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: C.muted }}>実収入</span>
+                        <span style={{ fontWeight: "700" }}>{fmt(gr.earnedGross)}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", borderTop: `1px solid ${C.border}`, paddingTop: "6px" }}>
+                        <span style={{ fontWeight: "700", color: clr }}>{isSuppl ? "補填" : "保証クリア"}</span>
+                        <span style={{ fontWeight: "700", color: clr }}>{isSuppl ? fmt(gr.supplement) : `+${fmt(gr.balance)}`}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ borderTop: `1.5px solid ${C.border}`, paddingTop: "8px" }} />
+        </>
+      )}
+
+      {/* 今日の保証条件チェック（既存） */}
+      <Header title="本日の達成状況" sub="写メ日記ルール" color={C.yellow} />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
         <div style={{ ...card, textAlign: "center", borderColor: `${C.green}40`, background: `${C.green}08` }}>
           <p style={{ color: C.muted, fontSize: "11px", marginBottom: "8px", fontWeight: "700", letterSpacing: "0.05em" }}>達成</p>
@@ -2884,19 +3000,17 @@ function GuaranteePage({ casts, scores, settings }) {
         </div>
         <div style={{ ...card, textAlign: "center", borderColor: `${C.red}40`, background: `${C.red}08` }}>
           <p style={{ color: C.muted, fontSize: "11px", marginBottom: "8px", fontWeight: "700", letterSpacing: "0.05em" }}>未達</p>
-          <p style={{ fontSize: "40px", fontWeight: "700", color: C.red, margin: "0 0 4px" }}>{rows.length - doneCount}</p>
+          <p style={{ fontSize: "40px", fontWeight: "700", color: C.red, margin: "0 0 4px" }}>{diaryRows.length - doneCount}</p>
           <p style={{ color: C.muted, fontSize: "11px", margin: 0 }}>名</p>
         </div>
       </div>
-
       <div style={{ ...card, padding: "12px 16px", background: `${C.accent}06` }}>
         <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>
           目標{settings.daily_post_goal}件 / 連投除外{settings.repeat_limit_min}分 / 最低{settings.min_text_length}文字 {settings.image_required ? "/ 画像必須" : ""}
         </p>
       </div>
-
       <div style={{ display: "grid", gap: "10px" }}>
-        {rows.map((r) => (
+        {diaryRows.map((r) => (
           <div key={r.name} style={{ ...card, borderColor: r.ok ? `${C.green}40` : `${C.red}30` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
               <p style={{ fontWeight: "700", fontSize: "15px", margin: 0, color: C.text }}>{r.name}</p>
