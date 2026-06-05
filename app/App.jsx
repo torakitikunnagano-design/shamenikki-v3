@@ -2750,11 +2750,11 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                     const balanceTxt = gr.supplement > 0
                       ? `補填 ${gr.supplement.toLocaleString("ja-JP")}円`
                       : `保証クリア +${gr.balance.toLocaleString("ja-JP")}円`;
+                    const daysClr = diffDays < 0 ? C.muted : diffDays <= 2 ? C.red : clr;
                     return (
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", padding: "7px 12px", borderRadius: "10px", background: `${clr}12`, border: `1.5px solid ${clr}40` }}>
-                        <span style={{ fontSize: "11px", fontWeight: "700", color: diffDays < 0 ? C.muted : diffDays <= 2 ? C.red : C.text, whiteSpace: "nowrap" }}>{daysLabel}</span>
-                        <span style={{ color: C.border, fontSize: "12px" }}>|</span>
-                        <span style={{ fontSize: "12px", fontWeight: "700", color: clr }}>{balanceTxt}</span>
+                      <div style={{ marginTop: "10px", padding: "10px 14px", borderRadius: "12px", background: `${clr}15`, border: `2px solid ${clr}35` }}>
+                        <span style={{ display: "inline-block", fontSize: "10px", fontWeight: "700", color: daysClr, background: `${daysClr}22`, padding: "2px 9px", borderRadius: "20px", marginBottom: "5px" }}>{daysLabel}</span>
+                        <p style={{ fontSize: "20px", fontWeight: "700", color: clr, margin: 0, lineHeight: 1.2 }}>{balanceTxt}</p>
                       </div>
                     );
                   })()}
