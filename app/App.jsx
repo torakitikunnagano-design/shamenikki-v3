@@ -2375,6 +2375,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
   const [syncPass, setSyncPass] = useState("");
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  const [showTodayOnly, setShowTodayOnly] = useState(false);
+  const todayKey = `${new Date().getMonth() + 1}/${new Date().getDate()}`;
 
   function resetDiagLock(c) {
     const castId = c.heaven_id || c.name;
@@ -2483,6 +2485,17 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
 
       setCasts(next);
       try { supabase.from("casts").upsert(next.map(toSupabaseCast), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
+
+      if (Array.isArray(data.shifts)) {
+        setShifts((prev) => {
+          const updated = { ...prev };
+          data.shifts.forEach(({ name, days }) => {
+            if (name && Array.isArray(days)) updated[name] = days;
+          });
+          return updated;
+        });
+      }
+
       setSyncResult({ addedCount, updatedCount, total: incoming.length });
       setSyncPass("");
     } catch (e) {
@@ -2624,45 +2637,55 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
       )}
 
       {tab === "list" && (
-        <div style={{ display: "grid", gap: "10px" }}>
-          {casts.map((c) => {
-            let diagData = null;
-            try { const s = localStorage.getItem(`cast_type_${c.heaven_id || c.name}`); if (s) diagData = JSON.parse(s); } catch {}
-            const isLocked = (diagData?.retries ?? 0) >= 2;
-            return (
-            <div key={c.name} style={{ ...card, borderColor: c.is_active ? `${C.green}40` : C.border }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                    <p style={{ fontWeight: "700", fontSize: "15px", margin: 0, color: C.text }}>{c.name}</p>
-                    <span style={{ fontSize: "11px", color: c.is_active ? C.green : C.muted, background: `${c.is_active ? C.green : C.muted}18`, padding: "3px 10px", borderRadius: "20px", fontWeight: "700" }}>{c.is_active ? "在籍中" : "停止中"}</span>
+        <>
+          <label style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", borderRadius: "12px", background: showTodayOnly ? `${C.blue}15` : C.surface, border: `1.5px solid ${showTodayOnly ? C.blue : C.border}`, cursor: "pointer", userSelect: "none" }}>
+            <input type="checkbox" checked={showTodayOnly} onChange={(e) => setShowTodayOnly(e.target.checked)} style={{ width: "16px", height: "16px", accentColor: C.blue }} />
+            <span style={{ fontSize: "13px", fontWeight: "700", color: showTodayOnly ? C.blue : C.muted }}>今日出勤の子だけ表示</span>
+          </label>
+          <div style={{ display: "grid", gap: "10px" }}>
+            {casts.filter((c) => !showTodayOnly || (Array.isArray(shifts[c.name]) && shifts[c.name].some((s) => s.date === todayKey))).map((c) => {
+              let diagData = null;
+              try { const s = localStorage.getItem(`cast_type_${c.heaven_id || c.name}`); if (s) diagData = JSON.parse(s); } catch {}
+              const isLocked = (diagData?.retries ?? 0) >= 2;
+              const todayShift = Array.isArray(shifts[c.name]) ? shifts[c.name].find((s) => s.date === todayKey) : null;
+              return (
+              <div key={c.name} style={{ ...card, borderColor: c.is_active ? `${C.green}40` : C.border }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                      <p style={{ fontWeight: "700", fontSize: "15px", margin: 0, color: C.text }}>{c.name}</p>
+                      <span style={{ fontSize: "11px", color: c.is_active ? C.green : C.muted, background: `${c.is_active ? C.green : C.muted}18`, padding: "3px 10px", borderRadius: "20px", fontWeight: "700" }}>{c.is_active ? "在籍中" : "停止中"}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                      <Tag label={`得意：${c.strong}`} color={C.green} />
+                      <Tag label={`苦手：${c.weak}`} color={C.yellow} />
+                      {c.heaven_id ? <Tag label="ヘブン✓" color={C.accent} /> : <Tag label="ヘブン未設定" color={C.muted} />}
+                      {diagData?.type && <Tag label={`${diagData.type}${isLocked ? " 🔒" : ""}`} color={isLocked ? C.red : C.blue} />}
+                    </div>
+                    {todayShift && (
+                      <p style={{ fontSize: "11px", color: C.blue, fontWeight: "700", margin: "6px 0 0" }}>本日 {todayShift.start}〜{todayShift.end}</p>
+                    )}
                   </div>
-                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                    <Tag label={`得意：${c.strong}`} color={C.green} />
-                    <Tag label={`苦手：${c.weak}`} color={C.yellow} />
-                    {c.heaven_id ? <Tag label="ヘブン✓" color={C.accent} /> : <Tag label="ヘブン未設定" color={C.muted} />}
-                    {diagData?.type && <Tag label={`${diagData.type}${isLocked ? " 🔒" : ""}`} color={isLocked ? C.red : C.blue} />}
-                  </div>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
-                  <button onClick={() => openModal(c)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.accent}40`, background: `${C.accent}12`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
-                    ID設定
-                  </button>
-                  <button onClick={() => toggle(c.name)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${c.is_active ? C.red : C.green}40`, background: `${c.is_active ? C.red : C.green}12`, color: c.is_active ? C.red : C.green, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
-                    {c.is_active ? "停止" : "再開"}
-                  </button>
-                  {diagData?.type && (
-                    <button onClick={() => resetDiagLock(c)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}12`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
-                      {isLocked ? "診断解除" : "診断リセット"}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
+                    <button onClick={() => openModal(c)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.accent}40`, background: `${C.accent}12`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                      ID設定
                     </button>
-                  )}
+                    <button onClick={() => toggle(c.name)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${c.is_active ? C.red : C.green}40`, background: `${c.is_active ? C.red : C.green}12`, color: c.is_active ? C.red : C.green, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
+                      {c.is_active ? "停止" : "再開"}
+                    </button>
+                    {diagData?.type && (
+                      <button onClick={() => resetDiagLock(c)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}12`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                        {isLocked ? "診断解除" : "診断リセット"}
+                      </button>
+                    )}
+                  </div>
                 </div>
+                <CastShiftSection castName={c.name} shifts={shifts} setShifts={setShifts} />
               </div>
-              <CastShiftSection castName={c.name} shifts={shifts} setShifts={setShifts} />
-            </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );
