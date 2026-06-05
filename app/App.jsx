@@ -2369,7 +2369,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
   const [lockRefresh, setLockRefresh] = useState(0);
   const [syncLoading, setSyncLoading] = useState(null); // null | "casts" | "shifts"
   const [syncResult, setSyncResult] = useState(null);
-  const [showTodayOnly, setShowTodayOnly] = useState(false);
+  const [showTodayOnly, setShowTodayOnly] = useState(true);
   const todayKey = `${new Date().getMonth() + 1}/${new Date().getDate()}`;
 
   function resetDiagLock(c) {
@@ -2441,6 +2441,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
         setCasts(next);
         try { supabase.from("casts").upsert(next.map(toSupabaseCast), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
         setSyncResult({ mode: "casts", addedCount, updatedCount, total: incoming.length });
+        setShowTodayOnly(false);
       } else {
         if (!Array.isArray(data.shifts)) throw new Error("出勤データが取得できませんでした");
         // 同期データの date は "M/D" 形式 → CastShiftSection 用に "YYYY-MM-DD" キーも書く
@@ -2460,6 +2461,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
           return updated;
         });
         setSyncResult({ mode: "shifts", total: data.shifts.length });
+        setShowTodayOnly(true);
       }
     } catch (e) {
       setSyncResult({ error: e.message });
@@ -2523,10 +2525,13 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig }) {
       )}
 
       <>
-        <label style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", borderRadius: "12px", background: showTodayOnly ? `${C.blue}15` : C.surface, border: `1.5px solid ${showTodayOnly ? C.blue : C.border}`, cursor: "pointer", userSelect: "none" }}>
-          <input type="checkbox" checked={showTodayOnly} onChange={(e) => setShowTodayOnly(e.target.checked)} style={{ width: "16px", height: "16px", accentColor: C.blue }} />
-          <span style={{ fontSize: "13px", fontWeight: "700", color: showTodayOnly ? C.blue : C.muted }}>今日出勤の子だけ表示</span>
-        </label>
+        <div style={{ display: "flex", borderRadius: "12px", overflow: "hidden", border: `1.5px solid ${C.border}`, background: C.surface, alignSelf: "flex-start" }}>
+          {[["today", "今日出勤", true], ["all", "全キャスト", false]].map(([key, label, val]) => (
+            <button key={key} onClick={() => setShowTodayOnly(val)} style={{ padding: "9px 20px", border: "none", background: showTodayOnly === val ? C.blue : "transparent", color: showTodayOnly === val ? "white" : C.muted, fontWeight: "700", cursor: "pointer", fontSize: "13px", transition: "background 0.15s, color 0.15s" }}>
+              {label}
+            </button>
+          ))}
+        </div>
         <div style={{ display: "grid", gap: "10px" }}>
           {casts.filter((c) => !showTodayOnly || (Array.isArray(shifts[c.name]) && shifts[c.name].some((s) => s.date === todayKey))).map((c) => {
             let diagData = null;
