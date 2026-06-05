@@ -376,6 +376,7 @@ function App() {
           } catch {}
         } else {
           // Supabaseにデータあり → { "cast_name_date": {startTime, endTime} } に復元
+          // prev（localStorage由来）を優先してマージ: doSyncが書いた配列キー等を上書きしない
           const rebuilt = {};
           data.forEach((row) => {
             rebuilt[`${row.cast_name}_${row.date}`] = {
@@ -383,7 +384,7 @@ function App() {
               endTime:   row.end_time,
             };
           });
-          setShifts(rebuilt);
+          setShifts((prev) => ({ ...rebuilt, ...prev }));
         }
       } catch {}
     }
