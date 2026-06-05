@@ -167,21 +167,36 @@ app.post('/store-sync', async (req, res) => {
     // キャスト一覧ページへ移動
     await page.goto(`https://newmanager.cityheaven.net/C8GirlMyPageRegist.php?shopdir=${encodeURIComponent(shopdir)}`, WAIT);
 
-    // a[href*="member_id="] を全取得 → heavenId と name を抽出・重複排除
+    // a[href*="member_id="] を全取得 → heavenId ごとに名前が取れる方を採用して重複排除
     const casts = await page.$$eval(
       'a[href*="C8GirlMyPageRegist.php?member_id="]',
       (anchors) => {
-        const seen = new Set();
-        return anchors.reduce((acc, a) => {
+        const cleanName = (raw) => {
+          return (raw || '')
+            .replace(/新人/g, '')
+            .replace(/\s+/g, ' ')
+            .replace(/[…\.]{1,3}$/, '')
+            .trim();
+        };
+        // heavenId → 最良の name を保持する Map
+        const map = new Map();
+        for (const a of anchors) {
           const m = (a.getAttribute('href') || '').match(/member_id=([^&]+)/);
-          if (!m) return acc;
+          if (!m) continue;
           const heavenId = m[1];
-          if (seen.has(heavenId)) return acc;
-          seen.add(heavenId);
-          const name = (a.textContent || '').replace(/新人/g, '').trim();
-          acc.push({ name, heavenId });
-          return acc;
-        }, []);
+          // name: textContent → img の alt/title にフォールバック
+          let raw = (a.textContent || '').trim();
+          if (!raw) {
+            const img = a.querySelector('img');
+            raw = (img && (img.getAttribute('alt') || img.getAttribute('title'))) || '';
+          }
+          const name = cleanName(raw);
+          // まだ登録がない、または既存が空名前なら上書き
+          if (!map.has(heavenId) || (!map.get(heavenId).name && name)) {
+            map.set(heavenId, { name, heavenId });
+          }
+        }
+        return Array.from(map.values());
       }
     );
 
