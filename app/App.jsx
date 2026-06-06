@@ -2898,6 +2898,9 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                           );
                         })}
                       </div>
+                      <p style={{ fontSize: "10px", color: C.muted, margin: "6px 0 0", lineHeight: 1.6 }}>
+                        色つき＝出勤日 / 青枠＝今日 ／ 遅＝遅刻・早＝早退・欠＝当日欠勤・ク＝クレーム
+                      </p>
                       {selDate && (() => {
                         const [sy2, sm2, sd2] = selDate.split("-").map(Number);
                         const selSI = shifts[`${c.name}_${selDate}`];
