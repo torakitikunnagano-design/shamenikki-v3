@@ -330,7 +330,7 @@ app.post('/mitene-recon', async (req, res) => {
 
     // Step 3: DOM を一括解析（クリックなし）
     const recon = await page.evaluate(() => {
-      // --- 残り回数を抽出 ---
+      // --- 残り回数を「残り回数：N/20」から数値 N で抽出 ---
       let remaining = null;
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       let node;
@@ -340,51 +340,60 @@ app.post('/mitene-recon', async (req, res) => {
         if (m) { remaining = parseInt(m[1], 10); break; }
       }
 
-      // --- 「ミテネを送る」と完全一致する要素を収集 ---
-      const sendEls = Array.from(
-        document.querySelectorAll('a, button, input[type=button], input[type=submit]')
-      ).filter(el => (el.textContent || el.value || '').trim() === 'ミテネを送る');
-
-      // --- 先頭3件の詳細を取得 ---
-      const sendButtons = sendEls.slice(0, 3).map(el => {
-        // 最も近い祖先で a.userpage を持つものを探して uid を取得
-        let uid = null;
-        let cursor = el.parentElement;
-        while (cursor && cursor !== document.body) {
-          const up = cursor.querySelector('a.userpage');
-          if (up) {
-            const hm = (up.getAttribute('href') || '').match(/[?&]uid=([^&]+)/);
-            if (hm) uid = hm[1];
-            break;
-          }
-          cursor = cursor.parentElement;
-        }
-        // el 自身が a.userpage の内側にある場合もフォールバック
-        if (!uid) {
-          const up = el.closest('a.userpage');
-          if (up) {
-            const hm = (up.getAttribute('href') || '').match(/[?&]uid=([^&]+)/);
-            if (hm) uid = hm[1];
-          }
-        }
-        return {
-          tag: el.tagName,
-          class: el.getAttribute('class') || null,
-          href: el.getAttribute('href') || null,
-          onclick: el.getAttribute('onclick') || null,
-          outerHTML: el.outerHTML.slice(0, 300),
-          uid,
-        };
+      // --- 「ミテネを送る」とちょうど一致する要素を収集 ---
+      // タグは限定せず全要素を対象にする（送るボタンが div/span + onclick の可能性に対応）。
+      // 空白を除いて完全一致で判定する。
+      const TARGET = 'ミテネを送る';
+      const norm = (s) => (s || '').replace(/\s+/g, '').trim();
+      const allMatches = Array.from(document.querySelectorAll('body *')).filter(el => {
+        const txt = (el.tagName === 'INPUT') ? el.value : el.textContent;
+        return norm(txt) === TARGET;
       });
 
+      // --- 祖先を除外して「最も内側のクリック対象」だけを残す ---
+      // 親要素は子のテキストをそのまま含むため同条件にマッチしてしまう（前回 22 件と
+      // 過大計上された原因）。他のマッチ要素を内包する要素を捨て、リーフだけ残す。
+      const leaves = allMatches.filter(el =>
+        !allMatches.some(other => other !== el && el.contains(other))
+      );
+
+      // 近くの a.userpage から会員 uid を取得
+      const uidOf = (el) => {
+        // カードは a.userpage で囲まれている → まず closest で探す
+        let up = el.closest('a.userpage');
+        // 見つからなければ祖先を遡り、その配下の a.userpage を探す
+        if (!up) {
+          let cursor = el.parentElement;
+          while (cursor && cursor !== document.body) {
+            const cand = cursor.querySelector('a.userpage');
+            if (cand) { up = cand; break; }
+            cursor = cursor.parentElement;
+          }
+        }
+        if (!up) return null;
+        const hm = (up.getAttribute('href') || '').match(/[?&]uid=([^&]+)/);
+        return hm ? hm[1] : null;
+      };
+
+      // --- 先頭 3 件の詳細 ---
+      const sendButtons = leaves.slice(0, 3).map(el => ({
+        tag: el.tagName,
+        class: el.getAttribute('class') || null,
+        href: el.getAttribute('href') || null,
+        onclick: el.getAttribute('onclick') || null,
+        outerHTML: el.outerHTML.slice(0, 300),
+        uid: uidOf(el),
+      }));
+
       // --- 既送信数：子要素を持たないリーフ要素で「本日ミテネ済」「送信済」を含むもの ---
-      const alreadySentCount = Array.from(document.querySelectorAll('*')).filter(el => {
+      const alreadySentCount = Array.from(document.querySelectorAll('body *')).filter(el => {
         if (el.children.length > 0) return false;
         const t = el.textContent.trim();
         return t.includes('本日ミテネ済') || t.includes('送信済');
       }).length;
 
-      return { remaining, sendButtons, alreadySentCount, sendableCount: sendEls.length };
+      // sendableCount = まだ送っていない（クリック可能な）「ミテネを送る」の数
+      return { remaining, sendButtons, alreadySentCount, sendableCount: leaves.length };
     });
 
     result.remaining = recon.remaining;
