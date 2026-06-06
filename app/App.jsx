@@ -2405,16 +2405,20 @@ function calcGuaranteeResult(castName, ctx) {
   const basis = settings?.salaryBasis ?? "gross";
   const earnedGross = periodRecs.reduce((s, r) => s + (basis === "net" ? (Number(r.takeHome) || 0) : (Number(r.gross) || 0)), 0);
   const daysArr = shifts[castName];
-  const shiftDays = [];
+  const workdaySet = new Set();
   if (Array.isArray(daysArr)) {
     const year = startDate.slice(0, 4);
     daysArr.forEach(({ date }) => {
       if (!date) return;
       const [m, d] = date.split("/");
       const ymd = `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-      if (ymd >= startDate && ymd <= endDate) shiftDays.push(ymd);
+      if (ymd >= startDate && ymd <= endDate) workdaySet.add(ymd);
     });
   }
+  (ctx.extraWorkdays?.[castName] || []).forEach((ymd) => {
+    if (ymd >= startDate && ymd <= endDate) workdaySet.add(ymd);
+  });
+  const shiftDays = [...workdaySet].sort();
   const castViolations = (violations[castName] || []).filter(
     (v) => v.date >= startDate && v.date <= endDate && v.type !== "diary"
   );
@@ -2458,6 +2462,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const [modalSaved, setModalSaved] = useState(false);
   const [guarantee, setGuarantee] = useLocalStorage("shamenikki_guarantee", {});
   const [violations, setViolations] = useLocalStorage("shamenikki_violations", {});
+  const [extraWorkdays, setExtraWorkdays] = useLocalStorage("shamenikki_extra_workdays", {});
   const [gModal, setGModal] = useState(null); // cast name | null
   const [gForm, setGForm] = useState({ type: "total", dailyAmount: "", startDate: "", endDate: "" });
   const [gSaved, setGSaved] = useState(false);
@@ -2470,7 +2475,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const todayKey = `${new Date().getMonth() + 1}/${new Date().getDate()}`;
   const todayISO = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
 
-  const guaranteeCtx = { casts, guarantee, violations, cutDays, shifts, settings, scores };
+  const guaranteeCtx = { casts, guarantee, violations, cutDays, shifts, settings, scores, extraWorkdays };
 
   function resetDiagLock(c) {
     const castId = c.heaven_id || c.name;
@@ -2512,6 +2517,13 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     setGuarantee((prev) => ({ ...prev, [gModal]: { ...gForm } }));
     setGSaved(true);
     setTimeout(() => setGModal(null), 1000);
+  }
+  function toggleExtraWorkday(castName, date) {
+    setExtraWorkdays((prev) => {
+      const list = prev[castName] || [];
+      const exists = list.includes(date);
+      return { ...prev, [castName]: exists ? list.filter((d) => d !== date) : [...list, date] };
+    });
   }
   function toggleViolation(castName, type, date) {
     setViolations((prev) => {
@@ -2838,26 +2850,33 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                     cur.setDate(cur.getDate() + 1);
                   }
                   const selDate = openCalCell?.castName === c.name ? openCalCell.date : null;
+                  const extraList = extraWorkdays[c.name] || [];
                   return (
                     <>
                       <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, margin: "0 0 8px" }}>違反カレンダー</p>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
                         {dates.map((ymd) => {
-                          const [, m, d] = ymd.split("-");
                           const [yy, mm, dd] = ymd.split("-").map(Number);
                           const dow = DOW[new Date(yy, mm - 1, dd).getDay()];
                           const isToday = ymd === todayISO;
                           const isSel = ymd === selDate;
                           const dayViols = (violations[c.name] || []).filter((v) => v.date === ymd);
                           const si = shifts[`${c.name}_${ymd}`];
+                          const isSyncWork = !!si?.startTime;
+                          const isManualWork = extraList.includes(ymd);
+                          const isWorkday = isSyncWork || isManualWork;
                           const shiftStr = si?.startTime && si?.endTime ? `${si.startTime.slice(0, 5)}-${si.endTime.slice(0, 5)}` : null;
+                          const cellBg = isSel ? `${C.blue}10` : isWorkday ? `${C.accent}12` : "white";
+                          const borderClr = isToday ? C.blue : isSel ? C.blue : isWorkday ? `${C.accent}50` : C.border;
                           return (
                             <div key={ymd}
                               onClick={() => setOpenCalCell((prev) => prev?.castName === c.name && prev?.date === ymd ? null : { castName: c.name, date: ymd })}
-                              style={{ width: "50px", minHeight: "56px", border: `1.5px solid ${isToday ? C.blue : isSel ? C.blue : C.border}`, borderRadius: "8px", padding: "4px 2px", textAlign: "center", cursor: "pointer", background: isSel ? `${C.blue}10` : dayViols.length > 0 ? `${C.red}08` : "white", userSelect: "none" }}>
-                              <p style={{ fontSize: "11px", fontWeight: "700", margin: "0 0 1px", color: isToday ? C.blue : C.text }}>{Number(m)}/{Number(d)}</p>
+                              style={{ width: "50px", minHeight: "60px", border: `1.5px solid ${borderClr}`, borderRadius: "8px", padding: "4px 2px", textAlign: "center", cursor: "pointer", background: cellBg, userSelect: "none", opacity: isWorkday ? 1 : 0.6 }}>
+                              <p style={{ fontSize: "11px", fontWeight: "700", margin: "0 0 1px", color: isToday ? C.blue : isWorkday ? C.text : C.muted }}>{mm}/{dd}</p>
                               <p style={{ fontSize: "10px", margin: "0 0 2px", color: dow === "日" ? C.red : dow === "土" ? C.blue : C.muted }}>{dow}</p>
-                              {shiftStr && <p style={{ fontSize: "8px", color: C.muted, margin: "0 0 2px", lineHeight: 1.3 }}>{shiftStr}</p>}
+                              {shiftStr && <p style={{ fontSize: "8px", color: C.muted, margin: "0 0 1px", lineHeight: 1.3 }}>{shiftStr}</p>}
+                              {isManualWork && !isSyncWork && <p style={{ fontSize: "8px", color: C.accent, margin: "0 0 1px", fontWeight: "700" }}>出勤</p>}
+                              {!isWorkday && <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 1px" }}>＋</p>}
                               <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1px" }}>
                                 {dayViols.map((v, i) => (
                                   <span key={i} style={{ fontSize: "9px", fontWeight: "700", color: "white", background: C.red, borderRadius: "2px", padding: "0 2px", lineHeight: "14px" }}>{VL[v.type] || "?"}</span>
@@ -2867,24 +2886,46 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                           );
                         })}
                       </div>
-                      {selDate && (
-                        <div style={{ marginTop: "8px", padding: "10px 12px", borderRadius: "10px", background: `${C.blue}06`, border: `1.5px solid ${C.blue}25` }}>
-                          <p style={{ fontSize: "11px", fontWeight: "700", color: C.blue, margin: "0 0 8px" }}>
-                            {Number(selDate.split("-")[1])}/{Number(selDate.split("-")[2])} の違反
-                          </p>
-                          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                            {[["late", "遅刻"], ["early", "早退"], ["absent", "当日欠勤"], ["complaint", "クレーム"]].map(([type, label]) => {
-                              const on = (violations[c.name] || []).some((v) => v.type === type && v.date === selDate);
-                              return (
-                                <button key={type} onClick={() => toggleViolation(c.name, type, selDate)}
-                                  style={{ padding: "5px 12px", borderRadius: "20px", border: `1.5px solid ${on ? C.red : C.border}`, background: on ? `${C.red}15` : "white", color: on ? C.red : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
-                                  {label}
+                      {selDate && (() => {
+                        const [sy2, sm2, sd2] = selDate.split("-").map(Number);
+                        const selSI = shifts[`${c.name}_${selDate}`];
+                        const selIsSyncWork = !!selSI?.startTime;
+                        const selIsManualWork = extraList.includes(selDate);
+                        const selIsWorkday = selIsSyncWork || selIsManualWork;
+                        const selShiftStr = selSI?.startTime && selSI?.endTime ? `${selSI.startTime.slice(0, 5)}〜${selSI.endTime.slice(0, 5)}` : null;
+                        return (
+                          <div style={{ marginTop: "8px", padding: "10px 12px", borderRadius: "10px", background: `${C.blue}06`, border: `1.5px solid ${C.blue}25` }}>
+                            <p style={{ fontSize: "11px", fontWeight: "700", color: C.blue, margin: "0 0 4px" }}>
+                              {sm2}/{sd2}{selIsSyncWork ? "（出勤・同期済み）" : selIsManualWork ? "（出勤・手動）" : ""}
+                            </p>
+                            {selShiftStr && <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 8px" }}>{selShiftStr}</p>}
+                            {!selIsSyncWork && (
+                              <div style={{ marginBottom: "8px" }}>
+                                <button onClick={() => toggleExtraWorkday(c.name, selDate)}
+                                  style={{ padding: "5px 12px", borderRadius: "20px", border: `1.5px solid ${selIsManualWork ? C.accent : C.border}`, background: selIsManualWork ? `${C.accent}15` : "white", color: selIsManualWork ? C.accent : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                                  {selIsManualWork ? "✓ この日は出勤（保証に追加中）" : "この日は出勤（保証に追加）"}
                                 </button>
-                              );
-                            })}
+                              </div>
+                            )}
+                            {selIsWorkday && (
+                              <>
+                                <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 6px" }}>違反</p>
+                                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                                  {[["late", "遅刻"], ["early", "早退"], ["absent", "当日欠勤"], ["complaint", "クレーム"]].map(([type, label]) => {
+                                    const on = (violations[c.name] || []).some((v) => v.type === type && v.date === selDate);
+                                    return (
+                                      <button key={type} onClick={() => toggleViolation(c.name, type, selDate)}
+                                        style={{ padding: "5px 12px", borderRadius: "20px", border: `1.5px solid ${on ? C.red : C.border}`, background: on ? `${C.red}15` : "white", color: on ? C.red : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                                        {label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            )}
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </>
                   );
                 })() : (
@@ -2906,6 +2947,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
 function GuaranteePage({ casts, scores, settings, shifts, cutDays }) {
   const [guarantee] = useLocalStorage("shamenikki_guarantee", {});
   const [violations] = useLocalStorage("shamenikki_violations", {});
+  const [extraWorkdays] = useLocalStorage("shamenikki_extra_workdays", {});
   const [detailCast, setDetailCast] = useState(null);
 
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
@@ -2914,7 +2956,7 @@ function GuaranteePage({ casts, scores, settings, shifts, cutDays }) {
   const toMD = (ymd) => { const [, m, d] = ymd.split("-"); return `${Number(m)}/${Number(d)}`; };
 
   // 保証計算コンテキスト
-  const ctx = { casts, guarantee, violations, cutDays, shifts, settings, scores };
+  const ctx = { casts, guarantee, violations, cutDays, shifts, settings, scores, extraWorkdays };
 
   // 保証設定があるキャストの計算結果
   const guaranteeRows = casts
