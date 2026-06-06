@@ -453,7 +453,7 @@ const TAB_PRIORITY = ['マッチ率', '口コミ', 'オススメ会員'];
 app.post('/mitene', async (req, res) => {
   const { heavenId, heavenPass, max } = req.body || {};
   const mlog = (m) => console.log('[mitene] ' + m);
-  const result = { ok: false, sent: 0, sentUids: [], remainingBefore: null, remainingAfter: null, byTab: {}, error: null, reachedStep: 0 };
+  const result = { ok: false, sent: 0, sentUids: [], remainingBefore: null, remainingAfter: null, byTab: {}, tabs: [], error: null, reachedStep: 0 };
   let browser;
 
   // 1500〜3500ms のランダム待機
@@ -542,29 +542,40 @@ app.post('/mitene', async (req, res) => {
     return sent;
   };
 
+  // ページ上の送信ボタン数を数える
+  const countSendable = async (page) => page.evaluate(() =>
+    document.querySelectorAll('a.kitene_send_btn__text_wrapper').length
+  );
+
   // -----------------------------------------------------------
   // ラベル文字を含むタブをクリックして切り替える
   //  - 遷移型（href）/ AJAX 型の両方に対応
-  //  - 見つからなければ false（呼び出し側でスキップ）
+  //  - 診断情報 { tabFound, tabTag, tabText, tabHref } を返す
   // -----------------------------------------------------------
   const clickTab = async (page, label) => {
-    const clicked = await page.evaluate((label) => {
+    const info = await page.evaluate((label) => {
       const cands = Array.from(document.querySelectorAll('a, button, li, span, div'));
       // ラベルを含み、かつ短い（＝見出し/タブらしい）要素を選ぶ
       const el = cands.find(e => {
         const t = (e.textContent || '').trim();
         return t.includes(label) && t.length <= label.length + 6;
       });
-      if (!el) return false;
+      if (!el) return { tabFound: false, tabTag: null, tabText: null, tabHref: null };
+      const out = {
+        tabFound: true,
+        tabTag: el.tagName,
+        tabText: (el.textContent || '').trim().slice(0, 40),
+        tabHref: el.getAttribute('href') || null,
+      };
       el.scrollIntoView({ block: 'center' });
       el.click();
-      return true;
+      return out;
     }, label);
-    if (!clicked) return false;
+    if (!info.tabFound) return info;
     // 遷移型タブなら waitForNavigation が解決、AJAX 型ならタイムアウト後に sleep で切替待ち
     await page.waitForNavigation({ timeout: 4000 }).catch(() => {});
-    await sleep(2000);
-    return true;
+    await sleep(2500);
+    return info;
   };
 
   try {
@@ -615,17 +626,39 @@ app.post('/mitene', async (req, res) => {
 
     let remainingTarget = target; // 残り送信枠（Infinity の場合あり）
     for (const tab of TAB_PRIORITY) {
-      if (!(remainingTarget > 0)) { mlog('target reached → stop cascade'); break; }
+      // 診断レコード（送れたかどうかに関わらず必ず記録）
+      const diag = { tab, tabFound: false, tabTag: null, tabText: null, tabHref: null, afterClickUrl: null, afterClickTitle: null, sendableCount: 0, sentThisTab: 0 };
+      result.tabs.push(diag);
+
+      if (!(remainingTarget > 0)) { mlog('target reached → stop cascade'); continue; }
       mlog('--- tab: ' + tab + ' (remainingTarget=' + (remainingTarget === Infinity ? 'all' : remainingTarget) + ') ---');
 
-      const found = await clickTab(page, tab);
-      if (!found) { mlog('tab not found → skip: ' + tab); continue; }
+      // タブをクリック（診断情報を取得）
+      const info = await clickTab(page, tab);
+      diag.tabFound = info.tabFound;
+      diag.tabTag = info.tabTag;
+      diag.tabText = info.tabText;
+      diag.tabHref = info.tabHref;
+      mlog('  tabFound=' + info.tabFound + ' tag=' + info.tabTag + ' text=' + JSON.stringify(info.tabText) + ' href=' + info.tabHref);
+
+      if (!info.tabFound) { mlog('  tab not found → skip: ' + tab); continue; }
+
+      // クリック/遷移直後の URL・タイトル
+      diag.afterClickUrl = page.url();
+      diag.afterClickTitle = await page.title().catch(() => null);
+      mlog('  afterClickUrl=' + diag.afterClickUrl + ' title=' + JSON.stringify(diag.afterClickTitle));
+
+      // リスト切替を十分待ってから送信ボタン数を数える
+      await sleep(1000);
+      diag.sendableCount = await countSendable(page);
+      mlog('  sendableCount=' + diag.sendableCount);
 
       const n = await sendOnCurrentPage(page, remainingTarget);
+      diag.sentThisTab = n;
       byTab[tab] += n;
       result.sent += n;
       if (remainingTarget !== Infinity) remainingTarget -= n;
-      mlog('tab ' + tab + ' sent=' + n);
+      mlog('tab ' + tab + ' sentThisTab=' + n);
     }
 
     // Step 4: remainingAfter（カスケード内でリロード済みだが念のため再取得）
