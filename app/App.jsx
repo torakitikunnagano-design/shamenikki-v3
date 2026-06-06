@@ -2979,10 +2979,12 @@ function GuaranteePage({ casts, scores, settings, shifts, cutDays }) {
     .filter((r) => r.gr !== null)
     .sort((a, b) => b.gr.supplement - a.gr.supplement);
 
-  const totalTarget    = guaranteeRows.length;
-  const totalSupplement = guaranteeRows.reduce((s, r) => s + r.gr.supplement, 0);
-  const supplementCount = guaranteeRows.filter((r) => r.gr.supplement > 0).length;
-  const clearCount      = totalTarget - supplementCount;
+  const totalTarget      = guaranteeRows.length;
+  const totalSupplement  = guaranteeRows.reduce((s, r) => s + r.gr.supplement, 0);
+  const supplementCount  = guaranteeRows.filter((r) => r.gr.supplement > 0).length;
+  const clearCount       = totalTarget - supplementCount;
+  const totalGuaranteeBase = guaranteeRows.reduce((s, r) => s + r.gr.guaranteeBase, 0);
+  const totalEarned      = guaranteeRows.reduce((s, r) => s + r.gr.earnedGross, 0);
 
   // 今日の投稿達成判定（既存の保証条件チェック）
   const todayPosts = scores.filter((s) => new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) === today);
@@ -3019,20 +3021,22 @@ function GuaranteePage({ casts, scores, settings, shifts, cutDays }) {
       {totalTarget > 0 && (
         <>
           <div style={{ ...card, borderColor: `${C.yellow}40`, background: `${C.yellow}06` }}>
-            <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, marginBottom: "10px", letterSpacing: "0.06em" }}>店全体サマリー</p>
-            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px 16px", alignItems: "center" }}>
-              <span style={{ fontSize: "12px", color: C.muted }}>保証対象</span>
-              <span style={{ fontWeight: "700", fontSize: "14px" }}>{totalTarget}人</span>
-              <span style={{ fontSize: "12px", color: C.muted }}>店の補填合計</span>
-              <span style={{ fontWeight: "700", fontSize: "24px", color: totalSupplement > 0 ? C.red : C.green }}>
-                {totalSupplement > 0 ? fmt(totalSupplement) : "補填なし"}
-              </span>
-              <span style={{ fontSize: "12px", color: C.muted }}>内訳</span>
-              <span style={{ fontSize: "12px" }}>
-                <span style={{ color: C.red, fontWeight: "700" }}>補填 {supplementCount}人</span>
-                <span style={{ color: C.muted, margin: "0 6px" }}>／</span>
-                <span style={{ color: C.green, fontWeight: "700" }}>クリア {clearCount}人</span>
-              </span>
+            <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, marginBottom: "8px", letterSpacing: "0.06em" }}>店全体サマリー</p>
+            <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 2px" }}>店の補填合計</p>
+            <p style={{ fontSize: "28px", fontWeight: "700", color: totalSupplement > 0 ? C.red : C.green, margin: "0 0 12px", lineHeight: 1.2 }}>
+              {totalSupplement > 0 ? fmt(totalSupplement) : "補填なし"}
+            </p>
+            <div style={{ display: "flex", gap: "20px", marginBottom: "10px" }}>
+              {[["対象", totalTarget, C.text], ["補填", supplementCount, C.red], ["クリア", clearCount, C.green]].map(([label, val, clr2]) => (
+                <div key={label} style={{ textAlign: "center" }}>
+                  <p style={{ fontSize: "22px", fontWeight: "700", color: clr2, margin: 0 }}>{val}</p>
+                  <p style={{ fontSize: "10px", color: C.muted, margin: 0 }}>{label}</p>
+                </div>
+              ))}
+            </div>
+            <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "8px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px", fontSize: "11px" }}>
+              <div><span style={{ color: C.muted }}>保証枠合計　</span><span style={{ fontWeight: "700" }}>{fmt(totalGuaranteeBase)}</span></div>
+              <div><span style={{ color: C.muted }}>実収入合計　</span><span style={{ fontWeight: "700" }}>{fmt(totalEarned)}</span></div>
             </div>
           </div>
 
@@ -3046,17 +3050,19 @@ function GuaranteePage({ casts, scores, settings, shifts, cutDays }) {
               const daysClr = remaining <= 0 ? C.muted : remaining <= 2 ? C.red : C.text;
               const isSuppl = gr.supplement > 0;
               const clr = isSuppl ? C.red : C.green;
+              const violCount = (gr.castViolations?.length || 0) + (gr.diaryViolDates?.length || 0);
               return (
                 <div key={name} onClick={() => setDetailCast(detailCast === name ? null : name)}
-                  style={{ ...card, borderColor: `${clr}35`, cursor: "pointer", userSelect: "none" }}>
+                  style={{ ...card, borderColor: `${clr}40`, background: isSuppl ? `${C.red}06` : `${C.green}06`, cursor: "pointer", userSelect: "none" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div style={{ flex: 1 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px", flexWrap: "wrap" }}>
                         <p style={{ fontWeight: "700", fontSize: "15px", margin: 0 }}>{name}</p>
                         <span style={{ fontSize: "10px", color: daysClr, fontWeight: "700", background: `${daysClr}18`, padding: "2px 8px", borderRadius: "20px" }}>{daysLabel}</span>
+                        {violCount > 0 && <span style={{ fontSize: "10px", color: C.red, fontWeight: "700", background: `${C.red}15`, padding: "2px 8px", borderRadius: "20px" }}>違反{violCount}件</span>}
                       </div>
-                      <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 8px" }}>{toMD(gr.startDate)}〜{toMD(gr.endDate)}</p>
-                      <p style={{ fontSize: "20px", fontWeight: "700", color: clr, margin: "0 0 4px", lineHeight: 1.2 }}>
+                      <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 6px" }}>{toMD(gr.startDate)}〜{toMD(gr.endDate)}</p>
+                      <p style={{ fontSize: "22px", fontWeight: "700", color: clr, margin: "0 0 4px", lineHeight: 1.2 }}>
                         {isSuppl ? `補填 ${fmt(gr.supplement)}` : `クリア +${fmt(gr.balance)}`}
                       </p>
                       <p style={{ fontSize: "11px", color: C.muted, margin: 0 }}>
