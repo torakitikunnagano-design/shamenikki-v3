@@ -443,5 +443,152 @@ app.post('/mitene-recon', async (req, res) => {
   }
 });
 
+// ============================================================
+// 【本番】ミテネ自動送信（registComeon を a.kitene_send_btn__text_wrapper のクリックで発火）
+//  - 人間らしいランダム待機を挟む / max は絶対に超えない / 二重送信しない
+// ============================================================
+app.post('/mitene', async (req, res) => {
+  const { heavenId, heavenPass, max } = req.body || {};
+  const mlog = (m) => console.log('[mitene] ' + m);
+  const result = { ok: false, sent: 0, sentUids: [], remainingBefore: null, remainingAfter: null, error: null, reachedStep: 0 };
+  let browser;
+
+  // 1500〜3500ms のランダム待機
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const randWait = () => sleep(1500 + Math.floor(Math.random() * 2000));
+
+  // 本文の「残り回数：N/20」から N を取得
+  const readRemaining = async (page) => page.evaluate(() => {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const m = node.textContent.trim().match(/残り回数[：:]\s*(\d+)\s*[\/／]\d+/);
+      if (m) return parseInt(m[1], 10);
+    }
+    return null;
+  });
+
+  // onclick="registComeon(uid)" を持つ未送信ボタンの uid 一覧（出現順）
+  const listSendableUids = async (page) => page.evaluate(() => {
+    return Array.from(document.querySelectorAll('a.kitene_send_btn__text_wrapper'))
+      .map(a => {
+        const m = (a.getAttribute('onclick') || '').match(/registComeon\(\s*'?(\d+)'?\s*\)/);
+        return m ? m[1] : null;
+      })
+      .filter(Boolean);
+  });
+
+  // 指定 uid のボタンが消える（=送信完了）のを最大 ms 待つ
+  const waitButtonGone = async (page, uid, ms) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      const stillThere = await page.evaluate((uid) => {
+        return Array.from(document.querySelectorAll('a.kitene_send_btn__text_wrapper')).some(a => {
+          const m = (a.getAttribute('onclick') || '').match(/registComeon\(\s*'?(\d+)'?\s*\)/);
+          return m && m[1] === uid;
+        });
+      }, uid);
+      if (!stillThere) return true;
+      await sleep(500);
+    }
+    return false;
+  };
+
+  try {
+    if (!heavenId || !heavenPass) {
+      result.error = 'heavenId and heavenPass are required';
+      return res.json(result);
+    }
+    // max を 0 以上の整数に正規化（未指定は null）
+    let maxN = null;
+    if (max !== undefined && max !== null && max !== '') {
+      maxN = parseInt(max, 10);
+      if (!Number.isFinite(maxN) || maxN < 0) maxN = 0;
+    }
+
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const page = await browser.newPage();
+    page.setDefaultNavigationTimeout(60000);
+    await page.setUserAgent(UA);
+    // registComeon の確認ダイアログが出る場合に備えて自動承認
+    page.on('dialog', async d => { try { await d.accept(); } catch (_) {} });
+
+    // Step 1: ログイン
+    mlog('login...');
+    await page.goto('https://spgirl.cityheaven.net/J1Login.php', WAIT);
+    await page.type('input[name="txt_account"]', heavenId);
+    await page.type('input[name="txt_password"]', heavenPass);
+    await Promise.all([page.click('input[type="submit"]'), page.waitForNavigation(WAIT)]);
+    result.reachedStep = 1;
+
+    // Step 2: ミテネ画面へ goto → remainingBefore
+    const miteneUrl = 'https://spgirl.cityheaven.net/J10ComeonVisitorList.php?gid=' + heavenId;
+    await page.goto(miteneUrl, WAIT);
+    await sleep(2000);
+    result.remainingBefore = await readRemaining(page);
+    result.reachedStep = 2;
+    mlog('remainingBefore=' + result.remainingBefore + ' maxN=' + maxN);
+
+    // Step 3: target = min(max があれば max, remainingBefore)
+    const cap = (result.remainingBefore != null) ? result.remainingBefore : Infinity;
+    const target = (maxN != null) ? Math.min(maxN, cap) : cap;
+    mlog('target=' + (target === Infinity ? 'all' : target));
+    result.reachedStep = 3;
+
+    const processed = new Set(); // 試行済み uid（成否問わず二重送信しない）
+
+    while (result.sent < target) {
+      // まだ送れる（未処理の）ボタンの uid を1つ取得
+      const uids = await listSendableUids(page);
+      const uid = uids.find(u => !processed.has(u));
+      if (!uid) { mlog('no more sendable buttons'); break; }
+      processed.add(uid);
+
+      // 対象要素までスクロール → ランダム待機 → クリック
+      const handles = await page.$$('a.kitene_send_btn__text_wrapper');
+      let handle = null;
+      for (const h of handles) {
+        const oc = await page.evaluate(el => el.getAttribute('onclick') || '', h);
+        const m = oc.match(/registComeon\(\s*'?(\d+)'?\s*\)/);
+        if (m && m[1] === uid) { handle = h; break; }
+      }
+      if (!handle) { mlog('handle not found for uid=' + uid); continue; }
+
+      await handle.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' })).catch(() => {});
+      await randWait();
+      await handle.click().catch(e => mlog('click err uid=' + uid + ': ' + e.message));
+
+      // 送信反映待ち（ボタンが消える＝本日ミテネ済へ）
+      const gone = await waitButtonGone(page, uid, 4000);
+      if (gone) {
+        result.sent++;
+        result.sentUids.push(uid);
+        mlog('sent uid=' + uid + ' (' + result.sent + '/' + (target === Infinity ? '?' : target) + ')');
+      } else {
+        mlog('send not confirmed uid=' + uid);
+      }
+
+      // 次の送信まで必ずランダム待機（連続高速送信しない）
+      await randWait();
+    }
+
+    // Step 4: remainingAfter
+    await page.reload(WAIT).catch(() => {});
+    await sleep(1500);
+    result.remainingAfter = await readRemaining(page);
+    result.reachedStep = 4;
+    mlog('done sent=' + result.sent + ' remainingAfter=' + result.remainingAfter);
+
+    await browser.close();
+    result.ok = true;
+    res.json(result);
+  } catch (e) {
+    mlog('ERROR at step=' + result.reachedStep + ': ' + e.message);
+    result.error = e.message;
+    if (browser) { try { await browser.close(); } catch (_) {} }
+    res.json(result);
+  }
+});
+
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.listen(3000, () => console.log('Heaven Bot :3000'));
