@@ -2828,9 +2828,15 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   const DOW = ["日", "月", "火", "水", "木", "金", "土"];
                   const VL = { late: "遅", early: "早", absent: "欠", complaint: "ク" };
                   const dates = [];
-                  const cur = new Date(startDate + "T00:00:00");
-                  const end = new Date(endDate + "T00:00:00");
-                  while (cur <= end) { dates.push(cur.toISOString().slice(0, 10)); cur.setDate(cur.getDate() + 1); }
+                  const [sy, sm, sd] = startDate.split("-").map(Number);
+                  const [ey, em, ed] = endDate.split("-").map(Number);
+                  const cur = new Date(sy, sm - 1, sd);
+                  const end = new Date(ey, em - 1, ed);
+                  const pad = (n) => String(n).padStart(2, "0");
+                  while (cur <= end) {
+                    dates.push(`${cur.getFullYear()}-${pad(cur.getMonth() + 1)}-${pad(cur.getDate())}`);
+                    cur.setDate(cur.getDate() + 1);
+                  }
                   const selDate = openCalCell?.castName === c.name ? openCalCell.date : null;
                   return (
                     <>
@@ -2838,7 +2844,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
                         {dates.map((ymd) => {
                           const [, m, d] = ymd.split("-");
-                          const dow = DOW[new Date(ymd + "T00:00:00").getDay()];
+                          const [yy, mm, dd] = ymd.split("-").map(Number);
+                          const dow = DOW[new Date(yy, mm - 1, dd).getDay()];
                           const isToday = ymd === todayISO;
                           const isSel = ymd === selDate;
                           const dayViols = (violations[c.name] || []).filter((v) => v.date === ymd);
