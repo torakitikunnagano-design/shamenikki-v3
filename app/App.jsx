@@ -2483,7 +2483,7 @@ function MiteneButton({ cast }) {
       const data = await res.json();
       if (data.ok) {
         const bt = data.byTab || {};
-        setMsg(`${data.sent ?? 0}件送信（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・オススメ${bt["オススメ会員"] || 0}）／残り${data.remainingAfter ?? "?"}回`);
+        setMsg(`${data.sent ?? 0}件送信（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・マイガール${bt["マイガール"] || 0}）／残り${data.remainingAfter ?? "?"}回`);
       } else {
         setErr(data.error || "送信に失敗しました");
       }

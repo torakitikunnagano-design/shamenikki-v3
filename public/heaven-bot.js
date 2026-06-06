@@ -448,7 +448,7 @@ app.post('/mitene-recon', async (req, res) => {
 //  - 人間らしいランダム待機を挟む / max は絶対に超えない / 二重送信しない
 // ============================================================
 // タブの優先順位（テキストで指定）。上から順に巡回して送る。
-const TAB_PRIORITY = ['マッチ率', '口コミ', 'オススメ会員'];
+const TAB_PRIORITY = ['マッチ率', '口コミ', 'マイガール'];
 
 app.post('/mitene', async (req, res) => {
   const { heavenId, heavenPass, max } = req.body || {};
@@ -588,9 +588,9 @@ app.post('/mitene', async (req, res) => {
 
     // 各タブの遷移先 URL（li/span クリックは効かないため直接 goto する）
     const TAB_URLS = {
-      'マッチ率':     'https://spgirl.cityheaven.net/J10ComeonAiMatchingList.php?gid=' + heavenId,
-      '口コミ':       'https://spgirl.cityheaven.net/J10ReviewRanking.php?gid=' + heavenId,
-      'オススメ会員': 'https://spgirl.cityheaven.net/J10ComeonVisitorList.php?gid=' + heavenId,
+      'マッチ率':   'https://spgirl.cityheaven.net/J10ComeonAiMatchingList.php?gid=' + heavenId,
+      '口コミ':     'https://spgirl.cityheaven.net/J10ReviewRanking.php?gid=' + heavenId,
+      'マイガール': 'https://spgirl.cityheaven.net/J10ComeonMyGirlList.php?gid=' + heavenId,
     };
 
     // Step 3: タブ優先カスケード（各タブ URL へ直接 goto して送信）
