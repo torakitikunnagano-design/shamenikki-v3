@@ -2463,6 +2463,62 @@ function calcGuaranteeResult(castName, ctx) {
 }
 
 // ============================================================
+// ============================================================
+// ミテネ送信ボタン（キャストごと・状態は各ボタンが個別に保持）
+// ============================================================
+function MiteneButton({ cast }) {
+  const [sending, setSending] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [err, setErr] = useState(null);
+  const hasPass = !!(cast?.heaven_id && cast?.heaven_pass);
+
+  async function send() {
+    setSending(true); setMsg(null); setErr(null);
+    try {
+      const res = await fetch("/api/heaven-mitene", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ heavenId: cast.heaven_id, heavenPass: cast.heaven_pass, max: 5 }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const bt = data.byTab || {};
+        setMsg(`${data.sent ?? 0}件送信（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・オススメ${bt["オススメ会員"] || 0}）／残り${data.remainingAfter ?? "?"}回`);
+      } else {
+        setErr(data.error || "送信に失敗しました");
+      }
+    } catch (e) {
+      setErr("サーバーに接続できませんでした: " + e.message);
+    }
+    setSending(false);
+  }
+
+  const disabled = !hasPass || sending;
+  return (
+    <>
+      <button
+        onClick={send}
+        disabled={disabled}
+        style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.accent2}55`, background: `${C.accent2}10`, color: disabled ? C.muted : C.accent2, fontWeight: "700", cursor: disabled ? "not-allowed" : "pointer", fontSize: "11px", whiteSpace: "nowrap", opacity: disabled ? 0.65 : 1 }}>
+        {sending ? "送信中…" : "💌ミテネ送信"}
+      </button>
+      {!hasPass && (
+        <p style={{ fontSize: "9px", color: C.muted, margin: "-2px 0 0", textAlign: "center" }}>要ID設定</p>
+      )}
+      {sending && (
+        <p style={{ fontSize: "9px", color: C.muted, margin: "-2px 0 0", textAlign: "center", lineHeight: 1.3 }}>1分ほどかかります</p>
+      )}
+      {msg && (
+        <p style={{ fontSize: "9px", color: C.green, fontWeight: "700", margin: "-2px 0 0", maxWidth: "130px", lineHeight: 1.35 }}>{msg}</p>
+      )}
+      {err && (
+        <p style={{ fontSize: "9px", color: C.red, fontWeight: "700", margin: "-2px 0 0", maxWidth: "130px", lineHeight: 1.35 }}>{err}</p>
+      )}
+    </>
+  );
+}
+
+// ============================================================
 // キャスト管理
 // ============================================================
 function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, settings }) {
@@ -2836,6 +2892,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   <button onClick={() => openGuaranteeModal(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     保証設定
                   </button>
+                  <MiteneButton cast={c} />
                   <button onClick={() => toggle(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${c.is_active ? C.red : C.green}45`, background: `${c.is_active ? C.red : C.green}10`, color: c.is_active ? C.red : C.green, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
                     {c.is_active ? "停止" : "再開"}
                   </button>
