@@ -2466,7 +2466,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const [syncLoading, setSyncLoading] = useState(null); // null | "casts" | "shifts"
   const [syncResult, setSyncResult] = useState(null);
   const [showTodayOnly, setShowTodayOnly] = useState(true);
-  const [violationDates, setViolationDates] = useState({});
+  const [openCalCell, setOpenCalCell] = useState(null); // { castName, date } | null
   const todayKey = `${new Date().getMonth() + 1}/${new Date().getDate()}`;
   const todayISO = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
 
@@ -2513,16 +2513,14 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     setGSaved(true);
     setTimeout(() => setGModal(null), 1000);
   }
-  function addViolation(castName, type, date) {
-    setViolations((prev) => ({ ...prev, [castName]: [...(prev[castName] || []), { type, date }] }));
-  }
-  function removeLastViolation(castName, type) {
+  function toggleViolation(castName, type, date) {
     setViolations((prev) => {
-      const list = [...(prev[castName] || [])];
-      const idx = list.map((v) => v.type).lastIndexOf(type);
-      if (idx === -1) return prev;
-      list.splice(idx, 1);
-      return { ...prev, [castName]: list };
+      const list = prev[castName] || [];
+      const exists = list.some((v) => v.type === type && v.date === date);
+      const newList = exists
+        ? list.filter((v) => !(v.type === type && v.date === date))
+        : [...list, { type, date }];
+      return { ...prev, [castName]: newList };
     });
   }
   function openModal(c) { setModal(c); setModalId(c.heaven_id || ""); setModalPass(c.heaven_pass || ""); setModalSaved(false); }
@@ -2825,34 +2823,66 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                 </div>
               </div>
               <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: `1px solid ${C.border}` }}>
-                <div style={{ marginBottom: "8px", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span style={{ fontSize: "11px", color: C.muted, whiteSpace: "nowrap" }}>違反日</span>
-                  <input
-                    type="date"
-                    value={violationDates[c.name] ?? todayISO}
-                    min={guarantee[c.name]?.startDate || undefined}
-                    max={guarantee[c.name]?.endDate || undefined}
-                    onChange={(e) => setViolationDates((prev) => ({ ...prev, [c.name]: e.target.value }))}
-                    style={{ fontSize: "12px", padding: "3px 8px", borderRadius: "8px", border: `1.5px solid ${C.border}`, background: "white", color: C.text, outline: "none" }}
-                  />
-                </div>
-                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                  {[["late", "遅刻"], ["early", "早退"], ["absent", "当日欠勤"], ["complaint", "クレーム"]].map(([type, label]) => {
-                    const count = (violations[c.name] || []).filter((v) => v.type === type).length;
-                    const selectedDate = violationDates[c.name] ?? todayISO;
-                    return (
-                      <div key={type} style={{ display: "flex", alignItems: "center", gap: "3px" }}>
-                        <button onClick={() => addViolation(c.name, type, selectedDate)} style={{ display: "flex", alignItems: "center", gap: "5px", padding: "5px 10px", borderRadius: "20px", border: `1.5px solid ${count > 0 ? C.red : C.border}`, background: count > 0 ? `${C.red}12` : "white", color: count > 0 ? C.red : C.muted, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
-                          {label}
-                          {count > 0 && <span style={{ background: C.red, color: "white", borderRadius: "20px", padding: "1px 6px", fontSize: "10px", fontWeight: "700", lineHeight: "1" }}>{count}</span>}
-                        </button>
-                        {count > 0 && (
-                          <button onClick={() => removeLastViolation(c.name, type)} style={{ width: "18px", height: "18px", borderRadius: "50%", border: `1px solid ${C.muted}40`, background: `${C.muted}15`, color: C.muted, cursor: "pointer", fontSize: "12px", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "700", padding: "0", lineHeight: "1" }}>−</button>
-                        )}
+                {guarantee[c.name]?.startDate && guarantee[c.name]?.endDate ? (() => {
+                  const { startDate, endDate } = guarantee[c.name];
+                  const DOW = ["日", "月", "火", "水", "木", "金", "土"];
+                  const VL = { late: "遅", early: "早", absent: "欠", complaint: "ク" };
+                  const dates = [];
+                  const cur = new Date(startDate + "T00:00:00");
+                  const end = new Date(endDate + "T00:00:00");
+                  while (cur <= end) { dates.push(cur.toISOString().slice(0, 10)); cur.setDate(cur.getDate() + 1); }
+                  const selDate = openCalCell?.castName === c.name ? openCalCell.date : null;
+                  return (
+                    <>
+                      <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, margin: "0 0 8px" }}>違反カレンダー</p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                        {dates.map((ymd) => {
+                          const [, m, d] = ymd.split("-");
+                          const dow = DOW[new Date(ymd + "T00:00:00").getDay()];
+                          const isToday = ymd === todayISO;
+                          const isSel = ymd === selDate;
+                          const dayViols = (violations[c.name] || []).filter((v) => v.date === ymd);
+                          const si = shifts[`${c.name}_${ymd}`];
+                          const shiftStr = si?.startTime && si?.endTime ? `${si.startTime.slice(0, 5)}-${si.endTime.slice(0, 5)}` : null;
+                          return (
+                            <div key={ymd}
+                              onClick={() => setOpenCalCell((prev) => prev?.castName === c.name && prev?.date === ymd ? null : { castName: c.name, date: ymd })}
+                              style={{ width: "50px", minHeight: "56px", border: `1.5px solid ${isToday ? C.blue : isSel ? C.blue : C.border}`, borderRadius: "8px", padding: "4px 2px", textAlign: "center", cursor: "pointer", background: isSel ? `${C.blue}10` : dayViols.length > 0 ? `${C.red}08` : "white", userSelect: "none" }}>
+                              <p style={{ fontSize: "11px", fontWeight: "700", margin: "0 0 1px", color: isToday ? C.blue : C.text }}>{Number(m)}/{Number(d)}</p>
+                              <p style={{ fontSize: "10px", margin: "0 0 2px", color: dow === "日" ? C.red : dow === "土" ? C.blue : C.muted }}>{dow}</p>
+                              {shiftStr && <p style={{ fontSize: "8px", color: C.muted, margin: "0 0 2px", lineHeight: 1.3 }}>{shiftStr}</p>}
+                              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1px" }}>
+                                {dayViols.map((v, i) => (
+                                  <span key={i} style={{ fontSize: "9px", fontWeight: "700", color: "white", background: C.red, borderRadius: "2px", padding: "0 2px", lineHeight: "14px" }}>{VL[v.type] || "?"}</span>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                </div>
+                      {selDate && (
+                        <div style={{ marginTop: "8px", padding: "10px 12px", borderRadius: "10px", background: `${C.blue}06`, border: `1.5px solid ${C.blue}25` }}>
+                          <p style={{ fontSize: "11px", fontWeight: "700", color: C.blue, margin: "0 0 8px" }}>
+                            {Number(selDate.split("-")[1])}/{Number(selDate.split("-")[2])} の違反
+                          </p>
+                          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                            {[["late", "遅刻"], ["early", "早退"], ["absent", "当日欠勤"], ["complaint", "クレーム"]].map(([type, label]) => {
+                              const on = (violations[c.name] || []).some((v) => v.type === type && v.date === selDate);
+                              return (
+                                <button key={type} onClick={() => toggleViolation(c.name, type, selDate)}
+                                  style={{ padding: "5px 12px", borderRadius: "20px", border: `1.5px solid ${on ? C.red : C.border}`, background: on ? `${C.red}15` : "white", color: on ? C.red : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })() : (
+                  <p style={{ fontSize: "11px", color: C.muted, margin: 0 }}>「保証設定」を押すと違反カレンダーが表示されます</p>
+                )}
               </div>
             </div>
             );
