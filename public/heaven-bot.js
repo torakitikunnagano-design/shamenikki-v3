@@ -453,7 +453,7 @@ const TAB_PRIORITY = ['マッチ率', '口コミ', 'オススメ会員'];
 app.post('/mitene', async (req, res) => {
   const { heavenId, heavenPass, max } = req.body || {};
   const mlog = (m) => console.log('[mitene] ' + m);
-  const result = { ok: false, sent: 0, sentUids: [], remainingBefore: null, remainingAfter: null, byTab: {}, tabs: [], error: null, reachedStep: 0 };
+  const result = { ok: false, sent: 0, sentUids: [], remainingBefore: null, remainingAfter: null, byTab: {}, error: null, reachedStep: 0 };
   let browser;
 
   // 1500〜3500ms のランダム待機
@@ -492,7 +492,7 @@ app.post('/mitene', async (req, res) => {
   // -----------------------------------------------------------
   const sendOnCurrentPage = async (page, target) => {
     let sent = 0;
-    let attempts = 0; // クリック試行回数。これで上限を厳格に管理する
+    let attempts = 0; // クリック試行回数。これで上限を厳格に管理する（target を絶対に超えない）
     if (!(target > 0)) return 0;
 
     while (attempts < target) {
@@ -502,29 +502,28 @@ app.post('/mitene', async (req, res) => {
       if (!uid) { mlog('  no more sendable buttons on this page'); break; }
       processed.add(uid);
 
-      // 対象要素のハンドルを取得
-      const handles = await page.$$('a.kitene_send_btn__text_wrapper');
-      let handle = null;
-      for (const h of handles) {
-        const oc = await page.evaluate(el => el.getAttribute('onclick') || '', h);
-        const m = oc.match(/registComeon\(\s*'?(\d+)'?\s*\)/);
-        if (m && m[1] === uid) { handle = h; break; }
-      }
-      if (!handle) { mlog('  handle not found for uid=' + uid); continue; }
-
       // クリック直前の残り回数
       const remBefore = await readRemaining(page);
 
-      // スクロール → ランダム待機 → クリック（= registComeon 発火）
-      await handle.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' })).catch(() => {});
-      await randWait();
-      await handle.click().catch(e => mlog('  click err uid=' + uid + ': ' + e.message));
-      attempts++; // 1クリック＝1試行。target を絶対に超えないための上限カウント
+      // 対象 uid のボタンを scrollIntoView してから el.click()（= registComeon 発火）
+      const clicked = await page.evaluate((uid) => {
+        const el = Array.from(document.querySelectorAll('a.kitene_send_btn__text_wrapper'))
+          .find(a => {
+            const m = (a.getAttribute('onclick') || '').match(/registComeon\(\s*'?(\d+)'?\s*\)/);
+            return m && m[1] === uid;
+          });
+        if (!el) return false;
+        el.scrollIntoView({ block: 'center' });
+        el.click();
+        return true;
+      }, uid);
+      attempts++; // 1クリック試行＝1消費
+      if (!clicked) { mlog('  click target gone uid=' + uid); continue; }
 
-      // AJAX 反映待ち → 残り回数表示を取り直す（軽くリロード）
-      await sleep(2000);
+      // クリック後ランダム待機 → 残り回数を読み直す（軽くリロードして最新化）
+      await randWait();
       await page.reload(WAIT).catch(() => {});
-      await sleep(1200);
+      await sleep(1500);
       const remAfter = await readRemaining(page);
 
       // 成功検知：残り回数 N が減っていれば送信成功
@@ -546,37 +545,6 @@ app.post('/mitene', async (req, res) => {
   const countSendable = async (page) => page.evaluate(() =>
     document.querySelectorAll('a.kitene_send_btn__text_wrapper').length
   );
-
-  // -----------------------------------------------------------
-  // ラベル文字を含むタブをクリックして切り替える
-  //  - 遷移型（href）/ AJAX 型の両方に対応
-  //  - 診断情報 { tabFound, tabTag, tabText, tabHref } を返す
-  // -----------------------------------------------------------
-  const clickTab = async (page, label) => {
-    const info = await page.evaluate((label) => {
-      const cands = Array.from(document.querySelectorAll('a, button, li, span, div'));
-      // ラベルを含み、かつ短い（＝見出し/タブらしい）要素を選ぶ
-      const el = cands.find(e => {
-        const t = (e.textContent || '').trim();
-        return t.includes(label) && t.length <= label.length + 6;
-      });
-      if (!el) return { tabFound: false, tabTag: null, tabText: null, tabHref: null };
-      const out = {
-        tabFound: true,
-        tabTag: el.tagName,
-        tabText: (el.textContent || '').trim().slice(0, 40),
-        tabHref: el.getAttribute('href') || null,
-      };
-      el.scrollIntoView({ block: 'center' });
-      el.click();
-      return out;
-    }, label);
-    if (!info.tabFound) return info;
-    // 遷移型タブなら waitForNavigation が解決、AJAX 型ならタイムアウト後に sleep で切替待ち
-    await page.waitForNavigation({ timeout: 4000 }).catch(() => {});
-    await sleep(2500);
-    return info;
-  };
 
   try {
     if (!heavenId || !heavenPass) {
@@ -618,47 +586,37 @@ app.post('/mitene', async (req, res) => {
     const target = (maxN != null) ? Math.min(maxN, cap) : cap;
     mlog('target=' + (target === Infinity ? 'all' : target));
 
-    // Step 3: タブ優先カスケード
+    // 各タブの遷移先 URL（li/span クリックは効かないため直接 goto する）
+    const TAB_URLS = {
+      'マッチ率':     'https://spgirl.cityheaven.net/J10ComeonAiMatchingList.php?gid=' + heavenId,
+      '口コミ':       'https://spgirl.cityheaven.net/J10ReviewRanking.php?gid=' + heavenId,
+      'オススメ会員': 'https://spgirl.cityheaven.net/J10ComeonVisitorList.php?gid=' + heavenId,
+    };
+
+    // Step 3: タブ優先カスケード（各タブ URL へ直接 goto して送信）
     result.reachedStep = 3;
     const byTab = {};
     TAB_PRIORITY.forEach(t => { byTab[t] = 0; });
     result.byTab = byTab;
 
-    let remainingTarget = target; // 残り送信枠（Infinity の場合あり）
     for (const tab of TAB_PRIORITY) {
-      // 診断レコード（送れたかどうかに関わらず必ず記録）
-      const diag = { tab, tabFound: false, tabTag: null, tabText: null, tabHref: null, afterClickUrl: null, afterClickTitle: null, sendableCount: 0, sentThisTab: 0 };
-      result.tabs.push(diag);
+      if (result.sent >= target) { mlog('target reached → stop cascade'); break; }
+      const url = TAB_URLS[tab];
+      mlog('--- tab: ' + tab + ' → goto ' + url + ' ---');
 
-      if (!(remainingTarget > 0)) { mlog('target reached → stop cascade'); continue; }
-      mlog('--- tab: ' + tab + ' (remainingTarget=' + (remainingTarget === Infinity ? 'all' : remainingTarget) + ') ---');
+      await page.goto(url, WAIT).catch(e => mlog('  goto err: ' + e.message));
+      // 送信ボタンの出現を待つ（無ければタイムアウト → スキップ）
+      await page.waitForSelector('a.kitene_send_btn__text_wrapper', { timeout: 4000 }).catch(() => {});
+      await sleep(1500);
 
-      // タブをクリック（診断情報を取得）
-      const info = await clickTab(page, tab);
-      diag.tabFound = info.tabFound;
-      diag.tabTag = info.tabTag;
-      diag.tabText = info.tabText;
-      diag.tabHref = info.tabHref;
-      mlog('  tabFound=' + info.tabFound + ' tag=' + info.tabTag + ' text=' + JSON.stringify(info.tabText) + ' href=' + info.tabHref);
+      const sc = await countSendable(page);
+      mlog('  url=' + page.url() + ' sendableCount=' + sc);
+      if (sc === 0) { mlog('  no send buttons → skip ' + tab); continue; }
 
-      if (!info.tabFound) { mlog('  tab not found → skip: ' + tab); continue; }
-
-      // クリック/遷移直後の URL・タイトル
-      diag.afterClickUrl = page.url();
-      diag.afterClickTitle = await page.title().catch(() => null);
-      mlog('  afterClickUrl=' + diag.afterClickUrl + ' title=' + JSON.stringify(diag.afterClickTitle));
-
-      // リスト切替を十分待ってから送信ボタン数を数える
-      await sleep(1000);
-      diag.sendableCount = await countSendable(page);
-      mlog('  sendableCount=' + diag.sendableCount);
-
-      const n = await sendOnCurrentPage(page, remainingTarget);
-      diag.sentThisTab = n;
+      const n = await sendOnCurrentPage(page, target - result.sent); // 残り枠ぶんだけ
       byTab[tab] += n;
       result.sent += n;
-      if (remainingTarget !== Infinity) remainingTarget -= n;
-      mlog('tab ' + tab + ' sentThisTab=' + n);
+      mlog('tab ' + tab + ' sentThisTab=' + n + ' (total sent=' + result.sent + ')');
     }
 
     // Step 4: remainingAfter（カスケード内でリロード済みだが念のため再取得）
