@@ -375,15 +375,42 @@ app.post('/mitene-recon', async (req, res) => {
         return hm ? hm[1] : null;
       };
 
-      // --- 先頭 3 件の詳細 ---
-      const sendButtons = leaves.slice(0, 3).map(el => ({
+      // テキスト span 自身はクリック対象でない（onclick/href を持たない）ことが判明したため、
+      // 祖先を遡って「実際にクリックすべき要素」を解決する。
+      // 条件: a / button / onclick 属性あり / BEM ブロック相当(kitene_send_btn 等で __ を含まない)。
+      const resolveClickTarget = (el) => {
+        let cur = el;
+        for (let i = 0; i < 8 && cur && cur !== document.body; i++) {
+          const tag = cur.tagName;
+          const clsTokens = (cur.getAttribute('class') || '').split(/\s+/).filter(Boolean);
+          const isBlock = clsTokens.some(t => /send_btn|sendbtn|kitene/i.test(t) && !t.includes('__'));
+          if (tag === 'A' || tag === 'BUTTON' || cur.getAttribute('onclick') || isBlock) {
+            return cur;
+          }
+          cur = cur.parentElement;
+        }
+        return el; // 解決できなければ元の要素
+      };
+
+      const describe = (el) => ({
         tag: el.tagName,
         class: el.getAttribute('class') || null,
         href: el.getAttribute('href') || null,
         onclick: el.getAttribute('onclick') || null,
         outerHTML: el.outerHTML.slice(0, 300),
-        uid: uidOf(el),
-      }));
+      });
+
+      // --- 先頭 3 件の詳細 ---
+      // 上位フィールドは「実クリック対象(clickTarget)」を表す。元のテキスト span 情報も併記。
+      const sendButtons = leaves.slice(0, 3).map(el => {
+        const target = resolveClickTarget(el);
+        const t = describe(target);
+        return {
+          ...t,
+          uid: uidOf(el),
+          textOuterHTML: el.outerHTML.slice(0, 200), // 一致したテキスト要素(span)
+        };
+      });
 
       // --- 既送信数：子要素を持たないリーフ要素で「本日ミテネ済」「送信済」を含むもの ---
       const alreadySentCount = Array.from(document.querySelectorAll('body *')).filter(el => {
