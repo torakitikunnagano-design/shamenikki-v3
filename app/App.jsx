@@ -2328,7 +2328,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
 // 保証計算ヘルパー（CastPage / GuaranteePage から共用）
 // ============================================================
 function calcDiaryViolations(castName, startDate, endDate, shiftDays, ctx) {
-  const { scores, settings, shifts } = ctx;
+  const { scores, settings, shifts, violations } = ctx;
   const goal          = settings?.daily_post_goal   ?? 5;
   const repeatLimitMs = (settings?.repeat_limit_min ?? 60) * 60000;
   const minLen        = settings?.min_text_length   ?? 100;
@@ -2340,13 +2340,20 @@ function calcDiaryViolations(castName, startDate, endDate, shiftDays, ctx) {
   function toMins(t) { const p = t.split(":"); return Number(p[0]) * 60 + (Number(p[1]) || 0); }
   function getJSTMins(iso) { const jstMs = new Date(iso).getTime() + 9 * 3600000; return Math.floor((jstMs / 60000) % 1440); }
 
-  let dayViolationCount = 0;
+  const violationDates = [];
   for (const ymd of shiftDays) {
+    // A: 遅刻・早退・当日欠勤がある日は二重カット防止でスキップ
+    const hasAttendanceViol = (violations[castName] || []).some(
+      (v) => v.date === ymd && (v.type === "late" || v.type === "early" || v.type === "absent")
+    );
+    if (hasAttendanceViol) continue;
+
     const dayPosts = scores.filter((s) => {
       if (s.cast_name !== castName) return false;
       try { return new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) === ymd; } catch { return false; }
     });
-    if (dayPosts.length === 0) continue;
+    if (dayPosts.length === 0) continue; // 0投稿は安全側でスキップ
+
     let filteredPosts = dayPosts;
     const si = shifts[`${castName}_${ymd}`];
     if (si?.startTime && si?.endTime) {
@@ -2364,24 +2371,23 @@ function calcDiaryViolations(castName, startDate, endDate, shiftDays, ctx) {
       return true;
     });
     const sorted = [...validPosts].sort((a, b) => new Date(a.posted_at) - new Date(b.posted_at));
+    // B: 同一image_hashは1回だけカウント（noDuplicate=true時）
     let count = 0, last = 0;
+    const seenHashes = new Set();
     for (const p of sorted) {
-      try { const t = new Date(p.posted_at).getTime(); if (count === 0 || t - last >= repeatLimitMs) { count++; last = t; } } catch {}
+      if (noDuplicate && p.image_hash && seenHashes.has(p.image_hash)) continue;
+      try {
+        const t = new Date(p.posted_at).getTime();
+        if (count === 0 || t - last >= repeatLimitMs) {
+          count++;
+          last = t;
+          if (p.image_hash) seenHashes.add(p.image_hash);
+        }
+      } catch {}
     }
-    if (count < goal) dayViolationCount++;
+    if (count < goal) violationDates.push(ymd);
   }
-  let duplicateViolationCount = 0;
-  if (noDuplicate) {
-    const periodPosts = scores.filter((s) => {
-      if (s.cast_name !== castName || !s.image_hash) return false;
-      try { const d = new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }); return d >= startDate && d <= endDate; } catch { return false; }
-    });
-    const hashCounts = {};
-    for (const p of periodPosts) hashCounts[p.image_hash] = (hashCounts[p.image_hash] || 0) + 1;
-    duplicateViolationCount = Object.values(hashCounts).some((c) => c >= 2) ? 1 : 0;
-  }
-  const totalViolations = dayViolationCount + duplicateViolationCount;
-  return { dayViolationCount, duplicateViolationCount, totalViolations };
+  return { violationDates };
 }
 
 function calcGuaranteeResult(castName, ctx) {
@@ -2412,7 +2418,8 @@ function calcGuaranteeResult(castName, ctx) {
   const castViolations = (violations[castName] || []).filter(
     (v) => v.date >= startDate && v.date <= endDate && v.type !== "diary"
   );
-  const { dayViolationCount, duplicateViolationCount, totalViolations: diaryViolCount } = calcDiaryViolations(castName, startDate, endDate, shiftDays, ctx);
+  const { violationDates: diaryViolDates } = calcDiaryViolations(castName, startDate, endDate, shiftDays, ctx);
+  const diaryViolCount = diaryViolDates.length;
   const diaryViolDays = diaryViolCount * (Number(cutDays?.diary) || 0);
   const workDays = shiftDays.length;
   const guaranteeBase = daily * workDays;
@@ -2423,7 +2430,7 @@ function calcGuaranteeResult(castName, ctx) {
     const adjustedGuarantee = Math.max(0, guaranteeBase - cutAmount);
     const supplement = Math.max(0, adjustedGuarantee - earnedGross);
     const balance = earnedGross - adjustedGuarantee;
-    return { type: "total", daily, workDays, guaranteeBase, manualViolDays, diaryViolCount, diaryViolDays, dayViolationCount, duplicateViolationCount, violationDays, cutAmount, adjustedGuarantee, earnedGross, supplement, balance, startDate, endDate };
+    return { type: "total", daily, workDays, guaranteeBase, manualViolDays, diaryViolCount, diaryViolDays, diaryViolDates, castViolations, violationDays, cutAmount, adjustedGuarantee, earnedGross, supplement, balance, startDate, endDate };
   } else {
     let totalCutAmount = 0;
     shiftDays.forEach((ymd) => {
@@ -2437,7 +2444,7 @@ function calcGuaranteeResult(castName, ctx) {
     const adjustedGuarantee = Math.max(0, guaranteeBase - cutAmount);
     const supplement = Math.max(0, adjustedGuarantee - earnedGross);
     const balance = earnedGross - adjustedGuarantee;
-    return { type: "daily", daily, workDays, guaranteeBase, manualViolDays, diaryViolCount, diaryViolDays, dayViolationCount, duplicateViolationCount, violationDays, cutAmount, adjustedGuarantee, earnedGross, supplement, balance, startDate, endDate };
+    return { type: "daily", daily, workDays, guaranteeBase, manualViolDays, diaryViolCount, diaryViolDays, diaryViolDates, castViolations, violationDays, cutAmount, adjustedGuarantee, earnedGross, supplement, balance, startDate, endDate };
   }
 }
 
@@ -2676,24 +2683,27 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                         <span style={{ color: C.muted }}>保証枠（{gr.workDays}日 × {fmt(gr.daily)}）</span>
                         <span style={{ fontWeight: "700" }}>{fmt(gr.guaranteeBase)}</span>
                       </div>
-                      {gr.cutAmount > 0 && (
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span style={{ color: C.red }}>違反カット合計（{gr.violationDays}日分）</span>
-                          <span style={{ fontWeight: "700", color: C.red }}>−{fmt(gr.cutAmount)}</span>
-                        </div>
-                      )}
-                      {gr.manualViolDays > 0 && (
-                        <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "10px" }}>
-                          <span style={{ color: C.red, fontSize: "11px" }}>└ 手動違反（{gr.manualViolDays}日分）</span>
-                        </div>
-                      )}
-                      {gr.diaryViolDays > 0 && (
-                        <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "10px" }}>
-                          <span style={{ color: C.red, fontSize: "11px" }}>
-                            └ 写メ日記違反（{gr.diaryViolCount}件{gr.duplicateViolationCount > 0 ? `・同一画像${gr.duplicateViolationCount}件含む` : ""}→ {gr.diaryViolDays}日カット）
-                          </span>
-                        </div>
-                      )}
+                      {gr.cutAmount > 0 && (() => {
+                        const tl = { late: "遅刻", early: "早退", absent: "当日欠勤", complaint: "クレーム" };
+                        const md = (ymd) => { const [,m,d] = ymd.split("-"); return `${Number(m)}/${Number(d)}`; };
+                        const allViols = [
+                          ...(gr.castViolations || []).map((v) => ({ date: v.date, label: tl[v.type] || v.type, days: Number(cutDays?.[v.type]) || 0 })),
+                          ...(gr.diaryViolDates || []).map((ymd) => ({ date: ymd, label: "写メ日記（投稿不足）", days: Number(cutDays?.diary) || 0 })),
+                        ].sort((a, b) => a.date < b.date ? -1 : 1);
+                        return (
+                          <>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span style={{ color: C.red }}>違反カット合計（{gr.violationDays}日分）</span>
+                              <span style={{ fontWeight: "700", color: C.red }}>−{fmt(gr.cutAmount)}</span>
+                            </div>
+                            {allViols.map((v, i) => (
+                              <div key={i} style={{ paddingLeft: "10px" }}>
+                                <span style={{ color: C.red, fontSize: "11px" }}>└ {md(v.date)} {v.label}{v.days !== 1 ? `（${v.days}日分）` : ""}</span>
+                              </div>
+                            ))}
+                          </>
+                        );
+                      })()}
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <span style={{ color: C.muted }}>調整後保証</span>
                         <span style={{ fontWeight: "700" }}>{fmt(gr.adjustedGuarantee)}</span>
@@ -2967,22 +2977,26 @@ function GuaranteePage({ casts, scores, settings, shifts, cutDays }) {
                         <span style={{ color: C.muted }}>保証枠（{gr.workDays}日 × {fmt(gr.daily)}）</span>
                         <span style={{ fontWeight: "700" }}>{fmt(gr.guaranteeBase)}</span>
                       </div>
-                      {gr.cutAmount > 0 && (
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span style={{ color: C.red }}>違反カット合計（{gr.violationDays}日分）</span>
-                          <span style={{ fontWeight: "700", color: C.red }}>−{fmt(gr.cutAmount)}</span>
-                        </div>
-                      )}
-                      {gr.manualViolDays > 0 && (
-                        <div style={{ paddingLeft: "10px" }}>
-                          <span style={{ color: C.red, fontSize: "11px" }}>└ 手動違反（{gr.manualViolDays}日分）</span>
-                        </div>
-                      )}
-                      {gr.diaryViolDays > 0 && (
-                        <div style={{ paddingLeft: "10px" }}>
-                          <span style={{ color: C.red, fontSize: "11px" }}>└ 写メ日記違反（{gr.diaryViolCount}件{gr.duplicateViolationCount > 0 ? `・同一画像含む` : ""}→ {gr.diaryViolDays}日カット）</span>
-                        </div>
-                      )}
+                      {gr.cutAmount > 0 && (() => {
+                        const tl = { late: "遅刻", early: "早退", absent: "当日欠勤", complaint: "クレーム" };
+                        const allViols = [
+                          ...(gr.castViolations || []).map((v) => ({ date: v.date, label: tl[v.type] || v.type, days: Number(cutDays?.[v.type]) || 0 })),
+                          ...(gr.diaryViolDates || []).map((ymd) => ({ date: ymd, label: "写メ日記（投稿不足）", days: Number(cutDays?.diary) || 0 })),
+                        ].sort((a, b) => a.date < b.date ? -1 : 1);
+                        return (
+                          <>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span style={{ color: C.red }}>違反カット合計（{gr.violationDays}日分）</span>
+                              <span style={{ fontWeight: "700", color: C.red }}>−{fmt(gr.cutAmount)}</span>
+                            </div>
+                            {allViols.map((v, i) => (
+                              <div key={i} style={{ paddingLeft: "10px" }}>
+                                <span style={{ color: C.red, fontSize: "11px" }}>└ {toMD(v.date)} {v.label}{v.days !== 1 ? `（${v.days}日分）` : ""}</span>
+                              </div>
+                            ))}
+                          </>
+                        );
+                      })()}
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <span style={{ color: C.muted }}>調整後保証</span>
                         <span style={{ fontWeight: "700" }}>{fmt(gr.adjustedGuarantee)}</span>
