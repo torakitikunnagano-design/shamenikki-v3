@@ -292,5 +292,151 @@ app.post('/store-sync', async (req, res) => {
   }
 });
 
+// ============================================================
+// 【一時調査用】ミテネ画面の構造を調べる（送信は一切しない）
+// ============================================================
+app.post('/mitene-recon', async (req, res) => {
+  const { heavenId, heavenPass } = req.body || {};
+  const mlog = (m) => console.log('[mitene] ' + m);
+  const result = {
+    loginUrl: null,
+    afterLoginUrl: null,
+    afterLoginTitle: null,
+    miteneLinks: [],
+    mitenePageUrl: null,
+    mitenePageTitle: null,
+    remainingText: null,
+    sendButtonCount: 0,
+    sendButtonSample: null,
+    bodyPreview: null,
+    error: null,
+    reachedStep: 0,
+  };
+  let browser;
+  try {
+    if (!heavenId || !heavenPass) {
+      result.error = 'heavenId and heavenPass are required';
+      return res.json(result);
+    }
+
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const page = await browser.newPage();
+    page.setDefaultNavigationTimeout(60000);
+    await page.setUserAgent(UA);
+
+    // Step 1: /post と同じログイン処理
+    const loginUrl = 'https://spgirl.cityheaven.net/J1Login.php';
+    result.loginUrl = loginUrl;
+    mlog('goto login: ' + loginUrl);
+    await page.goto(loginUrl, WAIT);
+    await page.type('input[name="txt_account"]', heavenId);
+    await page.type('input[name="txt_password"]', heavenPass);
+    await Promise.all([page.click('input[type="submit"]'), page.waitForNavigation(WAIT)]);
+
+    // Step 2: ログイン直後の URL と title
+    result.afterLoginUrl = page.url();
+    result.afterLoginTitle = await page.title();
+    mlog('afterLogin url=' + result.afterLoginUrl + ' title=' + result.afterLoginTitle);
+    result.reachedStep = 2;
+
+    // Step 3: 「ミテネ」を含むリンク・ボタンを全収集
+    const miteneLinks = await page.evaluate(() => {
+      const items = [];
+      document.querySelectorAll('a, button, input[type=button], input[type=submit]').forEach(el => {
+        const text = (el.textContent || el.value || '').trim();
+        if (text.includes('ミテネ') || text.includes('みてね')) {
+          items.push({
+            tag: el.tagName,
+            text,
+            href: el.getAttribute('href') || null,
+            onclick: el.getAttribute('onclick') || null,
+          });
+        }
+      });
+      return items;
+    });
+    result.miteneLinks = miteneLinks;
+    mlog('miteneLinks count=' + miteneLinks.length);
+    miteneLinks.forEach((l, i) => mlog('  [' + i + '] text=' + l.text + ' href=' + l.href + ' onclick=' + l.onclick));
+    result.reachedStep = 3;
+
+    // Step 4: 「ミテネできる会員を探す」または最初のミテネリンクへ遷移
+    const target = miteneLinks.find(l => l.text.includes('探す') || l.text.includes('ミテネできる')) || miteneLinks[0];
+    if (!target) {
+      result.error = 'no mitene link found on top page';
+      mlog('ERROR: ' + result.error);
+      await browser.close();
+      return res.json(result);
+    }
+
+    mlog('navigating to mitene page: href=' + target.href);
+    if (target.href) {
+      const href = target.href.startsWith('http') ? target.href : 'https://spgirl.cityheaven.net' + target.href;
+      await page.goto(href, WAIT);
+    } else {
+      const el = await findBtn(page, t => t.includes('ミテネ'));
+      if (el) await Promise.all([el.click(), page.waitForNavigation(WAIT).catch(() => {})]);
+    }
+    await new Promise(r => setTimeout(r, 2000));
+
+    result.mitenePageUrl = page.url();
+    result.mitenePageTitle = await page.title();
+    mlog('mitenePage url=' + result.mitenePageUrl + ' title=' + result.mitenePageTitle);
+    result.reachedStep = 4;
+
+    // Step 5a: 残り回数テキストを探す
+    const remainingText = await page.evaluate(() => {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      const hits = [];
+      let node;
+      while ((node = walker.nextNode())) {
+        const t = node.textContent.trim();
+        if (t && (t.includes('残り') || t.includes('ミテネ') || t.includes('回数'))) {
+          hits.push(t.slice(0, 120));
+        }
+      }
+      return hits.slice(0, 10);
+    });
+    result.remainingText = remainingText;
+    mlog('remainingText=' + JSON.stringify(remainingText));
+
+    // Step 5b: 「ミテネを送る」ボタン/リンクを調べる（クリックしない）
+    const sendInfo = await page.evaluate(() => {
+      const els = Array.from(document.querySelectorAll('a, button, input[type=button], input[type=submit]'));
+      const sends = els.filter(el => {
+        const t = (el.textContent || el.value || '').trim();
+        return t.includes('ミテネを送') || t.includes('ミテネ送');
+      });
+      const sample = sends[0] ? sends[0].closest('tr, li, div') : null;
+      return {
+        count: sends.length,
+        sample: sample ? sample.innerHTML.slice(0, 800) : (sends[0] ? sends[0].outerHTML.slice(0, 400) : null),
+        firstTag: sends[0] ? sends[0].tagName : null,
+        firstClass: sends[0] ? sends[0].getAttribute('class') : null,
+        firstHref: sends[0] ? sends[0].getAttribute('href') : null,
+        firstOnclick: sends[0] ? sends[0].getAttribute('onclick') : null,
+      };
+    });
+    result.sendButtonCount = sendInfo.count;
+    result.sendButtonSample = sendInfo;
+    mlog('sendButtons count=' + sendInfo.count + ' tag=' + sendInfo.firstTag + ' href=' + sendInfo.firstHref);
+
+    // Step 5c: body テキストプレビュー
+    const bodyPreview = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').trim().slice(0, 500));
+    result.bodyPreview = bodyPreview;
+    mlog('bodyPreview=' + bodyPreview.slice(0, 200));
+    result.reachedStep = 5;
+
+    await browser.close();
+    mlog('done');
+    res.json(result);
+  } catch (e) {
+    mlog('ERROR at step=' + result.reachedStep + ': ' + e.message);
+    result.error = e.message;
+    if (browser) { try { await browser.close(); } catch (_) {} }
+    res.json(result);
+  }
+});
+
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.listen(3000, () => console.log('Heaven Bot :3000'));
