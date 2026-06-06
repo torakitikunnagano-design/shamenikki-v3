@@ -478,22 +478,6 @@ app.post('/mitene', async (req, res) => {
       .filter(Boolean);
   });
 
-  // 指定 uid のボタンが消える（=送信完了）のを最大 ms 待つ
-  const waitButtonGone = async (page, uid, ms) => {
-    const end = Date.now() + ms;
-    while (Date.now() < end) {
-      const stillThere = await page.evaluate((uid) => {
-        return Array.from(document.querySelectorAll('a.kitene_send_btn__text_wrapper')).some(a => {
-          const m = (a.getAttribute('onclick') || '').match(/registComeon\(\s*'?(\d+)'?\s*\)/);
-          return m && m[1] === uid;
-        });
-      }, uid);
-      if (!stillThere) return true;
-      await sleep(500);
-    }
-    return false;
-  };
-
   try {
     if (!heavenId || !heavenPass) {
       result.error = 'heavenId and heavenPass are required';
@@ -536,15 +520,18 @@ app.post('/mitene', async (req, res) => {
     result.reachedStep = 3;
 
     const processed = new Set(); // 試行済み uid（成否問わず二重送信しない）
+    let attempts = 0;            // クリック試行回数。これでループ上限を厳格に管理する
 
-    while (result.sent < target) {
+    // 【最優先】ループ上限は「クリック試行回数 attempts」で必ず止める。
+    // 成功検知に依存しないため、何があっても送信回数が target を超えない。
+    while (attempts < target) {
       // まだ送れる（未処理の）ボタンの uid を1つ取得
       const uids = await listSendableUids(page);
       const uid = uids.find(u => !processed.has(u));
       if (!uid) { mlog('no more sendable buttons'); break; }
       processed.add(uid);
 
-      // 対象要素までスクロール → ランダム待機 → クリック
+      // 対象要素のハンドルを取得
       const handles = await page.$$('a.kitene_send_btn__text_wrapper');
       let handle = null;
       for (const h of handles) {
@@ -554,27 +541,36 @@ app.post('/mitene', async (req, res) => {
       }
       if (!handle) { mlog('handle not found for uid=' + uid); continue; }
 
+      // クリック直前の残り回数
+      const remBefore = await readRemaining(page);
+
+      // スクロール → ランダム待機 → クリック（= registComeon 発火）
       await handle.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' })).catch(() => {});
       await randWait();
       await handle.click().catch(e => mlog('click err uid=' + uid + ': ' + e.message));
+      attempts++; // 1クリック＝1試行。target を絶対に超えないための上限カウント
 
-      // 送信反映待ち（ボタンが消える＝本日ミテネ済へ）
-      const gone = await waitButtonGone(page, uid, 4000);
-      if (gone) {
+      // AJAX 反映待ち → 残り回数表示を取り直す（軽くリロード）
+      await sleep(2000);
+      await page.reload(WAIT).catch(() => {});
+      await sleep(1200);
+      const remAfter = await readRemaining(page);
+
+      // 成功検知：残り回数 N が減っていれば送信成功
+      if (remBefore != null && remAfter != null && remAfter < remBefore) {
         result.sent++;
         result.sentUids.push(uid);
-        mlog('sent uid=' + uid + ' (' + result.sent + '/' + (target === Infinity ? '?' : target) + ')');
+        mlog('sent uid=' + uid + ' remaining ' + remBefore + '->' + remAfter +
+          ' (' + result.sent + ' sent / ' + attempts + ' attempts / target ' + (target === Infinity ? '?' : target) + ')');
       } else {
-        mlog('send not confirmed uid=' + uid);
+        mlog('send not confirmed uid=' + uid + ' remaining ' + remBefore + '->' + remAfter);
       }
 
       // 次の送信まで必ずランダム待機（連続高速送信しない）
       await randWait();
     }
 
-    // Step 4: remainingAfter
-    await page.reload(WAIT).catch(() => {});
-    await sleep(1500);
+    // Step 4: remainingAfter（ループ内リロード済みだが念のため再取得）
     result.remainingAfter = await readRemaining(page);
     result.reachedStep = 4;
     mlog('done sent=' + result.sent + ' remainingAfter=' + result.remainingAfter);
