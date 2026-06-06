@@ -447,10 +447,13 @@ app.post('/mitene-recon', async (req, res) => {
 // 【本番】ミテネ自動送信（registComeon を a.kitene_send_btn__text_wrapper のクリックで発火）
 //  - 人間らしいランダム待機を挟む / max は絶対に超えない / 二重送信しない
 // ============================================================
+// タブの優先順位（テキストで指定）。上から順に巡回して送る。
+const TAB_PRIORITY = ['マッチ率', '口コミ', 'オススメ会員'];
+
 app.post('/mitene', async (req, res) => {
   const { heavenId, heavenPass, max } = req.body || {};
   const mlog = (m) => console.log('[mitene] ' + m);
-  const result = { ok: false, sent: 0, sentUids: [], remainingBefore: null, remainingAfter: null, error: null, reachedStep: 0 };
+  const result = { ok: false, sent: 0, sentUids: [], remainingBefore: null, remainingAfter: null, byTab: {}, error: null, reachedStep: 0 };
   let browser;
 
   // 1500〜3500ms のランダム待機
@@ -477,6 +480,92 @@ app.post('/mitene', async (req, res) => {
       })
       .filter(Boolean);
   });
+
+  // 試行済み uid（タブをまたいで二重送信しないよう全体で共有）
+  const processed = new Set();
+
+  // -----------------------------------------------------------
+  // 今表示中のリストページで target 件まで送信し、送れた数を返す
+  //  - 残り回数の減少で成功判定
+  //  - attempts 上限で必ず停止（target を絶対に超えない）
+  //  - 各送信の前後にランダム待機 / 二重送信防止
+  // -----------------------------------------------------------
+  const sendOnCurrentPage = async (page, target) => {
+    let sent = 0;
+    let attempts = 0; // クリック試行回数。これで上限を厳格に管理する
+    if (!(target > 0)) return 0;
+
+    while (attempts < target) {
+      // まだ送れる（未処理の）ボタンの uid を1つ取得
+      const uids = await listSendableUids(page);
+      const uid = uids.find(u => !processed.has(u));
+      if (!uid) { mlog('  no more sendable buttons on this page'); break; }
+      processed.add(uid);
+
+      // 対象要素のハンドルを取得
+      const handles = await page.$$('a.kitene_send_btn__text_wrapper');
+      let handle = null;
+      for (const h of handles) {
+        const oc = await page.evaluate(el => el.getAttribute('onclick') || '', h);
+        const m = oc.match(/registComeon\(\s*'?(\d+)'?\s*\)/);
+        if (m && m[1] === uid) { handle = h; break; }
+      }
+      if (!handle) { mlog('  handle not found for uid=' + uid); continue; }
+
+      // クリック直前の残り回数
+      const remBefore = await readRemaining(page);
+
+      // スクロール → ランダム待機 → クリック（= registComeon 発火）
+      await handle.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' })).catch(() => {});
+      await randWait();
+      await handle.click().catch(e => mlog('  click err uid=' + uid + ': ' + e.message));
+      attempts++; // 1クリック＝1試行。target を絶対に超えないための上限カウント
+
+      // AJAX 反映待ち → 残り回数表示を取り直す（軽くリロード）
+      await sleep(2000);
+      await page.reload(WAIT).catch(() => {});
+      await sleep(1200);
+      const remAfter = await readRemaining(page);
+
+      // 成功検知：残り回数 N が減っていれば送信成功
+      if (remBefore != null && remAfter != null && remAfter < remBefore) {
+        sent++;
+        result.sentUids.push(uid);
+        mlog('  sent uid=' + uid + ' remaining ' + remBefore + '->' + remAfter);
+      } else {
+        mlog('  send not confirmed uid=' + uid + ' remaining ' + remBefore + '->' + remAfter);
+      }
+
+      // 次の送信まで必ずランダム待機（連続高速送信しない）
+      await randWait();
+    }
+    return sent;
+  };
+
+  // -----------------------------------------------------------
+  // ラベル文字を含むタブをクリックして切り替える
+  //  - 遷移型（href）/ AJAX 型の両方に対応
+  //  - 見つからなければ false（呼び出し側でスキップ）
+  // -----------------------------------------------------------
+  const clickTab = async (page, label) => {
+    const clicked = await page.evaluate((label) => {
+      const cands = Array.from(document.querySelectorAll('a, button, li, span, div'));
+      // ラベルを含み、かつ短い（＝見出し/タブらしい）要素を選ぶ
+      const el = cands.find(e => {
+        const t = (e.textContent || '').trim();
+        return t.includes(label) && t.length <= label.length + 6;
+      });
+      if (!el) return false;
+      el.scrollIntoView({ block: 'center' });
+      el.click();
+      return true;
+    }, label);
+    if (!clicked) return false;
+    // 遷移型タブなら waitForNavigation が解決、AJAX 型ならタイムアウト後に sleep で切替待ち
+    await page.waitForNavigation({ timeout: 4000 }).catch(() => {});
+    await sleep(2000);
+    return true;
+  };
 
   try {
     if (!heavenId || !heavenPass) {
@@ -505,7 +594,7 @@ app.post('/mitene', async (req, res) => {
     await Promise.all([page.click('input[type="submit"]'), page.waitForNavigation(WAIT)]);
     result.reachedStep = 1;
 
-    // Step 2: ミテネ画面へ goto → remainingBefore
+    // Step 2: ミテネのリストページ（ミテネできる会員を探す）へ → remainingBefore
     const miteneUrl = 'https://spgirl.cityheaven.net/J10ComeonVisitorList.php?gid=' + heavenId;
     await page.goto(miteneUrl, WAIT);
     await sleep(2000);
@@ -513,67 +602,38 @@ app.post('/mitene', async (req, res) => {
     result.reachedStep = 2;
     mlog('remainingBefore=' + result.remainingBefore + ' maxN=' + maxN);
 
-    // Step 3: target = min(max があれば max, remainingBefore)
+    // target = min(max があれば max, remainingBefore)
     const cap = (result.remainingBefore != null) ? result.remainingBefore : Infinity;
     const target = (maxN != null) ? Math.min(maxN, cap) : cap;
     mlog('target=' + (target === Infinity ? 'all' : target));
+
+    // Step 3: タブ優先カスケード
     result.reachedStep = 3;
+    const byTab = {};
+    TAB_PRIORITY.forEach(t => { byTab[t] = 0; });
+    result.byTab = byTab;
 
-    const processed = new Set(); // 試行済み uid（成否問わず二重送信しない）
-    let attempts = 0;            // クリック試行回数。これでループ上限を厳格に管理する
+    let remainingTarget = target; // 残り送信枠（Infinity の場合あり）
+    for (const tab of TAB_PRIORITY) {
+      if (!(remainingTarget > 0)) { mlog('target reached → stop cascade'); break; }
+      mlog('--- tab: ' + tab + ' (remainingTarget=' + (remainingTarget === Infinity ? 'all' : remainingTarget) + ') ---');
 
-    // 【最優先】ループ上限は「クリック試行回数 attempts」で必ず止める。
-    // 成功検知に依存しないため、何があっても送信回数が target を超えない。
-    while (attempts < target) {
-      // まだ送れる（未処理の）ボタンの uid を1つ取得
-      const uids = await listSendableUids(page);
-      const uid = uids.find(u => !processed.has(u));
-      if (!uid) { mlog('no more sendable buttons'); break; }
-      processed.add(uid);
+      const found = await clickTab(page, tab);
+      if (!found) { mlog('tab not found → skip: ' + tab); continue; }
 
-      // 対象要素のハンドルを取得
-      const handles = await page.$$('a.kitene_send_btn__text_wrapper');
-      let handle = null;
-      for (const h of handles) {
-        const oc = await page.evaluate(el => el.getAttribute('onclick') || '', h);
-        const m = oc.match(/registComeon\(\s*'?(\d+)'?\s*\)/);
-        if (m && m[1] === uid) { handle = h; break; }
-      }
-      if (!handle) { mlog('handle not found for uid=' + uid); continue; }
-
-      // クリック直前の残り回数
-      const remBefore = await readRemaining(page);
-
-      // スクロール → ランダム待機 → クリック（= registComeon 発火）
-      await handle.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' })).catch(() => {});
-      await randWait();
-      await handle.click().catch(e => mlog('click err uid=' + uid + ': ' + e.message));
-      attempts++; // 1クリック＝1試行。target を絶対に超えないための上限カウント
-
-      // AJAX 反映待ち → 残り回数表示を取り直す（軽くリロード）
-      await sleep(2000);
-      await page.reload(WAIT).catch(() => {});
-      await sleep(1200);
-      const remAfter = await readRemaining(page);
-
-      // 成功検知：残り回数 N が減っていれば送信成功
-      if (remBefore != null && remAfter != null && remAfter < remBefore) {
-        result.sent++;
-        result.sentUids.push(uid);
-        mlog('sent uid=' + uid + ' remaining ' + remBefore + '->' + remAfter +
-          ' (' + result.sent + ' sent / ' + attempts + ' attempts / target ' + (target === Infinity ? '?' : target) + ')');
-      } else {
-        mlog('send not confirmed uid=' + uid + ' remaining ' + remBefore + '->' + remAfter);
-      }
-
-      // 次の送信まで必ずランダム待機（連続高速送信しない）
-      await randWait();
+      const n = await sendOnCurrentPage(page, remainingTarget);
+      byTab[tab] += n;
+      result.sent += n;
+      if (remainingTarget !== Infinity) remainingTarget -= n;
+      mlog('tab ' + tab + ' sent=' + n);
     }
 
-    // Step 4: remainingAfter（ループ内リロード済みだが念のため再取得）
+    // Step 4: remainingAfter（カスケード内でリロード済みだが念のため再取得）
+    await page.goto(miteneUrl, WAIT).catch(() => {});
+    await sleep(1500);
     result.remainingAfter = await readRemaining(page);
     result.reachedStep = 4;
-    mlog('done sent=' + result.sent + ' remainingAfter=' + result.remainingAfter);
+    mlog('done sent=' + result.sent + ' remainingAfter=' + result.remainingAfter + ' byTab=' + JSON.stringify(result.byTab));
 
     await browser.close();
     result.ok = true;
