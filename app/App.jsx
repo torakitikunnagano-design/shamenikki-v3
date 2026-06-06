@@ -69,6 +69,16 @@ const initSettings = {
 
 const initCutDays = { diary: 1, late: 1, early: 1, absent: 2, complaint: 1 };
 
+// 深夜営業対応：JST 06:00 を「営業日の境目」とする
+// UTC+3h することで、JST 0〜5:59 は前日扱い、JST 6:00〜 が当日になる
+function getBusinessToday() {
+  return new Date(Date.now() + 3 * 3600000).toISOString().slice(0, 10);
+}
+function getBusinessTodayKey() {
+  const d = new Date(Date.now() + 3 * 3600000);
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+}
+
 const initCourses = [
   { id: 1, minutes: 60 },
   { id: 2, minutes: 90 },
@@ -854,7 +864,7 @@ function CastLoginScreen({ casts, onLogin }) {
 // ============================================================
 function MyGuaranteePage({ casts, scores, settings, loggedInCast }) {
   const selectedCast = loggedInCast || "";
-  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const today = getBusinessToday();
   const todayPosts = scores.filter((s) => new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) === today);
 
   function countValid(posts) {
@@ -1990,7 +2000,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   }
 
   const mkHon = () => ({ courseMin: "", shimei: "", fee: "", shimeiRyou: "", op: "", extCount: "", extMin: "" });
-  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const today = getBusinessToday();
   const [records, setRecords] = useState(loadRecords);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
@@ -2472,8 +2482,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const [syncResult, setSyncResult] = useState(null);
   const [showTodayOnly, setShowTodayOnly] = useState(true);
   const [openCalCell, setOpenCalCell] = useState(null); // { castName, date } | null
-  const todayKey = `${new Date().getMonth() + 1}/${new Date().getDate()}`;
-  const todayISO = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const todayKey = getBusinessTodayKey();
+  const todayISO = getBusinessToday();
 
   const guaranteeCtx = { casts, guarantee, violations, cutDays, shifts, settings, scores, extraWorkdays };
 
@@ -2798,14 +2808,16 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                     if (!g?.dailyAmount || !g?.endDate) return null;
                     const gr = calcGuaranteeResult(c.name, guaranteeCtx);
                     if (!gr) return null;
-                    const todayJST = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
-                    const diffDays = Math.round((new Date(g.endDate).getTime() - new Date(todayJST).getTime()) / 86400000);
-                    const daysLabel = diffDays < 0 ? "期間終了" : diffDays === 0 ? "本日最終日" : `残り${diffDays}日`;
+                    const biz = getBusinessToday();
+                    const [ty, tm, td] = biz.split("-").map(Number);
+                    const [ey, em, ed] = g.endDate.split("-").map(Number);
+                    const remaining = Math.round((new Date(ey, em - 1, ed) - new Date(ty, tm - 1, td)) / 86400000) + 1;
+                    const daysLabel = remaining <= 0 ? "終了" : remaining === 1 ? "本日最終日" : `残り${remaining}日`;
                     const clr = gr.supplement > 0 ? C.red : C.green;
                     const balanceTxt = gr.supplement > 0
                       ? `補填 ${gr.supplement.toLocaleString("ja-JP")}円`
                       : `保証クリア +${gr.balance.toLocaleString("ja-JP")}円`;
-                    const daysClr = diffDays < 0 ? C.muted : diffDays <= 2 ? C.red : clr;
+                    const daysClr = remaining <= 0 ? C.muted : remaining <= 2 ? C.red : clr;
                     return (
                       <div style={{ marginTop: "10px", padding: "10px 14px", borderRadius: "12px", background: `${clr}15`, border: `2px solid ${clr}35` }}>
                         <p style={{ fontSize: "14px", fontWeight: "700", color: daysClr, margin: "0 0 4px" }}>{daysLabel}</p>
@@ -2950,8 +2962,8 @@ function GuaranteePage({ casts, scores, settings, shifts, cutDays }) {
   const [extraWorkdays] = useLocalStorage("shamenikki_extra_workdays", {});
   const [detailCast, setDetailCast] = useState(null);
 
-  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
-  const todayKey = `${new Date().getMonth() + 1}/${new Date().getDate()}`;
+  const today = getBusinessToday();
+  const todayKey = getBusinessTodayKey();
   const fmt = (n) => n.toLocaleString("ja-JP") + "円";
   const toMD = (ymd) => { const [, m, d] = ymd.split("-"); return `${Number(m)}/${Number(d)}`; };
 
@@ -3024,9 +3036,11 @@ function GuaranteePage({ casts, scores, settings, shifts, cutDays }) {
           {/* キャスト一覧（補填多い順） */}
           <div style={{ display: "grid", gap: "8px" }}>
             {guaranteeRows.map(({ name, gr }) => {
-              const diffDays = Math.round((new Date(gr.endDate).getTime() - new Date(today).getTime()) / 86400000);
-              const daysLabel = diffDays < 0 ? "期間終了" : diffDays === 0 ? "本日最終日" : `残り${diffDays}日`;
-              const daysClr = diffDays < 0 ? C.muted : diffDays <= 2 ? C.red : C.text;
+              const [ty2, tm2, td2] = today.split("-").map(Number);
+              const [ey2, em2, ed2] = gr.endDate.split("-").map(Number);
+              const remaining = Math.round((new Date(ey2, em2 - 1, ed2) - new Date(ty2, tm2 - 1, td2)) / 86400000) + 1;
+              const daysLabel = remaining <= 0 ? "終了" : remaining === 1 ? "本日最終日" : `残り${remaining}日`;
+              const daysClr = remaining <= 0 ? C.muted : remaining <= 2 ? C.red : C.text;
               const isSuppl = gr.supplement > 0;
               const clr = isSuppl ? C.red : C.green;
               return (
