@@ -28,8 +28,8 @@ const card = {
   background: "#ffffff",
   border: `1.5px solid ${C.border}`,
   borderRadius: "20px",
-  padding: "20px",
-  boxShadow: "0 4px 20px rgba(255,107,157,0.08)",
+  padding: "18px 20px",
+  boxShadow: "0 2px 12px rgba(255,107,157,0.10), 0 1px 3px rgba(61,26,78,0.04)",
 };
 
 const inp = {
@@ -2830,17 +2830,17 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   )}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
-                  <button onClick={() => openModal(c)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.accent}40`, background: `${C.accent}12`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                  <button onClick={() => openModal(c)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.accent}45`, background: `${C.accent}10`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     ID設定
                   </button>
-                  <button onClick={() => openGuaranteeModal(c.name)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}12`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                  <button onClick={() => openGuaranteeModal(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     保証設定
                   </button>
-                  <button onClick={() => toggle(c.name)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${c.is_active ? C.red : C.green}40`, background: `${c.is_active ? C.red : C.green}12`, color: c.is_active ? C.red : C.green, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
+                  <button onClick={() => toggle(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${c.is_active ? C.red : C.green}45`, background: `${c.is_active ? C.red : C.green}10`, color: c.is_active ? C.red : C.green, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
                     {c.is_active ? "停止" : "再開"}
                   </button>
                   {diagData?.type && (
-                    <button onClick={() => resetDiagLock(c)} style={{ padding: "6px 12px", borderRadius: "10px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}12`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                    <button onClick={() => resetDiagLock(c)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                       {isLocked ? "診断解除" : "診断リセット"}
                     </button>
                   )}
@@ -2878,12 +2878,13 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                           const isManualWork = extraList.includes(ymd);
                           const isWorkday = isSyncWork || isManualWork;
                           const shiftStr = si?.startTime && si?.endTime ? `${si.startTime.slice(0, 5)}-${si.endTime.slice(0, 5)}` : null;
-                          const cellBg = isSel ? `${C.blue}10` : isWorkday ? `${C.accent}12` : "white";
-                          const borderClr = isToday ? C.blue : isSel ? C.blue : isWorkday ? `${C.accent}50` : C.border;
+                          const cellBg = isSel ? `${C.accent}15` : isWorkday ? `${C.accent}10` : "white";
+                          const borderClr = isToday ? C.blue : isSel ? C.accent : isWorkday ? `${C.accent}60` : C.border;
+                          const borderW = (isToday || isSel) ? "2px" : "1.5px";
                           return (
                             <div key={ymd}
                               onClick={() => setOpenCalCell((prev) => prev?.castName === c.name && prev?.date === ymd ? null : { castName: c.name, date: ymd })}
-                              style={{ width: "50px", minHeight: "60px", border: `1.5px solid ${borderClr}`, borderRadius: "8px", padding: "4px 2px", textAlign: "center", cursor: "pointer", background: cellBg, userSelect: "none", opacity: isWorkday ? 1 : 0.6 }}>
+                              style={{ width: "50px", minHeight: "60px", border: `${borderW} solid ${borderClr}`, borderRadius: "10px", padding: "4px 2px", textAlign: "center", cursor: "pointer", background: cellBg, userSelect: "none", opacity: isWorkday ? 1 : 0.55, boxShadow: isSel ? `0 2px 8px ${C.accent}25` : "none" }}>
                               <p style={{ fontSize: "11px", fontWeight: "700", margin: "0 0 1px", color: isToday ? C.blue : isWorkday ? C.text : C.muted }}>{mm}/{dd}</p>
                               <p style={{ fontSize: "10px", margin: "0 0 2px", color: dow === "日" ? C.red : dow === "土" ? C.blue : C.muted }}>{dow}</p>
                               {shiftStr && <p style={{ fontSize: "8px", color: C.muted, margin: "0 0 1px", lineHeight: 1.3 }}>{shiftStr}</p>}
@@ -2909,15 +2910,15 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                         const selIsWorkday = selIsSyncWork || selIsManualWork;
                         const selShiftStr = selSI?.startTime && selSI?.endTime ? `${selSI.startTime.slice(0, 5)}〜${selSI.endTime.slice(0, 5)}` : null;
                         return (
-                          <div style={{ marginTop: "8px", padding: "10px 12px", borderRadius: "10px", background: `${C.blue}06`, border: `1.5px solid ${C.blue}25` }}>
-                            <p style={{ fontSize: "11px", fontWeight: "700", color: C.blue, margin: "0 0 4px" }}>
+                          <div style={{ marginTop: "8px", padding: "12px 14px", borderRadius: "12px", background: `${C.accent}06`, border: `1.5px solid ${C.accent}30` }}>
+                            <p style={{ fontSize: "12px", fontWeight: "700", color: C.accent, margin: "0 0 4px" }}>
                               {sm2}/{sd2}{selIsSyncWork ? "（出勤・同期済み）" : selIsManualWork ? "（出勤・手動）" : ""}
                             </p>
                             {selShiftStr && <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 8px" }}>{selShiftStr}</p>}
                             {!selIsSyncWork && (
                               <div style={{ marginBottom: "8px" }}>
                                 <button onClick={() => toggleExtraWorkday(c.name, selDate)}
-                                  style={{ padding: "5px 12px", borderRadius: "20px", border: `1.5px solid ${selIsManualWork ? C.accent : C.border}`, background: selIsManualWork ? `${C.accent}15` : "white", color: selIsManualWork ? C.accent : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                                  style={{ padding: "6px 14px", borderRadius: "20px", border: `1.5px solid ${selIsManualWork ? C.accent : C.border}`, background: selIsManualWork ? `${C.accent}18` : "white", color: selIsManualWork ? C.accent : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
                                   {selIsManualWork ? "✓ この日は出勤（保証に追加中）" : "この日は出勤（保証に追加）"}
                                 </button>
                               </div>
@@ -2930,7 +2931,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                                     const on = (violations[c.name] || []).some((v) => v.type === type && v.date === selDate);
                                     return (
                                       <button key={type} onClick={() => toggleViolation(c.name, type, selDate)}
-                                        style={{ padding: "5px 12px", borderRadius: "20px", border: `1.5px solid ${on ? C.red : C.border}`, background: on ? `${C.red}15` : "white", color: on ? C.red : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                                        style={{ padding: "6px 14px", borderRadius: "20px", border: `1.5px solid ${on ? C.red : C.border}`, background: on ? `${C.red}15` : "white", color: on ? C.red : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
                                         {label}
                                       </button>
                                     );
@@ -3053,7 +3054,7 @@ function GuaranteePage({ casts, scores, settings, shifts, cutDays }) {
               const violCount = (gr.castViolations?.length || 0) + (gr.diaryViolDates?.length || 0);
               return (
                 <div key={name} onClick={() => setDetailCast(detailCast === name ? null : name)}
-                  style={{ ...card, borderColor: `${clr}40`, background: isSuppl ? `${C.red}06` : `${C.green}06`, cursor: "pointer", userSelect: "none" }}>
+                  style={{ ...card, borderColor: `${clr}50`, background: isSuppl ? `${C.red}09` : `${C.green}09`, cursor: "pointer", userSelect: "none" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px", flexWrap: "wrap" }}>
