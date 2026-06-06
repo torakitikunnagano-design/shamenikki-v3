@@ -293,25 +293,12 @@ app.post('/store-sync', async (req, res) => {
 });
 
 // ============================================================
-// 【一時調査用】ミテネ画面の構造を調べる（送信は一切しない）
+// 【調査専用】ミテネ画面の「送るボタン」を正確に特定する（送信は一切しない）
 // ============================================================
 app.post('/mitene-recon', async (req, res) => {
   const { heavenId, heavenPass } = req.body || {};
-  const mlog = (m) => console.log('[mitene] ' + m);
-  const result = {
-    loginUrl: null,
-    afterLoginUrl: null,
-    afterLoginTitle: null,
-    miteneLinks: [],
-    mitenePageUrl: null,
-    mitenePageTitle: null,
-    remainingText: null,
-    sendButtonCount: 0,
-    sendButtonSample: null,
-    bodyPreview: null,
-    error: null,
-    reachedStep: 0,
-  };
+  const mlog = (m) => console.log('[mitene-recon] ' + m);
+  const result = { remaining: null, sendButtons: [], alreadySentCount: null, sendableCount: null, error: null, reachedStep: 0 };
   let browser;
   try {
     if (!heavenId || !heavenPass) {
@@ -324,108 +311,90 @@ app.post('/mitene-recon', async (req, res) => {
     page.setDefaultNavigationTimeout(60000);
     await page.setUserAgent(UA);
 
-    // Step 1: /post と同じログイン処理
-    const loginUrl = 'https://spgirl.cityheaven.net/J1Login.php';
-    result.loginUrl = loginUrl;
-    mlog('goto login: ' + loginUrl);
-    await page.goto(loginUrl, WAIT);
+    // Step 1: ログイン
+    mlog('login...');
+    await page.goto('https://spgirl.cityheaven.net/J1Login.php', WAIT);
     await page.type('input[name="txt_account"]', heavenId);
     await page.type('input[name="txt_password"]', heavenPass);
     await Promise.all([page.click('input[type="submit"]'), page.waitForNavigation(WAIT)]);
+    mlog('afterLogin url=' + page.url());
+    result.reachedStep = 1;
 
-    // Step 2: ログイン直後の URL と title
-    result.afterLoginUrl = page.url();
-    result.afterLoginTitle = await page.title();
-    mlog('afterLogin url=' + result.afterLoginUrl + ' title=' + result.afterLoginTitle);
+    // Step 2: ミテネ画面へ直接 goto
+    const miteneUrl = 'https://spgirl.cityheaven.net/J10ComeonVisitorList.php?gid=' + heavenId;
+    mlog('goto mitene: ' + miteneUrl);
+    await page.goto(miteneUrl, WAIT);
+    await new Promise(r => setTimeout(r, 2000));
+    mlog('mitene url=' + page.url() + ' title=' + (await page.title()));
     result.reachedStep = 2;
 
-    // Step 3: 「ミテネ」を含むリンク・ボタンを全収集
-    const miteneLinks = await page.evaluate(() => {
-      const items = [];
-      document.querySelectorAll('a, button, input[type=button], input[type=submit]').forEach(el => {
-        const text = (el.textContent || el.value || '').trim();
-        if (text.includes('ミテネ') || text.includes('みてね')) {
-          items.push({
-            tag: el.tagName,
-            text,
-            href: el.getAttribute('href') || null,
-            onclick: el.getAttribute('onclick') || null,
-          });
-        }
-      });
-      return items;
-    });
-    result.miteneLinks = miteneLinks;
-    mlog('miteneLinks count=' + miteneLinks.length);
-    miteneLinks.forEach((l, i) => mlog('  [' + i + '] text=' + l.text + ' href=' + l.href + ' onclick=' + l.onclick));
-    result.reachedStep = 3;
-
-    // Step 4: 「ミテネできる会員を探す」または最初のミテネリンクへ遷移
-    const target = miteneLinks.find(l => l.text.includes('探す') || l.text.includes('ミテネできる')) || miteneLinks[0];
-    if (!target) {
-      result.error = 'no mitene link found on top page';
-      mlog('ERROR: ' + result.error);
-      await browser.close();
-      return res.json(result);
-    }
-
-    mlog('navigating to mitene page: href=' + target.href);
-    if (target.href) {
-      const href = target.href.startsWith('http') ? target.href : 'https://spgirl.cityheaven.net' + target.href;
-      await page.goto(href, WAIT);
-    } else {
-      const el = await findBtn(page, t => t.includes('ミテネ'));
-      if (el) await Promise.all([el.click(), page.waitForNavigation(WAIT).catch(() => {})]);
-    }
-    await new Promise(r => setTimeout(r, 2000));
-
-    result.mitenePageUrl = page.url();
-    result.mitenePageTitle = await page.title();
-    mlog('mitenePage url=' + result.mitenePageUrl + ' title=' + result.mitenePageTitle);
-    result.reachedStep = 4;
-
-    // Step 5a: 残り回数テキストを探す
-    const remainingText = await page.evaluate(() => {
+    // Step 3: DOM を一括解析（クリックなし）
+    const recon = await page.evaluate(() => {
+      // --- 残り回数を抽出 ---
+      let remaining = null;
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      const hits = [];
       let node;
       while ((node = walker.nextNode())) {
         const t = node.textContent.trim();
-        if (t && (t.includes('残り') || t.includes('ミテネ') || t.includes('回数'))) {
-          hits.push(t.slice(0, 120));
-        }
+        const m = t.match(/残り回数[：:]\s*(\d+)\s*[\/／]\d+/);
+        if (m) { remaining = parseInt(m[1], 10); break; }
       }
-      return hits.slice(0, 10);
-    });
-    result.remainingText = remainingText;
-    mlog('remainingText=' + JSON.stringify(remainingText));
 
-    // Step 5b: 「ミテネを送る」ボタン/リンクを調べる（クリックしない）
-    const sendInfo = await page.evaluate(() => {
-      const els = Array.from(document.querySelectorAll('a, button, input[type=button], input[type=submit]'));
-      const sends = els.filter(el => {
-        const t = (el.textContent || el.value || '').trim();
-        return t.includes('ミテネを送') || t.includes('ミテネ送');
+      // --- 「ミテネを送る」と完全一致する要素を収集 ---
+      const sendEls = Array.from(
+        document.querySelectorAll('a, button, input[type=button], input[type=submit]')
+      ).filter(el => (el.textContent || el.value || '').trim() === 'ミテネを送る');
+
+      // --- 先頭3件の詳細を取得 ---
+      const sendButtons = sendEls.slice(0, 3).map(el => {
+        // 最も近い祖先で a.userpage を持つものを探して uid を取得
+        let uid = null;
+        let cursor = el.parentElement;
+        while (cursor && cursor !== document.body) {
+          const up = cursor.querySelector('a.userpage');
+          if (up) {
+            const hm = (up.getAttribute('href') || '').match(/[?&]uid=([^&]+)/);
+            if (hm) uid = hm[1];
+            break;
+          }
+          cursor = cursor.parentElement;
+        }
+        // el 自身が a.userpage の内側にある場合もフォールバック
+        if (!uid) {
+          const up = el.closest('a.userpage');
+          if (up) {
+            const hm = (up.getAttribute('href') || '').match(/[?&]uid=([^&]+)/);
+            if (hm) uid = hm[1];
+          }
+        }
+        return {
+          tag: el.tagName,
+          class: el.getAttribute('class') || null,
+          href: el.getAttribute('href') || null,
+          onclick: el.getAttribute('onclick') || null,
+          outerHTML: el.outerHTML.slice(0, 300),
+          uid,
+        };
       });
-      const sample = sends[0] ? sends[0].closest('tr, li, div') : null;
-      return {
-        count: sends.length,
-        sample: sample ? sample.innerHTML.slice(0, 800) : (sends[0] ? sends[0].outerHTML.slice(0, 400) : null),
-        firstTag: sends[0] ? sends[0].tagName : null,
-        firstClass: sends[0] ? sends[0].getAttribute('class') : null,
-        firstHref: sends[0] ? sends[0].getAttribute('href') : null,
-        firstOnclick: sends[0] ? sends[0].getAttribute('onclick') : null,
-      };
-    });
-    result.sendButtonCount = sendInfo.count;
-    result.sendButtonSample = sendInfo;
-    mlog('sendButtons count=' + sendInfo.count + ' tag=' + sendInfo.firstTag + ' href=' + sendInfo.firstHref);
 
-    // Step 5c: body テキストプレビュー
-    const bodyPreview = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').trim().slice(0, 500));
-    result.bodyPreview = bodyPreview;
-    mlog('bodyPreview=' + bodyPreview.slice(0, 200));
-    result.reachedStep = 5;
+      // --- 既送信数：子要素を持たないリーフ要素で「本日ミテネ済」「送信済」を含むもの ---
+      const alreadySentCount = Array.from(document.querySelectorAll('*')).filter(el => {
+        if (el.children.length > 0) return false;
+        const t = el.textContent.trim();
+        return t.includes('本日ミテネ済') || t.includes('送信済');
+      }).length;
+
+      return { remaining, sendButtons, alreadySentCount, sendableCount: sendEls.length };
+    });
+
+    result.remaining = recon.remaining;
+    result.sendButtons = recon.sendButtons;
+    result.alreadySentCount = recon.alreadySentCount;
+    result.sendableCount = recon.sendableCount;
+    result.reachedStep = 3;
+
+    mlog('remaining=' + recon.remaining + ' sendable=' + recon.sendableCount + ' alreadySent=' + recon.alreadySentCount);
+    recon.sendButtons.forEach((b, i) => mlog('  btn[' + i + '] tag=' + b.tag + ' uid=' + b.uid + ' href=' + b.href + ' onclick=' + b.onclick));
 
     await browser.close();
     mlog('done');
