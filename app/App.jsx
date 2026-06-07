@@ -79,6 +79,28 @@ function getBusinessTodayKey() {
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
 }
 
+// 名前の正規化: 🔰(新人マーク)・新人・装飾記号・空白を除去して照合用の名前にする。
+// 出勤データとキャストの名前照合で「ほし🔰」と「ほし」を同一視するために使う。
+function normalizeName(s) {
+  return String(s || "")
+    .replace(/新人/g, "")
+    .replace(/[\s　]/g, "") // 半角/全角スペース
+    .replace(/[🔰★☆♪♫♡♥❤◎○●◯◆◇■□▲△▼▽※‼！!♢❀✿✦✧♛👑💖💕✨🌟⭐️⭐]/gu, "") // 装飾記号
+    .trim();
+}
+
+// shifts マップ（{ name: M/D配列, name_YMD: {...} }）から、castName に対応する
+// M/D 配列を「正規化名で」探して返す。完全一致を最優先（既存=NADESHIKO の挙動は不変）。
+function shiftDaysFor(shifts, castName) {
+  if (!shifts) return null;
+  if (Array.isArray(shifts[castName])) return shifts[castName]; // 完全一致(高速・従来挙動)
+  const target = normalizeName(castName);
+  for (const k in shifts) {
+    if (Array.isArray(shifts[k]) && normalizeName(k) === target) return shifts[k];
+  }
+  return null;
+}
+
 const initCourses = [
   { id: 1, minutes: 60 },
   { id: 2, minutes: 90 },
@@ -3041,11 +3063,12 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
           ))}
         </div>
         <div style={{ display: "grid", gap: "10px" }}>
-          {casts.filter((c) => !showTodayOnly || (Array.isArray(shifts[c.name]) && shifts[c.name].some((s) => s.date === todayKey))).map((c) => {
+          {casts.filter((c) => { if (!showTodayOnly) return true; const d = shiftDaysFor(shifts, c.name); return Array.isArray(d) && d.some((s) => s.date === todayKey); }).map((c) => {
             let diagData = null;
             try { const s = localStorage.getItem(skey(`cast_type_${c.heaven_id || c.name}`)); if (s) diagData = JSON.parse(s); } catch {}
             const isLocked = (diagData?.retries ?? 0) >= 2;
-            const todayShift = Array.isArray(shifts[c.name]) ? shifts[c.name].find((s) => s.date === todayKey) : null;
+            const _days = shiftDaysFor(shifts, c.name);
+            const todayShift = Array.isArray(_days) ? _days.find((s) => s.date === todayKey) : null;
             return (
             <div key={c.name} style={{ ...card, borderColor: c.is_active ? `${C.green}40` : C.border }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -3257,7 +3280,7 @@ function GuaranteePage({ casts, scores, settings, shifts, cutDays }) {
     }
     return count;
   }
-  const diaryRows = casts.filter((c) => c.is_active && Array.isArray(shifts[c.name]) && shifts[c.name].some((s) => s.date === todayKey)).map((c) => {
+  const diaryRows = casts.filter((c) => { if (!c.is_active) return false; const d = shiftDaysFor(shifts, c.name); return Array.isArray(d) && d.some((s) => s.date === todayKey); }).map((c) => {
     const posts = todayPosts.filter((p) => p.cast_name === c.name);
     const valid = countValid(posts);
     const latest = posts[posts.length - 1];
@@ -3792,10 +3815,11 @@ function ShiftsPage({ casts, shifts, setShifts }) {
 // ============================================================
 function BulkMitenePage({ casts, shifts, syncConfig }) {
   const todayKey = getBusinessTodayKey();
-  // 今日出勤キャスト（既存ロジック流用：shifts[name] の M/D 配列に本日が含まれる）
-  const todayCasts = casts.filter(
-    (c) => Array.isArray(shifts[c.name]) && shifts[c.name].some((s) => s.date === todayKey)
-  );
+  // 今日出勤キャスト（正規化名で出勤データと照合：🔰等の装飾差を吸収）
+  const todayCasts = casts.filter((c) => {
+    const d = shiftDaysFor(shifts, c.name);
+    return Array.isArray(d) && d.some((s) => s.date === todayKey);
+  });
   const storeLabel = syncConfig?.shopdir || "店舗（未設定）";
 
   const [perMax, setPerMax] = useState(5);
