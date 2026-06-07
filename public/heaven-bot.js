@@ -12,6 +12,10 @@ app.use(express.json({ limit: '20mb' }));
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const WAIT = { waitUntil: 'domcontentloaded', timeout: 60000 };
 
+// キャスト同期で取り込む上位N名（ヘブンのキャスト一覧の掲載順・先頭から）。退店者が大量に残る店舗対策。
+// NADESHIKO は名簿70名で上限未満なので影響なし。あとで変えたいときはこの数値だけ変更する。
+const CAST_SYNC_LIMIT = 100;
+
 async function findBtn(page, matchFn) {
   const hs = await page.$$('a, button, input[type=button], input[type=submit]');
   for (const h of hs) {
@@ -170,7 +174,7 @@ app.post('/store-sync', async (req, res) => {
     // a[href*="member_id="] を全取得 → heavenId ごとに名前が取れる方を採用して重複排除
     const casts = await page.$$eval(
       'a[href*="C8GirlMyPageRegist.php?member_id="]',
-      (anchors) => {
+      (anchors, limit) => {
         const cleanName = (raw) => {
           return (raw || '')
             .replace(/新人/g, '')
@@ -196,11 +200,13 @@ app.post('/store-sync', async (req, res) => {
             map.set(heavenId, { name, heavenId });
           }
         }
-        return Array.from(map.values());
-      }
+        // 掲載順（Map の挿入順）の先頭から limit 名だけ返す
+        return Array.from(map.values()).slice(0, limit);
+      },
+      CAST_SYNC_LIMIT
     );
 
-    console.log('[store-sync] casts=' + casts.length);
+    console.log('[store-sync] casts=' + casts.length + ' (limit ' + CAST_SYNC_LIMIT + ')');
 
     // シフト一覧を全ページ取得（C9）&start=1,2,… で送りされる
     const MAX_C9_PAGES = 20;
