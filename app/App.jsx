@@ -284,18 +284,31 @@ function App() {
   }, []);
   function switchStore(id) {
     if (!id || id === getActiveStoreId()) return;
-    try { localStorage.setItem(ACTIVE_STORE_KEY, id); } catch {}
+    try {
+      localStorage.setItem(ACTIVE_STORE_KEY, id);
+      // 店舗切替のリロードをまたいで「今いる画面」を保持（次回マウントで1回だけ復元）
+      sessionStorage.setItem("shamenikki_switch_restore", JSON.stringify({ mode, adminUnlocked, castPage, adminPage }));
+    } catch {}
     // 確実に反映するためページを再読込（名前空間化された各キーを読み直す）
     location.reload();
   }
 
-  const [mode, setMode] = useState("cast");
-  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  // 店舗切替のリロードをまたいで現在の画面を復元（sessionStorage を1回だけ消費）
+  const [switchRestore] = useState(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = sessionStorage.getItem("shamenikki_switch_restore");
+      if (raw) { sessionStorage.removeItem("shamenikki_switch_restore"); return JSON.parse(raw); }
+    } catch {}
+    return null;
+  });
+  const [mode, setMode] = useState(switchRestore?.mode ?? "cast");
+  const [adminUnlocked, setAdminUnlocked] = useState(switchRestore?.adminUnlocked ?? false);
   const [passInput, setPassInput] = useState("");
   const [passError, setPassError] = useState(false);
-  const [castPage, setCastPage] = useState("score");
+  const [castPage, setCastPage] = useState(switchRestore?.castPage ?? "score");
   const [showShindan, setShowShindan] = useState(false);
-  const [adminPage, setAdminPage] = useState("guarantee");
+  const [adminPage, setAdminPage] = useState(switchRestore?.adminPage ?? "guarantee");
   const [casts, setCasts] = useLocalStorage("shamenikki_casts", initCasts);
   const [scores, setScores] = useLocalStorage("shamenikki_scores", initScores);
   const [settings, setSettings] = useLocalStorage("shamenikki_settings", initSettings);
