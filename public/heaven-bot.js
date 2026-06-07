@@ -175,12 +175,10 @@ app.post('/store-sync', async (req, res) => {
     const casts = await page.$$eval(
       'a[href*="C8GirlMyPageRegist.php?member_id="]',
       (anchors, limit) => {
+        // ヘブン表示は「名前」の後に必ず半角/全角スペース＋装飾(「新人🔰」「No2 本指名」等)。
+        // 最初の半角/全角スペースより前だけを名前として採用する。
         const cleanName = (raw) => {
-          return (raw || '')
-            .replace(/新人/g, '')
-            .replace(/\s+/g, ' ')
-            .replace(/[…\.]{1,3}$/, '')
-            .trim();
+          return (raw || '').trim().split(/[\s　]/)[0] || '';
         };
         // heavenId → 最良の name を保持する Map
         const map = new Map();

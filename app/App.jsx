@@ -79,14 +79,10 @@ function getBusinessTodayKey() {
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
 }
 
-// 名前の正規化: 🔰(新人マーク)・新人・装飾記号・空白を除去して照合用の名前にする。
-// 出勤データとキャストの名前照合で「ほし🔰」と「ほし」を同一視するために使う。
+// 名前の正規化: ヘブン表示は「名前」の後に必ず半角/全角スペース＋装飾(「新人🔰」「No2 本指名」等)。
+// よって「最初の半角/全角スペースより前」だけを識別名とする（絵文字列挙より確実）。
 function normalizeName(s) {
-  return String(s || "")
-    .replace(/新人/g, "")
-    .replace(/[\s　]/g, "") // 半角/全角スペース
-    .replace(/[🔰★☆♪♫♡♥❤◎○●◯◆◇■□▲△▼▽※‼！!♢❀✿✦✧♛👑💖💕✨🌟⭐️⭐]/gu, "") // 装飾記号
-    .trim();
+  return String(s || "").trim().split(/[\s　]/)[0] || "";
 }
 
 // shifts マップ（{ name: M/D配列, name_YMD: {...} }）から、castName に対応する
@@ -2856,7 +2852,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         let addedCount = 0, updatedCount = 0;
         const next = [...casts];
 
-        incoming.forEach(({ name, heavenId }) => {
+        incoming.forEach(({ name: rawName, heavenId }) => {
+          const name = normalizeName(rawName); // 最初のスペースより前だけを保存名にする
           // 1. heavenId一致 → name更新（他設定は保持）
           const byId = next.findIndex((c) => c.heaven_id && c.heaven_id === heavenId);
           if (byId !== -1) {
@@ -2864,10 +2861,10 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
             updatedCount++;
             return;
           }
-          // 2. name一致 → heaven_id更新（他設定は保持）
-          const byName = next.findIndex((c) => c.name === name);
+          // 2. name一致（正規化名で照合）→ heaven_id更新＋name正規化（他設定は保持）
+          const byName = next.findIndex((c) => normalizeName(c.name) === name);
           if (byName !== -1) {
-            next[byName] = { ...next[byName], heaven_id: heavenId };
+            next[byName] = { ...next[byName], heaven_id: heavenId, name };
             updatedCount++;
             return;
           }
