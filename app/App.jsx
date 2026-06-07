@@ -601,6 +601,7 @@ function App() {
   const adminNav = [
     { id: "guarantee", label: "保証管理", icon: "🎀" },
     { id: "cast",      label: "キャスト", icon: "👑" }, // 出勤設定を統合済み
+    { id: "bulkmitene", label: "一括ミテネ", icon: "💌" },
     // { id: "shifts",  label: "出勤設定", icon: "🕐" }, // キャストタブに統合
     // { id: "ranking", label: "ランキング", icon: "🌟" }, // 作り直し予定のため一時非表示
     // { id: "title",   label: "タイトル",  icon: "✏️" }, // 作り直し予定のため一時非表示
@@ -726,6 +727,7 @@ function App() {
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} shifts={shifts} cutDays={cutDays} />}
                 {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} settings={settings} />}
+                {mode === "admin" && page === "bulkmitene" && <BulkMitenePage casts={casts} shifts={shifts} syncConfig={syncConfig} />}
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
                 {mode === "admin" && page === "courses"   && <CoursesPage courses={courses} setCourses={setCourses} />}
@@ -3584,6 +3586,168 @@ function ShiftsPage({ casts, shifts, setShifts }) {
 // ============================================================
 // 共通コンポーネント
 // ============================================================
+// ============================================================
+// 一括ミテネ（今日出勤キャストへ1人ずつ逐次送信）
+// ============================================================
+function BulkMitenePage({ casts, shifts, syncConfig }) {
+  const todayKey = getBusinessTodayKey();
+  // 今日出勤キャスト（既存ロジック流用：shifts[name] の M/D 配列に本日が含まれる）
+  const todayCasts = casts.filter(
+    (c) => Array.isArray(shifts[c.name]) && shifts[c.name].some((s) => s.date === todayKey)
+  );
+  const storeLabel = syncConfig?.shopdir || "店舗（未設定）";
+
+  const [perMax, setPerMax] = useState(5);
+  const [running, setRunning] = useState(false);
+  const [rows, setRows] = useState([]);        // { name, sendable, status, msg }
+  const [progress, setProgress] = useState(null); // { current, total, name }
+  const [summary, setSummary] = useState(null);
+
+  const updateRow = (name, patch) =>
+    setRows((prev) => prev.map((r) => (r.name === name ? { ...r, ...patch } : r)));
+
+  async function start() {
+    setRunning(true);
+    setSummary(null);
+
+    // 全行を初期化（送信不可は最初からスキップ表示）
+    const init = todayCasts.map((c) => {
+      const sendable = !!(c.heaven_id && c.heaven_pass);
+      return { name: c.name, sendable, status: sendable ? "pending" : "skip", msg: sendable ? "" : "スキップ（要ID設定）" };
+    });
+    setRows(init);
+
+    // 「送信可」だけを上から順に1人ずつ直列で呼ぶ
+    const sendable = todayCasts.filter((c) => c.heaven_id && c.heaven_pass);
+    let totalSent = 0;
+    let successCount = 0;
+    const errors = [];
+
+    for (let i = 0; i < sendable.length; i++) {
+      const c = sendable[i];
+      setProgress({ current: i + 1, total: sendable.length, name: c.name });
+      updateRow(c.name, { status: "sending", msg: "送信中…" });
+      try {
+        const res = await fetch("/api/heaven-mitene", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ heavenId: c.heaven_id, heavenPass: c.heaven_pass, max: perMax }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          const bt = data.byTab || {};
+          const sent = data.sent ?? 0;
+          totalSent += sent;
+          successCount++;
+          updateRow(c.name, { status: "done", msg: `${sent}件（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・マイガール${bt["マイガール"] || 0}）／残り${data.remainingAfter ?? "?"}回` });
+        } else {
+          const em = data.error || "送信に失敗しました";
+          errors.push(`${c.name}：${em}`);
+          updateRow(c.name, { status: "error", msg: em });
+        }
+      } catch (e) {
+        const em = "サーバーに接続できませんでした: " + e.message;
+        errors.push(`${c.name}：${em}`);
+        updateRow(c.name, { status: "error", msg: em });
+      }
+    }
+
+    const skipCount = todayCasts.length - sendable.length;
+    setProgress(null);
+    setSummary({ totalSent, successCount, targetCount: sendable.length, skipCount, errors });
+    setRunning(false);
+  }
+
+  const badge = (txt, color) => (
+    <span style={{ fontSize: "10px", fontWeight: "700", color, background: `${color}15`, padding: "2px 8px", borderRadius: "10px", whiteSpace: "nowrap" }}>{txt}</span>
+  );
+  const statusColor = { pending: C.muted, skip: C.muted, sending: C.blue, done: C.green, error: C.red };
+
+  // 実行前は todayCasts から行を生成、実行開始後は rows（ライブ状態）を表示
+  const displayRows = rows.length
+    ? rows
+    : todayCasts.map((c) => {
+        const sendable = !!(c.heaven_id && c.heaven_pass);
+        return { name: c.name, sendable, status: sendable ? "pending" : "skip", msg: sendable ? "" : "要ID設定（スキップ）" };
+      });
+
+  const startDisabled = running || todayCasts.length === 0;
+
+  return (
+    <div style={{ display: "grid", gap: "14px" }}>
+      <Header title="一括ミテネ" sub="今日出勤キャストへ1人ずつ自動送信" color={C.accent2} />
+
+      <div style={{ ...card, background: `${C.yellow}10`, borderColor: `${C.yellow}45` }}>
+        <p style={{ fontSize: "12px", color: C.sub, fontWeight: "700", margin: 0, lineHeight: 1.5 }}>
+          ⚠️ 完了まで数分かかります。終わるまで画面を閉じたり再読み込みしないでください。
+        </p>
+      </div>
+
+      <div style={card}>
+        <label style={{ fontSize: "11px", color: C.muted, fontWeight: "700", display: "block", marginBottom: "6px" }}>店</label>
+        <select value={storeLabel} disabled style={{ ...inp, marginBottom: "14px" }}>
+          <option>{storeLabel}</option>
+        </select>
+
+        <label style={{ fontSize: "11px", color: C.muted, fontWeight: "700", display: "block", marginBottom: "6px" }}>1人あたりの送信数</label>
+        <input
+          type="number"
+          min={1}
+          value={perMax}
+          disabled={running}
+          onChange={(e) => setPerMax(Math.max(1, parseInt(e.target.value, 10) || 1))}
+          style={{ ...inp, marginBottom: "14px" }}
+        />
+
+        <button
+          onClick={start}
+          disabled={startDisabled}
+          style={{ width: "100%", padding: "13px", borderRadius: "14px", border: "none", background: startDisabled ? C.muted : C.accent2, color: "white", fontWeight: "700", fontSize: "14px", cursor: startDisabled ? "not-allowed" : "pointer", opacity: startDisabled ? 0.7 : 1 }}>
+          {running ? "送信中…" : "💌 一括送信スタート"}
+        </button>
+
+        {progress && (
+          <p style={{ fontSize: "13px", color: C.blue, fontWeight: "700", textAlign: "center", margin: "12px 0 0" }}>
+            {progress.current}/{progress.total}人目 [{progress.name}] 送信中…
+          </p>
+        )}
+      </div>
+
+      {todayCasts.length === 0 ? (
+        <div style={{ ...card, textAlign: "center", padding: "30px", color: C.muted }}>今日出勤のキャストがいません</div>
+      ) : (
+        <div style={{ ...card, display: "grid", gap: "8px" }}>
+          <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, margin: "0 0 4px" }}>今日出勤 {todayCasts.length}人（{storeLabel}）</p>
+          {displayRows.map((r) => (
+            <div key={r.name} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "10px", border: `1px solid ${C.border}`, background: C.surface }}>
+              <span style={{ fontWeight: "700", fontSize: "13px", color: C.text, minWidth: "64px" }}>{r.name}</span>
+              {r.sendable ? badge("送信可", C.green) : badge("要ID設定（スキップ）", C.muted)}
+              {r.msg && <span style={{ fontSize: "11px", color: statusColor[r.status] || C.muted, lineHeight: 1.35, flex: 1 }}>{r.msg}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {summary && (
+        <div style={{ ...card, borderColor: `${C.accent2}45`, background: `${C.accent2}08` }}>
+          <p style={{ fontSize: "13px", fontWeight: "700", color: C.text, margin: "0 0 6px" }}>完了</p>
+          <p style={{ fontSize: "13px", color: C.sub, margin: 0, lineHeight: 1.6 }}>
+            合計{summary.totalSent}件送信／対象{summary.targetCount}人中{summary.successCount}人成功／スキップ{summary.skipCount}人
+          </p>
+          {summary.errors.length > 0 && (
+            <div style={{ marginTop: "8px" }}>
+              <p style={{ fontSize: "11px", fontWeight: "700", color: C.red, margin: "0 0 4px" }}>エラー</p>
+              {summary.errors.map((e, i) => (
+                <p key={i} style={{ fontSize: "11px", color: C.red, margin: "0 0 2px", lineHeight: 1.4 }}>・{e}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Header({ title, sub, color }) {
   return (
     <div style={{ marginBottom: "4px" }}>
