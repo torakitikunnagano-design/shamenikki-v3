@@ -178,6 +178,24 @@ function ensureStoreMigration() {
         if (v !== null) localStorage.setItem(k + NS, v);
       }
     });
+
+    // 旧バグの誤シード掃除: 非オリジナル店に initCasts/initScores/initCourses が
+    // そのまま seed されていた場合のみ除去する（モック既定と一致するものだけ。実データは消さない）。
+    // これをしないと localStorage→Supabase 再シードで誤データが復活してしまう。
+    const active = getActiveStoreId();
+    if (active !== DEFAULT_STORE_ID) {
+      const rm = (key) => { try { localStorage.removeItem(key); } catch {} };
+      // casts / courses はモック既定が静的なので完全一致で判定
+      if (localStorage.getItem("shamenikki_casts::" + active) === JSON.stringify(initCasts)) rm("shamenikki_casts::" + active);
+      if (localStorage.getItem("shamenikki_courses::" + active) === JSON.stringify(initCourses)) rm("shamenikki_courses::" + active);
+      // scores はタイムスタンプが動的なので「全 id が小さい(=モック 1,2,3)」を目印に判定（実データは Date.now の巨大 id）
+      try {
+        const sc = JSON.parse(localStorage.getItem("shamenikki_scores::" + active) || "null");
+        if (Array.isArray(sc) && sc.length > 0 && sc.every((s) => typeof s.id === "number" && s.id < 100000)) {
+          rm("shamenikki_scores::" + active);
+        }
+      } catch {}
+    }
   } catch {}
 }
 
@@ -324,10 +342,13 @@ function App() {
     // 復元値は1回使ったら破棄（通常リロードでは従来どおり再ロックされるように）
     try { sessionStorage.removeItem("shamenikki_switch_restore"); } catch {}
   }, []);
-  const [casts, setCasts] = useLocalStorage("shamenikki_casts", initCasts);
-  const [scores, setScores] = useLocalStorage("shamenikki_scores", initScores);
+  // 既定のモックデータ(initCasts 等)はオリジナル店(nadeshiko)だけに使う。
+  // 新規店はデータが無ければ「空」で始める（NADESHIKO の既定キャストを流し込まない）。
+  const isOriginalStore = getActiveStoreId() === DEFAULT_STORE_ID;
+  const [casts, setCasts] = useLocalStorage("shamenikki_casts", isOriginalStore ? initCasts : []);
+  const [scores, setScores] = useLocalStorage("shamenikki_scores", isOriginalStore ? initScores : []);
   const [settings, setSettings] = useLocalStorage("shamenikki_settings", initSettings);
-  const [courses, setCourses] = useLocalStorage("shamenikki_courses", initCourses);
+  const [courses, setCourses] = useLocalStorage("shamenikki_courses", isOriginalStore ? initCourses : []);
   const [shifts, setShifts] = useLocalStorage("shamenikki_shifts", {});
   const [syncConfig, setSyncConfig] = useLocalStorage("shamenikki_sync_config", { shopdir: "", adminId: "", adminPass: "" });
   const [cutDays, setCutDays] = useLocalStorage("shamenikki_cut_days", initCutDays);
