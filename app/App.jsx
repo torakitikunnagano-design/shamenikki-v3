@@ -130,6 +130,10 @@ const DEFAULT_STORES = [
   { id: "club_audition_nagano", name: "クラブオーディション長野" },
 ];
 
+// キャスト同期で保存する上位N名（ヘブン掲載順の先頭から）。退店者が大量に残る店舗対策。
+// クライアント側で制限するので VPS ボット編集は不要。NADESHIKO は70名で上限未満＝影響なし。
+const CAST_SYNC_LIMIT = 100;
+
 // 名前空間化しない共通キー（店舗で分けない）
 const COMMON_KEYS = new Set([
   STORES_KEY, ACTIVE_STORE_KEY, AUTO_LOGIN_KEY, CREDS_KEY, "shamenikki_settings_synced",
@@ -2848,7 +2852,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       if (!res.ok || !data.casts) throw new Error(data.message || "同期に失敗しました");
 
       if (mode === "casts") {
-        const incoming = data.casts;
+        // 掲載順の先頭から CAST_SYNC_LIMIT 名だけ取り込む（ボットは全件返してOK）
+        const incoming = (data.casts || []).slice(0, CAST_SYNC_LIMIT);
         let addedCount = 0, updatedCount = 0;
         const next = [...casts];
 
