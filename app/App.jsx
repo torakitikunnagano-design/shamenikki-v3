@@ -179,31 +179,39 @@ function ensureStoreMigration() {
       }
     });
 
-    // 旧バグの誤シード掃除: 非オリジナル店に焼き付いたモック(さくら/みお/りな 等)を除去する。
-    // 完全一致だと配列が少しでも書き換わっていると効かない（前回これで効かなかった）。
-    // そこで「モックの行だけ」を要素単位で除去し、実データ・ヘブン認証(heaven_id/heaven_pass)は残す。
-    // ※ sync_config には一切触れない（別キー）。オリジナル店(nadeshiko)は対象外。
-    const active = getActiveStoreId();
-    if (active !== DEFAULT_STORE_ID) {
-      const cleanArray = (key, isMock) => {
-        try {
-          const raw = localStorage.getItem(key);
-          if (!raw) return;
-          const arr = JSON.parse(raw);
-          if (!Array.isArray(arr)) return;
-          const kept = arr.filter((x) => !isMock(x));
-          if (kept.length !== arr.length) localStorage.setItem(key, JSON.stringify(kept));
-        } catch {}
-      };
-      // casts: モック名 かつ ヘブン認証が空の行だけ除去（認証入り・実キャストは残す）
-      const mockNames = new Set(initCasts.map((c) => c.name));
-      cleanArray("shamenikki_casts::" + active, (c) => mockNames.has(c.name) && !c.heaven_id && !c.heaven_pass);
-      // scores: モックは id が小さい(1,2,3)。実データは Date.now の巨大 id
-      cleanArray("shamenikki_scores::" + active, (s) => typeof s.id === "number" && s.id < 100000);
-      // courses: モックの id:minutes(1:60/2:90/3:120) に一致する行だけ除去
-      const mockCourses = new Set(initCourses.map((c) => c.id + ":" + c.minutes));
-      cleanArray("shamenikki_courses::" + active, (c) => mockCourses.has(c.id + ":" + c.minutes));
-    }
+    // 旧バグの誤シード掃除: 非オリジナル店「すべて」の casts/scores/courses から
+    // モック行だけを要素単位で除去する（アクティブ店に限らず全店を走査するので、
+    // どの店を開いていても・店切替の瞬間でも焼き付きモックが必ず消える）。
+    // heaven_id/heaven_pass 入りキャスト・実データ・sync_config・nadeshiko には触れない。
+    const cleanArray = (key, isMock) => {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return;
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) return;
+        const kept = arr.filter((x) => !isMock(x));
+        if (kept.length !== arr.length) localStorage.setItem(key, JSON.stringify(kept));
+      } catch {}
+    };
+    const mockNames = new Set(initCasts.map((c) => c.name));
+    const mockCourses = new Set(initCourses.map((c) => c.id + ":" + c.minutes));
+    Object.keys(localStorage).forEach((key) => {
+      const idx = key.indexOf("::");
+      if (idx < 0) return;
+      const base = key.slice(0, idx);
+      const store = key.slice(idx + 2);
+      if (store === DEFAULT_STORE_ID) return; // nadeshiko は対象外
+      if (base === "shamenikki_casts") {
+        // モック名 かつ ヘブン認証が空の行だけ除去（認証入り・実キャストは残す）
+        cleanArray(key, (c) => mockNames.has(c.name) && !c.heaven_id && !c.heaven_pass);
+      } else if (base === "shamenikki_scores") {
+        // モックは id が小さい(1,2,3)。実データは Date.now の巨大 id
+        cleanArray(key, (s) => typeof s.id === "number" && s.id < 100000);
+      } else if (base === "shamenikki_courses") {
+        // モックの id:minutes(1:60/2:90/3:120) に一致する行だけ除去
+        cleanArray(key, (c) => mockCourses.has(c.id + ":" + c.minutes));
+      }
+    });
   } catch {}
 }
 
@@ -847,11 +855,17 @@ function App() {
         <>
           {/* サブバー */}
           <div style={{ background: "white", borderBottom: `1.5px solid ${C.border}`, padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: "36px" }}>
-            <span style={{ fontSize: "11px", color: C.accent, fontWeight: "700", letterSpacing: "0.05em" }}>
-              {mode === "cast"
-                ? (loggedInCast ? `💕 ${loggedInCast}` : "💕 キャスト")
-                : "👑 店舗管理"}
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "11px", color: C.accent, fontWeight: "700", letterSpacing: "0.05em" }}>
+                {mode === "cast"
+                  ? (loggedInCast ? `💕 ${loggedInCast}` : "💕 キャスト")
+                  : "👑 店舗管理"}
+              </span>
+              {/* 現在のアクティブ店バッジ（キャスト・管理どちらのタブでも表示） */}
+              <span style={{ fontSize: "10px", fontWeight: "700", color: C.accent2, background: `${C.accent2}15`, border: `1px solid ${C.accent2}40`, padding: "2px 8px", borderRadius: "10px", whiteSpace: "nowrap" }}>
+                🏠 {activeStoreId === DEFAULT_STORE_ID ? "NADESHIKO" : (storeList.find((s) => s.id === activeStoreId)?.name || activeStoreId)}
+              </span>
+            </div>
             {mode === "admin" && (
               <button onClick={logout} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "12px" }}>ログアウト</button>
             )}
