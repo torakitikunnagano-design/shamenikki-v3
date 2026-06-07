@@ -293,28 +293,32 @@ function App() {
     location.reload();
   }
 
-  // 店舗切替のリロードをまたいで現在の画面を復元する。
-  // 注意: 初期化関数は「純粋」にする。SSRハイドレーション不一致でツリーが再マウントされると
-  //       初期化が再実行されるため、ここで removeItem すると2回目の実行で値が消え、復元が失われる
-  //       （= 管理ログイン画面からキャスト画面へ飛んでいた原因）。破棄は下の useEffect で1回だけ行う。
-  const [switchRestore] = useState(() => {
-    if (typeof window === "undefined") return null;
+  // 初期値はサーバ描画と同じデフォルトにする（hydration mismatch を起こさないため）
+  const [mode, setMode] = useState("cast");
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [passInput, setPassInput] = useState("");
+  const [passError, setPassError] = useState(false);
+  const [castPage, setCastPage] = useState("score");
+  const [showShindan, setShowShindan] = useState(false);
+  const [adminPage, setAdminPage] = useState("guarantee");
+
+  // 店舗切替のリロードをまたいで現在の画面を復元する（クライアント専用・マウント後に1回だけ）。
+  // lazy initializer ではなく useEffect で適用することで、初期描画はサーバと一致し
+  // hydration mismatch → 再マウントが起きない（= 復元が再マウントに巻き込まれて消える問題を回避）。
+  useEffect(() => {
     try {
       const raw = sessionStorage.getItem("shamenikki_switch_restore");
-      return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
-  });
-  useEffect(() => {
+      if (raw) {
+        const r = JSON.parse(raw);
+        if (r.mode !== undefined) setMode(r.mode);
+        if (r.adminUnlocked !== undefined) setAdminUnlocked(r.adminUnlocked);
+        if (r.castPage !== undefined) setCastPage(r.castPage);
+        if (r.adminPage !== undefined) setAdminPage(r.adminPage);
+      }
+    } catch {}
     // 復元値は1回使ったら破棄（通常リロードでは従来どおり再ロックされるように）
     try { sessionStorage.removeItem("shamenikki_switch_restore"); } catch {}
   }, []);
-  const [mode, setMode] = useState(switchRestore?.mode ?? "cast");
-  const [adminUnlocked, setAdminUnlocked] = useState(switchRestore?.adminUnlocked ?? false);
-  const [passInput, setPassInput] = useState("");
-  const [passError, setPassError] = useState(false);
-  const [castPage, setCastPage] = useState(switchRestore?.castPage ?? "score");
-  const [showShindan, setShowShindan] = useState(false);
-  const [adminPage, setAdminPage] = useState(switchRestore?.adminPage ?? "guarantee");
   const [casts, setCasts] = useLocalStorage("shamenikki_casts", initCasts);
   const [scores, setScores] = useLocalStorage("shamenikki_scores", initScores);
   const [settings, setSettings] = useLocalStorage("shamenikki_settings", initSettings);
