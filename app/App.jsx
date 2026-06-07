@@ -91,7 +91,12 @@ const initScores = [
   { id: 3, cast_name: "りな", diary: "お疲れ様です", result: "総合点：32点\n\n保証条件チェック\n・文字数判定：文字数不足\n・画像判定：画像不足\n\n保証改善提案\n・最低100文字必要です。自己紹介や今日の気分を追記してください\n\n良い点\n・挨拶ができている\n\n改善点\n・文字数が大幅に不足\n・画像がない\n\n改善タイトル案\n・「今日もよろしくお願いします♪」", posted_at: new Date(Date.now() - 7200000).toISOString(), has_image: false, score: 32 },
 ];
 
-const ADMIN_PASSWORD = "1234";
+const ADMIN_PASSWORD = "1234"; // 未知店舗のフォールバック（ロックアウト防止）
+// 管理ログインパスワード（店舗ごと）
+const ADMIN_PASSWORDS = {
+  nadeshiko: "1234",
+  club_audition_nagano: "4321",
+};
 const AUTO_LOGIN_KEY = "shamenikki_autologin";
 const CREDS_KEY      = "shamenikki_creds";
 
@@ -697,7 +702,9 @@ function App() {
   }, []);
 
   function tryUnlock() {
-    if (passInput === ADMIN_PASSWORD) {
+    // 現在選択中の店舗のパスワードと照合（未知店舗は従来の 1234 にフォールバック）
+    const expected = ADMIN_PASSWORDS[getActiveStoreId()] ?? ADMIN_PASSWORD;
+    if (passInput === expected) {
       setAdminUnlocked(true); setPassError(false); setPassInput("");
     } else {
       setPassError(true); setPassInput("");
