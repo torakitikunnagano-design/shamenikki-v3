@@ -206,6 +206,49 @@ app.post('/store-sync', async (req, res) => {
 
     console.log('[store-sync] casts=' + casts.length + ' (limit ' + CAST_SYNC_LIMIT + ')');
 
+    // 各キャストページ(C8 member_id)からミテネ用ログインID/パスワードを取得する。
+    // 「登録済」枠の「ログインID : ◯◯◯　パスワード : ◯◯◯」をスクレイプ。
+    // 同時実行を制限し、ページごとにタイムアウト。失敗は黙ってスキップ（クライアント側で既存値維持）。
+    const CRED_LIMIT = 150;
+    const CRED_CONCURRENCY = 4;
+    const CRED_PAGE_TIMEOUT = 20000;
+    const credTargets = casts.slice(0, CRED_LIMIT); // slice でも要素は同一参照なので casts に反映される
+
+    async function fetchCred(memberId) {
+      let p;
+      try {
+        p = await browser.newPage();
+        await p.setUserAgent(UA);
+        p.setDefaultNavigationTimeout(CRED_PAGE_TIMEOUT);
+        await p.goto(
+          `https://newmanager.cityheaven.net/C8GirlMyPageRegist.php?member_id=${encodeURIComponent(memberId)}&shopdir=${encodeURIComponent(shopdir)}`,
+          { waitUntil: 'domcontentloaded', timeout: CRED_PAGE_TIMEOUT }
+        );
+        return await p.evaluate(() => {
+          const t = (document.body && document.body.innerText) || '';
+          const idM = t.match(/ログイン\s*ID\s*[:：]\s*([0-9A-Za-z_\-]+)/);
+          const pwM = t.match(/パスワード\s*[:：]\s*([^\s　<\n\r]+)/);
+          return { loginId: idM ? idM[1] : null, password: pwM ? pwM[1] : null };
+        });
+      } catch (e) {
+        return { loginId: null, password: null };
+      } finally {
+        if (p) { try { await p.close(); } catch (_) {} }
+      }
+    }
+
+    let credIdx = 0, credOk = 0;
+    async function credWorker() {
+      while (credIdx < credTargets.length) {
+        const c = credTargets[credIdx++];
+        const cred = await fetchCred(c.heavenId);
+        if (cred.loginId) c.heavenId = cred.loginId;   // ページのログインIDを優先（heaven_id）
+        if (cred.password) { c.heavenPass = cred.password; credOk++; } // 毎回上書き（最新に追従）
+      }
+    }
+    await Promise.all(Array.from({ length: CRED_CONCURRENCY }, () => credWorker()));
+    console.log('[store-sync] creds fetched=' + credOk + '/' + credTargets.length);
+
     // シフト一覧を全ページ取得（C9）&start=1,2,… で送りされる
     const MAX_C9_PAGES = 20;
     const allShifts = [];

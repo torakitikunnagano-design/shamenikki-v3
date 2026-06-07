@@ -2879,24 +2879,26 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         let addedCount = 0, updatedCount = 0;
         const next = [...casts];
 
-        incoming.forEach(({ name: rawName, heavenId }) => {
+        incoming.forEach(({ name: rawName, heavenId, heavenPass }) => {
           const name = normalizeName(rawName); // 最初のスペースより前だけを保存名にする
-          // 1. heavenId一致 → name更新（他設定は保持）
+          const pass = heavenPass || null;     // 取得できた時だけ上書き（失敗時は既存値を維持）
+          // heaven_pass は端末ローカルのみ（Supabaseには送らない）。毎回の同期で最新に追従。
+          // 1. heavenId一致 → name更新（取得できればパスワードも更新）
           const byId = next.findIndex((c) => c.heaven_id && c.heaven_id === heavenId);
           if (byId !== -1) {
-            next[byId] = { ...next[byId], name };
+            next[byId] = { ...next[byId], name, ...(pass ? { heaven_pass: pass } : {}) };
             updatedCount++;
             return;
           }
-          // 2. name一致（正規化名で照合）→ heaven_id更新＋name正規化（他設定は保持）
+          // 2. name一致（正規化名で照合）→ heaven_id更新＋name正規化（取得できればパスワードも更新）
           const byName = next.findIndex((c) => normalizeName(c.name) === name);
           if (byName !== -1) {
-            next[byName] = { ...next[byName], heaven_id: heavenId, name };
+            next[byName] = { ...next[byName], heaven_id: heavenId, name, ...(pass ? { heaven_pass: pass } : {}) };
             updatedCount++;
             return;
           }
           // 3. 新規追加
-          next.push({ name, is_active: true, work_start: "", strong: "未分析", weak: "未分析", heaven_id: heavenId, heaven_pass: "" });
+          next.push({ name, is_active: true, work_start: "", strong: "未分析", weak: "未分析", heaven_id: heavenId, heaven_pass: pass || "" });
           addedCount++;
         });
 
