@@ -2863,7 +2863,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       const res = await fetch("/api/store-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir }),
+        body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir, mode }),
       });
       const data = await res.json();
       if (!res.ok || !data.casts) throw new Error(data.message || "同期に失敗しました");

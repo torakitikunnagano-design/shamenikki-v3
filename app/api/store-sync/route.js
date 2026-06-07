@@ -4,7 +4,7 @@ const VPS_URL = "http://160.251.166.73:3000/store-sync";
 
 export async function POST(request) {
   try {
-    const { adminId, adminPass, shopdir } = await request.json();
+    const { adminId, adminPass, shopdir, mode } = await request.json();
 
     const vpsRes = await fetch(VPS_URL, {
       method: "POST",
@@ -12,7 +12,7 @@ export async function POST(request) {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
       },
-      body: JSON.stringify({ adminId, adminPass, shopdir }),
+      body: JSON.stringify({ adminId, adminPass, shopdir, mode }),
     });
 
     const resText = await vpsRes.text();

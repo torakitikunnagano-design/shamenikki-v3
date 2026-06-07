@@ -133,7 +133,7 @@ app.post('/post', async (req, res) => {
 // 店舗管理からキャスト一覧を吸い上げる
 // ============================================================
 app.post('/store-sync', async (req, res) => {
-  const { adminId, adminPass, shopdir } = req.body || {};
+  const { adminId, adminPass, shopdir, mode } = req.body || {};
   let browser;
   try {
     if (!adminId || !adminPass || !shopdir) {
@@ -209,6 +209,8 @@ app.post('/store-sync', async (req, res) => {
     // 各キャストページ(C8 member_id)からミテネ用ログインID/パスワードを取得する。
     // 「登録済」枠の「ログインID : ◯◯◯　パスワード : ◯◯◯」をスクレイプ。
     // 同時実行を制限し、ページごとにタイムアウト。失敗は黙ってスキップ（クライアント側で既存値維持）。
+    // ※ キャスト同期(mode==='casts')のときだけ実行。出勤同期では走らせず従来速度を維持。
+    if (mode === 'casts') {
     const CRED_LIMIT = 150;
     const CRED_CONCURRENCY = 4;
     const CRED_PAGE_TIMEOUT = 20000;
@@ -248,6 +250,7 @@ app.post('/store-sync', async (req, res) => {
     }
     await Promise.all(Array.from({ length: CRED_CONCURRENCY }, () => credWorker()));
     console.log('[store-sync] creds fetched=' + credOk + '/' + credTargets.length);
+    } // end if (mode === 'casts')
 
     // シフト一覧を全ページ取得（C9）&start=1,2,… で送りされる
     const MAX_C9_PAGES = 20;
