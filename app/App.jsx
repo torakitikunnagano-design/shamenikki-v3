@@ -380,8 +380,8 @@ function App() {
         if (data.length > 0) {
           // Supabaseにデータあり → それを使う
           setCourses(data.map((r) => ({ id: r.id, minutes: r.minutes })));
-        } else {
-          // Supabaseが空 → localStorageの内容を一度だけシード
+        } else if (getActiveStoreId() === DEFAULT_STORE_ID) {
+          // オリジナル店(NADESHIKO)のみ: localStorage を Supabase に初回シード
           try {
             const stored = localStorage.getItem(skey("shamenikki_courses"));
             if (stored) {
@@ -391,6 +391,9 @@ function App() {
               }
             }
           } catch {}
+        } else {
+          // 非オリジナル店: Supabase が唯一の真実。空なら必ず空にして漏れ物を一掃
+          setCourses([]);
         }
       } catch {}
     }
@@ -451,16 +454,21 @@ function App() {
         if (error) throw error;
 
         if (data.length === 0) {
-          // Supabaseが空 → localStorageの内容をシード（heaven_passは送らない）
-          try {
-            const stored = localStorage.getItem(skey("shamenikki_casts"));
-            if (stored) {
-              const local = JSON.parse(stored);
-              if (local.length > 0) {
-                await supabase.from("casts").upsert(local.map(toSupabaseCast), { onConflict: "store_id,name" });
+          if (getActiveStoreId() === DEFAULT_STORE_ID) {
+            // オリジナル店(NADESHIKO)のみ: localStorage を Supabase に初回シード（heaven_passは送らない）
+            try {
+              const stored = localStorage.getItem(skey("shamenikki_casts"));
+              if (stored) {
+                const local = JSON.parse(stored);
+                if (local.length > 0) {
+                  await supabase.from("casts").upsert(local.map(toSupabaseCast), { onConflict: "store_id,name" });
+                }
               }
-            }
-          } catch {}
+            } catch {}
+          } else {
+            // 非オリジナル店: Supabase が唯一の真実。空なら必ず空にして localStorage の漏れ物を一掃
+            setCasts([]);
+          }
         } else {
           // Supabaseにデータあり → localStorageのheaven_passをname照合でマージ
           try {
@@ -497,25 +505,30 @@ function App() {
         if (error) throw error;
 
         if (data.length === 0) {
-          // Supabaseが空 → localStorageの内容をシード
-          try {
-            const stored = localStorage.getItem(skey("shamenikki_scores"));
-            if (stored) {
-              const local = JSON.parse(stored);
-              if (local.length > 0) {
-                await supabase.from("scores").upsert(local.map((s) => ({
-                  store_id:   getActiveStoreId(),
-                  id:         s.id,
-                  cast_name:  s.cast_name,
-                  diary:      s.diary,
-                  result:     s.result,
-                  posted_at:  s.posted_at,
-                  has_image:  s.has_image,
-                  score:      s.score,
-                })), { onConflict: "id" });
+          if (getActiveStoreId() === DEFAULT_STORE_ID) {
+            // オリジナル店(NADESHIKO)のみ: localStorage を Supabase に初回シード
+            try {
+              const stored = localStorage.getItem(skey("shamenikki_scores"));
+              if (stored) {
+                const local = JSON.parse(stored);
+                if (local.length > 0) {
+                  await supabase.from("scores").upsert(local.map((s) => ({
+                    store_id:   getActiveStoreId(),
+                    id:         s.id,
+                    cast_name:  s.cast_name,
+                    diary:      s.diary,
+                    result:     s.result,
+                    posted_at:  s.posted_at,
+                    has_image:  s.has_image,
+                    score:      s.score,
+                  })), { onConflict: "id" });
+                }
               }
-            }
-          } catch {}
+            } catch {}
+          } else {
+            // 非オリジナル店: Supabase が唯一の真実。空なら必ず空にして漏れ物を一掃
+            setScores([]);
+          }
         } else {
           // Supabaseにデータあり → それを使う
           setScores(data.map((s) => ({
@@ -862,7 +875,7 @@ function App() {
                   : "👑 店舗管理"}
               </span>
               {/* 現在のアクティブ店バッジ（キャスト・管理どちらのタブでも表示） */}
-              <span style={{ fontSize: "10px", fontWeight: "700", color: C.accent2, background: `${C.accent2}15`, border: `1px solid ${C.accent2}40`, padding: "2px 8px", borderRadius: "10px", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: "13px", fontWeight: "700", color: C.accent2, background: `${C.accent2}1a`, border: `1.5px solid ${C.accent2}55`, padding: "4px 12px", borderRadius: "12px", whiteSpace: "nowrap" }}>
                 🏠 {activeStoreId === DEFAULT_STORE_ID ? "NADESHIKO" : (storeList.find((s) => s.id === activeStoreId)?.name || activeStoreId)}
               </span>
             </div>
