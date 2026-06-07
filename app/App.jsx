@@ -95,6 +95,87 @@ const ADMIN_PASSWORD = "1234";
 const AUTO_LOGIN_KEY = "shamenikki_autologin";
 const CREDS_KEY      = "shamenikki_creds";
 
+// ============================================================
+// 複数店舗対応（Phase 1）: 店舗ごとに localStorage を名前空間化する土台
+//  - 既存(NADESHIKO)のデータは壊さない（古いキーはコピーするだけで残す）
+// ============================================================
+const STORES_KEY       = "shamenikki_stores";        // 店舗一覧（共通・名前空間化しない）
+const ACTIVE_STORE_KEY = "shamenikki_active_store";   // 選択中店舗id（共通）
+const DEFAULT_STORE_ID = "nadeshiko";
+const DEFAULT_STORES = [
+  { id: "nadeshiko", name: "NADESHIKO-撫子-" },
+  { id: "club_audition_nagano", name: "クラブオーディション長野" },
+];
+
+// 名前空間化しない共通キー（店舗で分けない）
+const COMMON_KEYS = new Set([
+  STORES_KEY, ACTIVE_STORE_KEY, AUTO_LOGIN_KEY, CREDS_KEY, "shamenikki_settings_synced",
+]);
+
+// 店舗ごとに分ける localStorage キー
+const PER_STORE_BASE_KEYS = [
+  "shamenikki_casts", "shamenikki_scores", "shamenikki_settings", "shamenikki_courses",
+  "shamenikki_shifts", "shamenikki_sync_config", "shamenikki_cut_days",
+  "shamenikki_guarantee", "shamenikki_violations", "shamenikki_extra_workdays",
+];
+// キャスト等に紐づく動的キー（接頭辞で判定）
+const PER_STORE_PREFIXES = ["shamenikki_salary_", "cast_type_", "support_settings_"];
+
+function getStores() {
+  try {
+    const raw = localStorage.getItem(STORES_KEY);
+    if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) return arr; }
+  } catch {}
+  return DEFAULT_STORES;
+}
+function getActiveStoreId() {
+  try { return localStorage.getItem(ACTIVE_STORE_KEY) || DEFAULT_STORE_ID; } catch { return DEFAULT_STORE_ID; }
+}
+// 選択中店舗で名前空間化したキー（共通キーはそのまま返す）
+function skey(baseKey) {
+  if (!baseKey || COMMON_KEYS.has(baseKey)) return baseKey;
+  return baseKey + "::" + getActiveStoreId();
+}
+// 接頭辞スキャン用: 選択中店舗の名前空間キーだけを返す（[{fullKey, baseKey}]）
+function scopedKeys(prefix) {
+  const suffix = "::" + getActiveStoreId();
+  try {
+    return Object.keys(localStorage)
+      .filter((k) => k.startsWith(prefix) && k.endsWith(suffix))
+      .map((k) => ({ fullKey: k, baseKey: k.slice(0, -suffix.length) }));
+  } catch { return []; }
+}
+
+// 既存(名前空間なし)データを 1 回だけ ::nadeshiko へコピーする（元キーは消さない）
+let _storeMigrationDone = false;
+function ensureStoreMigration() {
+  if (_storeMigrationDone) return;
+  if (typeof window === "undefined") return;
+  _storeMigrationDone = true;
+  try {
+    if (!localStorage.getItem(STORES_KEY)) localStorage.setItem(STORES_KEY, JSON.stringify(DEFAULT_STORES));
+    if (!localStorage.getItem(ACTIVE_STORE_KEY)) localStorage.setItem(ACTIVE_STORE_KEY, DEFAULT_STORE_ID);
+
+    const NS = "::" + DEFAULT_STORE_ID;
+    // 固定キー: baseKey::nadeshiko が未作成で、古い baseKey があるときだけコピー
+    PER_STORE_BASE_KEYS.forEach((bk) => {
+      const oldV = localStorage.getItem(bk);
+      if (oldV !== null && localStorage.getItem(bk + NS) === null) {
+        localStorage.setItem(bk + NS, oldV);
+      }
+    });
+    // 動的キー（salary/cast_type/support_settings）: 名前空間なしのものをコピー
+    Object.keys(localStorage).forEach((k) => {
+      if (k.includes("::")) return; // 既に名前空間化済み
+      if (!PER_STORE_PREFIXES.some((p) => k.startsWith(p))) return;
+      if (localStorage.getItem(k + NS) === null) {
+        const v = localStorage.getItem(k);
+        if (v !== null) localStorage.setItem(k + NS, v);
+      }
+    });
+  } catch {}
+}
+
 // 給料レコード → salary_records 行
 function toSupabaseRecord(rec, castId) {
   return {
@@ -157,11 +238,12 @@ function useLocalStorage(key, initialValue) {
   const initialized = useRef(false);
 
   useEffect(() => {
+    const nsKey = skey(key); // 選択中店舗で名前空間化
     if (!initialized.current) {
       // 初回マウント時: localStorageから読み込む
       initialized.current = true;
       try {
-        const stored = localStorage.getItem(key);
+        const stored = localStorage.getItem(nsKey);
         if (stored !== null) {
           setValue(JSON.parse(stored));
           return; // 読み込み後は書き込まずに終了
@@ -170,7 +252,7 @@ function useLocalStorage(key, initialValue) {
     }
     // 初回以降: localStorageへ書き込む
     try {
-      localStorage.setItem(key, JSON.stringify(value));
+      localStorage.setItem(nsKey, JSON.stringify(value));
     } catch {}
   }, [key, value]);
 
@@ -181,12 +263,28 @@ function useLocalStorage(key, initialValue) {
 // メインアプリ
 // ============================================================
 function App() {
+  // 店舗データ移行（描画前に1回・同期実行）— useLocalStorage の読み込みより先に確実に走らせる
+  if (typeof window !== "undefined") ensureStoreMigration();
+
   useEffect(() => {
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = "https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap";
     document.head.appendChild(link);
   }, []);
+
+  // 店舗切替（共通キー・名前空間化しない）
+  const [storeList, setStoreList] = useState(DEFAULT_STORES);
+  const [activeStoreId, setActiveStoreId] = useState(DEFAULT_STORE_ID);
+  useEffect(() => {
+    try { setStoreList(getStores()); setActiveStoreId(getActiveStoreId()); } catch {}
+  }, []);
+  function switchStore(id) {
+    if (!id || id === getActiveStoreId()) return;
+    try { localStorage.setItem(ACTIVE_STORE_KEY, id); } catch {}
+    // 確実に反映するためページを再読込（名前空間化された各キーを読み直す）
+    location.reload();
+  }
 
   const [mode, setMode] = useState("cast");
   const [adminUnlocked, setAdminUnlocked] = useState(false);
@@ -217,7 +315,7 @@ function App() {
         } else {
           // Supabaseが空 → localStorageの内容を一度だけシード
           try {
-            const stored = localStorage.getItem("shamenikki_courses");
+            const stored = localStorage.getItem(skey("shamenikki_courses"));
             if (stored) {
               const local = JSON.parse(stored);
               if (local.length > 0) {
@@ -239,7 +337,7 @@ function App() {
         const synced = localStorage.getItem("shamenikki_settings_synced");
         if (!synced) {
           try {
-            const stored = localStorage.getItem("shamenikki_settings");
+            const stored = localStorage.getItem(skey("shamenikki_settings"));
             if (stored) {
               const local = JSON.parse(stored);
               await supabase.from("settings").upsert({
@@ -286,7 +384,7 @@ function App() {
         if (data.length === 0) {
           // Supabaseが空 → localStorageの内容をシード（heaven_passは送らない）
           try {
-            const stored = localStorage.getItem("shamenikki_casts");
+            const stored = localStorage.getItem(skey("shamenikki_casts"));
             if (stored) {
               const local = JSON.parse(stored);
               if (local.length > 0) {
@@ -297,7 +395,7 @@ function App() {
         } else {
           // Supabaseにデータあり → localStorageのheaven_passをname照合でマージ
           try {
-            const stored = localStorage.getItem("shamenikki_casts");
+            const stored = localStorage.getItem(skey("shamenikki_casts"));
             const localCasts = stored ? JSON.parse(stored) : [];
             const merged = data.map((sc) => {
               const lc = localCasts.find((l) => l.name === sc.name);
@@ -332,7 +430,7 @@ function App() {
         if (data.length === 0) {
           // Supabaseが空 → localStorageの内容をシード
           try {
-            const stored = localStorage.getItem("shamenikki_scores");
+            const stored = localStorage.getItem(skey("shamenikki_scores"));
             if (stored) {
               const local = JSON.parse(stored);
               if (local.length > 0) {
@@ -375,7 +473,7 @@ function App() {
         if (data.length === 0) {
           // Supabaseが空 → localStorageの内容をシード
           try {
-            const stored = localStorage.getItem("shamenikki_shifts");
+            const stored = localStorage.getItem(skey("shamenikki_shifts"));
             if (stored) {
               const local = JSON.parse(stored);
               const rows = Object.entries(local).map(([key, val]) => ({
@@ -416,13 +514,12 @@ function App() {
         if (data.length === 0) {
           // Supabaseが空 → localStorageの cast_type_* を走査してシード
           try {
-            const rows = Object.keys(localStorage)
-              .filter((k) => k.startsWith("cast_type_"))
-              .map((k) => {
+            const rows = scopedKeys("cast_type_")
+              .map(({ fullKey, baseKey }) => {
                 try {
-                  const val = JSON.parse(localStorage.getItem(k));
+                  const val = JSON.parse(localStorage.getItem(fullKey));
                   if (!val?.type) return null;
-                  return { cast_id: k.slice("cast_type_".length), type: val.type, retries: val.retries ?? 0, updated_at: new Date().toISOString() };
+                  return { cast_id: baseKey.slice("cast_type_".length), type: val.type, retries: val.retries ?? 0, updated_at: new Date().toISOString() };
                 } catch { return null; }
               })
               .filter(Boolean);
@@ -433,7 +530,7 @@ function App() {
         } else {
           // Supabaseにデータあり → 各行をlocalStorageに書き戻す（ハイドレート）
           data.forEach((row) => {
-            try { localStorage.setItem(`cast_type_${row.cast_id}`, JSON.stringify({ type: row.type, retries: row.retries })); } catch {}
+            try { localStorage.setItem(skey(`cast_type_${row.cast_id}`), JSON.stringify({ type: row.type, retries: row.retries })); } catch {}
           });
         }
       } catch {}
@@ -451,13 +548,12 @@ function App() {
         if (data.length === 0) {
           // Supabaseが空 → localStorageの support_settings_* を走査してシード
           try {
-            const rows = Object.keys(localStorage)
-              .filter((k) => k.startsWith("support_settings_"))
-              .map((k) => {
+            const rows = scopedKeys("support_settings_")
+              .map(({ fullKey, baseKey }) => {
                 try {
-                  const val = JSON.parse(localStorage.getItem(k));
+                  const val = JSON.parse(localStorage.getItem(fullKey));
                   return {
-                    cast_id:       k.slice("support_settings_".length),
+                    cast_id:       baseKey.slice("support_settings_".length),
                     image_support: typeof val.imageSupport === "boolean" ? val.imageSupport : true,
                     text_support:  typeof val.textSupport  === "boolean" ? val.textSupport  : true,
                     title_assist:  typeof val.titleAssist  === "boolean" ? val.titleAssist  : true,
@@ -474,7 +570,7 @@ function App() {
           // Supabaseにデータあり → 各行をlocalStorageに書き戻す（ハイドレート）
           data.forEach((row) => {
             try {
-              localStorage.setItem(`support_settings_${row.cast_id}`, JSON.stringify({
+              localStorage.setItem(skey(`support_settings_${row.cast_id}`), JSON.stringify({
                 imageSupport: row.image_support,
                 textSupport:  row.text_support,
                 titleAssist:  row.title_assist,
@@ -497,10 +593,10 @@ function App() {
         if (recordsData.length === 0) {
           // Supabaseが空 → localStorageの shamenikki_salary_* を走査してシード
           try {
-            const salaryKeys = Object.keys(localStorage).filter((k) => k.startsWith("shamenikki_salary_"));
-            for (const key of salaryKeys) {
-              const castId = key.slice("shamenikki_salary_".length);
-              const recs = JSON.parse(localStorage.getItem(key)) || [];
+            const salaryKeys = scopedKeys("shamenikki_salary_");
+            for (const { fullKey, baseKey } of salaryKeys) {
+              const castId = baseKey.slice("shamenikki_salary_".length);
+              const recs = JSON.parse(localStorage.getItem(fullKey)) || [];
               for (const rec of recs) {
                 // 親レコードを先に upsert
                 await supabase.from("salary_records").upsert(toSupabaseRecord(rec, castId));
@@ -561,7 +657,7 @@ function App() {
             });
             // cast_id ごとに localStorage に書き戻す
             Object.entries(castMap).forEach(([castId, recs]) => {
-              try { localStorage.setItem(`shamenikki_salary_${castId}`, JSON.stringify(recs)); } catch {}
+              try { localStorage.setItem(skey(`shamenikki_salary_${castId}`), JSON.stringify(recs)); } catch {}
             });
           } catch {}
         }
@@ -586,7 +682,7 @@ function App() {
     const cast = casts.find((c) => c.name === name);
     const castId = cast?.heaven_id || name;
     try {
-      const typeData = localStorage.getItem(`cast_type_${castId}`);
+      const typeData = localStorage.getItem(skey(`cast_type_${castId}`));
       if (typeData && JSON.parse(typeData)?.type) { setCastPage("score"); return; }
     } catch {}
     setShowShindan(true);
@@ -679,12 +775,24 @@ function App() {
                 ? (loggedInCast ? `💕 ${loggedInCast}` : "💕 キャスト")
                 : "👑 店舗管理"}
             </span>
-            {mode === "admin" && (
-              <button onClick={logout} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "12px" }}>ログアウト</button>
-            )}
-            {mode === "cast" && loggedInCast && (
-              <button onClick={castLogout} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "12px" }}>退出</button>
-            )}
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              {/* 店舗切替（共通・切替で再読込） */}
+              <select
+                value={activeStoreId}
+                onChange={(e) => switchStore(e.target.value)}
+                title="店舗を切り替え"
+                style={{ fontSize: "11px", color: C.text, fontWeight: "700", border: `1.5px solid ${C.border}`, borderRadius: "8px", padding: "3px 8px", background: "white", cursor: "pointer", maxWidth: "180px" }}>
+                {storeList.map((s) => (
+                  <option key={s.id} value={s.id}>🏠 {s.name}</option>
+                ))}
+              </select>
+              {mode === "admin" && (
+                <button onClick={logout} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "12px" }}>ログアウト</button>
+              )}
+              {mode === "cast" && loggedInCast && (
+                <button onClick={castLogout} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "12px" }}>退出</button>
+              )}
+            </div>
           </div>
 
           {/* キャスト未ログイン */}
@@ -992,7 +1100,7 @@ function useCastTypeLock(castId) {
     if (!key || lockLoaded.current) return;
     lockLoaded.current = true;
     try {
-      const saved = localStorage.getItem(key);
+      const saved = localStorage.getItem(skey(key));
       if (saved) setLockData(JSON.parse(saved));
     } catch {}
   }, [key]);
@@ -1000,7 +1108,7 @@ function useCastTypeLock(castId) {
   function saveLock(updates) {
     setLockData((prev) => {
       const next = { ...prev, ...updates };
-      if (key) { try { localStorage.setItem(key, JSON.stringify(next)); } catch {} }
+      if (key) { try { localStorage.setItem(skey(key), JSON.stringify(next)); } catch {} }
       if (castId) {
         try {
           supabase.from("cast_types").upsert(
@@ -1015,7 +1123,7 @@ function useCastTypeLock(castId) {
 
   function resetLock() {
     setLockData({ type: null, retries: 0 });
-    if (key) { try { localStorage.removeItem(key); } catch {} }
+    if (key) { try { localStorage.removeItem(skey(key)); } catch {} }
     if (castId) {
       try { supabase.from("cast_types").delete().eq("cast_id", castId).then(() => {}).catch(() => {}); } catch {}
     }
@@ -1229,7 +1337,7 @@ function useSupportSettings(castId) {
     if (!key || loaded.current) return;
     loaded.current = true;
     try {
-      const saved = localStorage.getItem(key);
+      const saved = localStorage.getItem(skey(key));
       if (saved) {
         const { imageSupport, textSupport, titleAssist } = JSON.parse(saved);
         setSupport({
@@ -1244,7 +1352,7 @@ function useSupportSettings(castId) {
   function update(patch) {
     setSupport((prev) => {
       const next = { ...prev, ...patch };
-      if (key) { try { localStorage.setItem(key, JSON.stringify(next)); } catch {} }
+      if (key) { try { localStorage.setItem(skey(key), JSON.stringify(next)); } catch {} }
       if (castId) {
         try {
           supabase.from("support_settings").upsert(
@@ -1309,7 +1417,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
   useEffect(() => {
     if (!castId) return;
     try {
-      const saved = localStorage.getItem(`cast_type_${castId}`);
+      const saved = localStorage.getItem(skey(`cast_type_${castId}`));
       if (saved) {
         const { type, retries } = JSON.parse(saved);
         setConfirmedType(mapToCanonicalType(type));
@@ -1320,7 +1428,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
 
   function getSalaryContext() {
     try {
-      const recs = JSON.parse(localStorage.getItem(`shamenikki_salary_${castId}`)) || [];
+      const recs = JSON.parse(localStorage.getItem(skey(`shamenikki_salary_${castId}`))) || [];
       if (recs.length === 0) return "";
       const recent = recs.slice(0, 5);
 
@@ -1998,7 +2106,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   const storageKey = `shamenikki_salary_${castId}`;
 
   function loadRecords() {
-    try { return JSON.parse(localStorage.getItem(storageKey)) || []; } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(skey(storageKey))) || []; } catch { return []; }
   }
 
   const mkHon = () => ({ courseMin: "", shimei: "", fee: "", shimeiRyou: "", op: "", extCount: "", extMin: "" });
@@ -2137,7 +2245,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
     };
     const next = [rec, ...records].slice(0, 30);
     setRecords(next);
-    localStorage.setItem(storageKey, JSON.stringify(next)); // 従来通りlocalStorageに保存
+    localStorage.setItem(skey(storageKey), JSON.stringify(next)); // 従来通りlocalStorageに保存（店舗で名前空間化）
     setHons(Array.from({ length: 12 }, mkHon));
     if (!staffShift) { setStartTime(""); setEndTime(""); }
     setGross(""); setDorm(""); setMisc(""); setTransport("");
@@ -2412,7 +2520,7 @@ function calcGuaranteeResult(castName, ctx) {
   const cast = casts.find((c) => c.name === castName);
   const castId = cast?.heaven_id || castName;
   let salaryRecs = [];
-  try { salaryRecs = JSON.parse(localStorage.getItem(`shamenikki_salary_${castId}`)) || []; } catch {}
+  try { salaryRecs = JSON.parse(localStorage.getItem(skey(`shamenikki_salary_${castId}`))) || []; } catch {}
   const periodRecs = salaryRecs.filter((r) => r.date >= startDate && r.date <= endDate);
   const basis = settings?.salaryBasis ?? "gross";
   const earnedGross = periodRecs.reduce((s, r) => s + (basis === "net" ? (Number(r.takeHome) || 0) : (Number(r.gross) || 0)), 0);
@@ -2547,7 +2655,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
 
   function resetDiagLock(c) {
     const castId = c.heaven_id || c.name;
-    try { localStorage.removeItem(`cast_type_${castId}`); } catch {}
+    try { localStorage.removeItem(skey(`cast_type_${castId}`)); } catch {}
     try { supabase.from("cast_types").delete().eq("cast_id", castId).then(() => {}).catch(() => {}); } catch {}
     setLockRefresh((n) => n + 1);
   }
@@ -2843,7 +2951,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         <div style={{ display: "grid", gap: "10px" }}>
           {casts.filter((c) => !showTodayOnly || (Array.isArray(shifts[c.name]) && shifts[c.name].some((s) => s.date === todayKey))).map((c) => {
             let diagData = null;
-            try { const s = localStorage.getItem(`cast_type_${c.heaven_id || c.name}`); if (s) diagData = JSON.parse(s); } catch {}
+            try { const s = localStorage.getItem(skey(`cast_type_${c.heaven_id || c.name}`)); if (s) diagData = JSON.parse(s); } catch {}
             const isLocked = (diagData?.retries ?? 0) >= 2;
             const todayShift = Array.isArray(shifts[c.name]) ? shifts[c.name].find((s) => s.date === todayKey) : null;
             return (
