@@ -423,8 +423,10 @@ function App() {
             }
           } catch {}
         } else {
-          // 非オリジナル店: Supabase が唯一の真実。空なら必ず空にして漏れ物を一掃
-          setCourses([]);
+          // 非オリジナル店で Supabase が0件。localStorage にも無いときだけ空にする（誤った空で消さない）
+          let localArr = [];
+          try { const s = localStorage.getItem(skey("shamenikki_courses")); localArr = s ? JSON.parse(s) : []; } catch {}
+          if (!Array.isArray(localArr) || localArr.length === 0) setCourses([]);
         }
       } catch {}
     }
@@ -497,8 +499,12 @@ function App() {
               }
             } catch {}
           } else {
-            // 非オリジナル店: Supabase が唯一の真実。空なら必ず空にして localStorage の漏れ物を一掃
-            setCasts([]);
+            // 非オリジナル店で Supabase が0件。ただし localStorage に既存データがあるなら
+            // 「誤った空（店舗往復時の取得失敗等）」の可能性が高いので破壊しない（141件を消さない）。
+            // localStorage も空のときだけ空表示にする（真に未同期の新規店）。
+            let localArr = [];
+            try { const s = localStorage.getItem(skey("shamenikki_casts")); localArr = s ? JSON.parse(s) : []; } catch {}
+            if (!Array.isArray(localArr) || localArr.length === 0) setCasts([]);
           }
         } else {
           // Supabaseにデータあり → localStorageのheaven_passをname照合でマージ
@@ -557,8 +563,10 @@ function App() {
               }
             } catch {}
           } else {
-            // 非オリジナル店: Supabase が唯一の真実。空なら必ず空にして漏れ物を一掃
-            setScores([]);
+            // 非オリジナル店で Supabase が0件。localStorage にも無いときだけ空にする（誤った空で消さない）
+            let localArr = [];
+            try { const s = localStorage.getItem(skey("shamenikki_scores")); localArr = s ? JSON.parse(s) : []; } catch {}
+            if (!Array.isArray(localArr) || localArr.length === 0) setScores([]);
           }
         } else {
           // Supabaseにデータあり → それを使う
