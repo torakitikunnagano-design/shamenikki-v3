@@ -743,33 +743,6 @@ function App() {
         </div>
       </header>
 
-      {/* サブバー（全画面共通: 店舗スイッチャーを常時表示） */}
-      <div style={{ background: "white", borderBottom: `1.5px solid ${C.border}`, padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: "36px" }}>
-        <span style={{ fontSize: "11px", color: C.accent, fontWeight: "700", letterSpacing: "0.05em" }}>
-          {mode === "cast"
-            ? (loggedInCast ? `💕 ${loggedInCast}` : "💕 キャスト")
-            : "👑 店舗管理"}
-        </span>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          {/* 店舗切替（共通・切替で再読込） */}
-          <select
-            value={activeStoreId}
-            onChange={(e) => switchStore(e.target.value)}
-            title="店舗を切り替え"
-            style={{ fontSize: "11px", color: C.text, fontWeight: "700", border: `1.5px solid ${C.border}`, borderRadius: "8px", padding: "3px 8px", background: "white", cursor: "pointer", maxWidth: "180px" }}>
-            {storeList.map((s) => (
-              <option key={s.id} value={s.id}>🏠 {s.name}</option>
-            ))}
-          </select>
-          {mode === "admin" && adminUnlocked && (
-            <button onClick={logout} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "12px" }}>ログアウト</button>
-          )}
-          {mode === "cast" && loggedInCast && (
-            <button onClick={castLogout} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "12px" }}>退出</button>
-          )}
-        </div>
-      </div>
-
       {/* 管理ロック */}
       {mode === "admin" && !adminUnlocked ? (
         <div style={{ padding: "40px 16px", maxWidth: "400px", margin: "0 auto", display: "grid", gap: "20px" }}>
@@ -779,6 +752,17 @@ function App() {
             <p style={{ color: C.muted, fontSize: "13px", margin: 0 }}>パスワードを入力してください</p>
           </div>
           <div style={{ ...card }}>
+            {/* 店舗切替（ログイン前にここで選ぶ。onChange のロジックは従来どおり） */}
+            <Field label="店舗">
+              <select
+                value={activeStoreId}
+                onChange={(e) => switchStore(e.target.value)}
+                style={{ ...inp, cursor: "pointer" }}>
+                {storeList.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </Field>
             <Field label="パスワード">
               <input
                 type="password"
@@ -802,6 +786,21 @@ function App() {
 
       ) : (
         <>
+          {/* サブバー */}
+          <div style={{ background: "white", borderBottom: `1.5px solid ${C.border}`, padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: "36px" }}>
+            <span style={{ fontSize: "11px", color: C.accent, fontWeight: "700", letterSpacing: "0.05em" }}>
+              {mode === "cast"
+                ? (loggedInCast ? `💕 ${loggedInCast}` : "💕 キャスト")
+                : "👑 店舗管理"}
+            </span>
+            {mode === "admin" && (
+              <button onClick={logout} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "12px" }}>ログアウト</button>
+            )}
+            {mode === "cast" && loggedInCast && (
+              <button onClick={castLogout} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "12px" }}>退出</button>
+            )}
+          </div>
+
           {/* キャスト未ログイン */}
           {mode === "cast" && !loggedInCast ? (
             <CastLoginScreen casts={casts} onLogin={handleCastLogin} />
