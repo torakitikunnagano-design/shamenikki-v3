@@ -179,6 +179,7 @@ function ensureStoreMigration() {
 // 給料レコード → salary_records 行
 function toSupabaseRecord(rec, castId) {
   return {
+    store_id:   getActiveStoreId(),
     id:         rec.id,
     cast_id:    castId,
     date:       rec.date,
@@ -203,6 +204,7 @@ function toSupabaseRecord(rec, castId) {
 // hons 配列 → salary_sessions 行の配列
 function toSupabaseSessions(rec) {
   return (rec.hons || []).map((h, seq) => ({
+    store_id:         getActiveStoreId(),
     salary_record_id: rec.id,
     seq,
     course_min:  Number(h.courseMin)  || 0,
@@ -218,6 +220,7 @@ function toSupabaseSessions(rec) {
 // Supabaseに送るキャストデータ（heaven_passは絶対に含めない）
 function toSupabaseCast(c) {
   return {
+    store_id:     getActiveStoreId(),
     name:         c.name,
     is_active:    c.is_active,
     work_start:   c.work_start   || "",
@@ -307,7 +310,7 @@ function App() {
   useEffect(() => {
     async function initCourses() {
       try {
-        const { data, error } = await supabase.from("courses").select("*").order("minutes");
+        const { data, error } = await supabase.from("courses").select("*").eq("store_id", getActiveStoreId()).order("minutes");
         if (error) throw error;
         if (data.length > 0) {
           // Supabaseにデータあり → それを使う
@@ -319,7 +322,7 @@ function App() {
             if (stored) {
               const local = JSON.parse(stored);
               if (local.length > 0) {
-                await supabase.from("courses").upsert(local.map((c) => ({ id: c.id, minutes: c.minutes })));
+                await supabase.from("courses").upsert(local.map((c) => ({ id: c.id, minutes: c.minutes, store_id: getActiveStoreId() })), { onConflict: "store_id,id" });
               }
             }
           } catch {}
@@ -341,6 +344,7 @@ function App() {
             if (stored) {
               const local = JSON.parse(stored);
               await supabase.from("settings").upsert({
+                store_id:         getActiveStoreId(),
                 id: 1,
                 daily_post_goal:  local.daily_post_goal,
                 repeat_limit_min: local.repeat_limit_min,
@@ -350,14 +354,14 @@ function App() {
                 after_work_min:   local.after_work_min,
                 show_guarantee:   local.show_guarantee ?? true,
                 updated_at:       new Date().toISOString(),
-              });
+              }, { onConflict: "store_id,id" });
               localStorage.setItem("shamenikki_settings_synced", "1");
             }
           } catch {}
         }
 
         // ② ①の後にSupabaseから読み込み（デフォルト行でユーザー設定を上書きしない）
-        const { data, error } = await supabase.from("settings").select("*").eq("id", 1).single();
+        const { data, error } = await supabase.from("settings").select("*").eq("store_id", getActiveStoreId()).eq("id", 1).single();
         if (!error && data) {
           setSettings({
             daily_post_goal:  data.daily_post_goal,
@@ -378,7 +382,7 @@ function App() {
   useEffect(() => {
     async function initCasts() {
       try {
-        const { data, error } = await supabase.from("casts").select("*");
+        const { data, error } = await supabase.from("casts").select("*").eq("store_id", getActiveStoreId());
         if (error) throw error;
 
         if (data.length === 0) {
@@ -388,7 +392,7 @@ function App() {
             if (stored) {
               const local = JSON.parse(stored);
               if (local.length > 0) {
-                await supabase.from("casts").upsert(local.map(toSupabaseCast), { onConflict: "name" });
+                await supabase.from("casts").upsert(local.map(toSupabaseCast), { onConflict: "store_id,name" });
               }
             }
           } catch {}
@@ -424,7 +428,7 @@ function App() {
   useEffect(() => {
     async function initScores() {
       try {
-        const { data, error } = await supabase.from("scores").select("*").order("posted_at", { ascending: false });
+        const { data, error } = await supabase.from("scores").select("*").eq("store_id", getActiveStoreId()).order("posted_at", { ascending: false });
         if (error) throw error;
 
         if (data.length === 0) {
@@ -435,6 +439,7 @@ function App() {
               const local = JSON.parse(stored);
               if (local.length > 0) {
                 await supabase.from("scores").upsert(local.map((s) => ({
+                  store_id:   getActiveStoreId(),
                   id:         s.id,
                   cast_name:  s.cast_name,
                   diary:      s.diary,
@@ -442,7 +447,7 @@ function App() {
                   posted_at:  s.posted_at,
                   has_image:  s.has_image,
                   score:      s.score,
-                })));
+                })), { onConflict: "id" });
               }
             }
           } catch {}
@@ -467,7 +472,7 @@ function App() {
   useEffect(() => {
     async function initShifts() {
       try {
-        const { data, error } = await supabase.from("shifts").select("*");
+        const { data, error } = await supabase.from("shifts").select("*").eq("store_id", getActiveStoreId());
         if (error) throw error;
 
         if (data.length === 0) {
@@ -477,13 +482,14 @@ function App() {
             if (stored) {
               const local = JSON.parse(stored);
               const rows = Object.entries(local).map(([key, val]) => ({
+                store_id:   getActiveStoreId(),
                 cast_name:  key.slice(0, -11),   // 末尾11文字("_YYYY-MM-DD")を除いた部分
                 date:       key.slice(-10),        // 末尾10文字がYYYY-MM-DD
                 start_time: val.startTime || "",
                 end_time:   val.endTime   || "",
               }));
               if (rows.length > 0) {
-                await supabase.from("shifts").upsert(rows, { onConflict: "cast_name,date" });
+                await supabase.from("shifts").upsert(rows, { onConflict: "store_id,cast_name,date" });
               }
             }
           } catch {}
@@ -508,7 +514,7 @@ function App() {
   useEffect(() => {
     async function initCastTypes() {
       try {
-        const { data, error } = await supabase.from("cast_types").select("*");
+        const { data, error } = await supabase.from("cast_types").select("*").eq("store_id", getActiveStoreId());
         if (error) throw error;
 
         if (data.length === 0) {
@@ -519,12 +525,12 @@ function App() {
                 try {
                   const val = JSON.parse(localStorage.getItem(fullKey));
                   if (!val?.type) return null;
-                  return { cast_id: baseKey.slice("cast_type_".length), type: val.type, retries: val.retries ?? 0, updated_at: new Date().toISOString() };
+                  return { store_id: getActiveStoreId(), cast_id: baseKey.slice("cast_type_".length), type: val.type, retries: val.retries ?? 0, updated_at: new Date().toISOString() };
                 } catch { return null; }
               })
               .filter(Boolean);
             if (rows.length > 0) {
-              await supabase.from("cast_types").upsert(rows, { onConflict: "cast_id" });
+              await supabase.from("cast_types").upsert(rows, { onConflict: "store_id,cast_id" });
             }
           } catch {}
         } else {
@@ -542,7 +548,7 @@ function App() {
   useEffect(() => {
     async function initSupportSettings() {
       try {
-        const { data, error } = await supabase.from("support_settings").select("*");
+        const { data, error } = await supabase.from("support_settings").select("*").eq("store_id", getActiveStoreId());
         if (error) throw error;
 
         if (data.length === 0) {
@@ -553,6 +559,7 @@ function App() {
                 try {
                   const val = JSON.parse(localStorage.getItem(fullKey));
                   return {
+                    store_id:      getActiveStoreId(),
                     cast_id:       baseKey.slice("support_settings_".length),
                     image_support: typeof val.imageSupport === "boolean" ? val.imageSupport : true,
                     text_support:  typeof val.textSupport  === "boolean" ? val.textSupport  : true,
@@ -563,7 +570,7 @@ function App() {
               })
               .filter(Boolean);
             if (rows.length > 0) {
-              await supabase.from("support_settings").upsert(rows, { onConflict: "cast_id" });
+              await supabase.from("support_settings").upsert(rows, { onConflict: "store_id,cast_id" });
             }
           } catch {}
         } else {
@@ -587,7 +594,7 @@ function App() {
   useEffect(() => {
     async function initSalaryRecords() {
       try {
-        const { data: recordsData, error } = await supabase.from("salary_records").select("*");
+        const { data: recordsData, error } = await supabase.from("salary_records").select("*").eq("store_id", getActiveStoreId());
         if (error) throw error;
 
         if (recordsData.length === 0) {
@@ -612,7 +619,7 @@ function App() {
         } else {
           // Supabaseにデータあり → sessionsも取得してlocalStorageに書き戻す（ハイドレート）
           try {
-            const { data: sessionsData } = await supabase.from("salary_sessions").select("*");
+            const { data: sessionsData } = await supabase.from("salary_sessions").select("*").eq("store_id", getActiveStoreId());
             // sessions を salary_record_id でグループ化
             const sessionsMap = {};
             (sessionsData || []).forEach((s) => {
@@ -1112,8 +1119,8 @@ function useCastTypeLock(castId) {
       if (castId) {
         try {
           supabase.from("cast_types").upsert(
-            { cast_id: castId, type: next.type, retries: next.retries, updated_at: new Date().toISOString() },
-            { onConflict: "cast_id" }
+            { store_id: getActiveStoreId(), cast_id: castId, type: next.type, retries: next.retries, updated_at: new Date().toISOString() },
+            { onConflict: "store_id,cast_id" }
           ).then(() => {}).catch(() => {});
         } catch {}
       }
@@ -1125,7 +1132,7 @@ function useCastTypeLock(castId) {
     setLockData({ type: null, retries: 0 });
     if (key) { try { localStorage.removeItem(skey(key)); } catch {} }
     if (castId) {
-      try { supabase.from("cast_types").delete().eq("cast_id", castId).then(() => {}).catch(() => {}); } catch {}
+      try { supabase.from("cast_types").delete().eq("store_id", getActiveStoreId()).eq("cast_id", castId).then(() => {}).catch(() => {}); } catch {}
     }
   }
 
@@ -1182,7 +1189,7 @@ function ShindanPage({ casts, setCasts, loggedInCast, onComplete }) {
       try {
         supabase.from("casts").upsert(
           toSupabaseCast({ ...cast, type: typeGuess, disclose, shindan_note: disclose === "YES" ? note : null }),
-          { onConflict: "name" }
+          { onConflict: "store_id,name" }
         ).then(() => {}).catch(() => {});
       } catch {}
     } catch { setResult({ type: typeGuess, detail: "分析中にエラーが発生しました。" }); }
@@ -1356,8 +1363,8 @@ function useSupportSettings(castId) {
       if (castId) {
         try {
           supabase.from("support_settings").upsert(
-            { cast_id: castId, image_support: next.imageSupport, text_support: next.textSupport, title_assist: next.titleAssist, updated_at: new Date().toISOString() },
-            { onConflict: "cast_id" }
+            { store_id: getActiveStoreId(), cast_id: castId, image_support: next.imageSupport, text_support: next.textSupport, title_assist: next.titleAssist, updated_at: new Date().toISOString() },
+            { onConflict: "store_id,cast_id" }
           ).then(() => {}).catch(() => {});
         } catch {}
       }
@@ -1671,7 +1678,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
       }
       const newScore = { id: Date.now(), cast_name: castName, diary: finalDiary, result: scoreText, posted_at: autoPostedAtISO, has_image: !!imageFile, image_hash: imageHash, score: sc };
       setScores((prev) => [newScore, ...prev]);
-      try { supabase.from("scores").upsert(newScore).then(() => {}).catch(() => {}); } catch {}
+      try { supabase.from("scores").upsert({ ...newScore, store_id: getActiveStoreId() }, { onConflict: "id" }).then(() => {}).catch(() => {}); } catch {}
       setLoading(false);
     }
   }
@@ -2656,7 +2663,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   function resetDiagLock(c) {
     const castId = c.heaven_id || c.name;
     try { localStorage.removeItem(skey(`cast_type_${castId}`)); } catch {}
-    try { supabase.from("cast_types").delete().eq("cast_id", castId).then(() => {}).catch(() => {}); } catch {}
+    try { supabase.from("cast_types").delete().eq("store_id", getActiveStoreId()).eq("cast_id", castId).then(() => {}).catch(() => {}); } catch {}
     setLockRefresh((n) => n + 1);
   }
 
@@ -2665,7 +2672,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     setCasts(updated);
     const toggled = updated.find((c) => c.name === name);
     if (toggled) {
-      try { supabase.from("casts").upsert(toSupabaseCast(toggled), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
+      try { supabase.from("casts").upsert(toSupabaseCast(toggled), { onConflict: "store_id,name" }).then(() => {}).catch(() => {}); } catch {}
     }
   }
   function openGuaranteeModal(castName) {
@@ -2718,7 +2725,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     setModalSaved(true);
     setTimeout(() => setModal(null), 1000);
     // Supabaseにはheaven_passを送らない（toSupabaseCastが除外する）
-    try { supabase.from("casts").upsert(toSupabaseCast({ ...modal, heaven_id: modalId }), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
+    try { supabase.from("casts").upsert(toSupabaseCast({ ...modal, heaven_id: modalId }), { onConflict: "store_id,name" }).then(() => {}).catch(() => {}); } catch {}
   }
 
   async function doSync(mode) {
@@ -2763,7 +2770,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         });
 
         setCasts(next);
-        try { supabase.from("casts").upsert(next.map(toSupabaseCast), { onConflict: "name" }).then(() => {}).catch(() => {}); } catch {}
+        try { supabase.from("casts").upsert(next.map(toSupabaseCast), { onConflict: "store_id,name" }).then(() => {}).catch(() => {}); } catch {}
         setSyncResult({ mode: "casts", addedCount, updatedCount, total: incoming.length });
         setShowTodayOnly(false);
       } else {
@@ -3383,12 +3390,12 @@ function CoursesPage({ courses, setCourses }) {
     const newCourse = { id: Date.now(), minutes: m };
     setCourses([...courses, newCourse].sort((a, b) => a.minutes - b.minutes));
     setNewMin("");
-    try { await supabase.from("courses").upsert({ id: newCourse.id, minutes: newCourse.minutes }); } catch {}
+    try { await supabase.from("courses").upsert({ id: newCourse.id, minutes: newCourse.minutes, store_id: getActiveStoreId() }, { onConflict: "store_id,id" }); } catch {}
   }
 
   function deleteCourse(id) {
     setCourses(courses.filter((c) => c.id !== id));
-    try { supabase.from("courses").delete().eq("id", id).then(() => {}).catch(() => {}); } catch {}
+    try { supabase.from("courses").delete().eq("store_id", getActiveStoreId()).eq("id", id).then(() => {}).catch(() => {}); } catch {}
   }
 
   function startEdit(c) { setEditId(c.id); setEditMin(String(c.minutes)); }
@@ -3399,7 +3406,7 @@ function CoursesPage({ courses, setCourses }) {
     setCourses(courses.map((c) => c.id === id ? { ...c, minutes: m } : c).sort((a, b) => a.minutes - b.minutes));
     setEditId(null);
     setEditMin("");
-    try { await supabase.from("courses").upsert({ id, minutes: m }); } catch {}
+    try { await supabase.from("courses").upsert({ id, minutes: m, store_id: getActiveStoreId() }, { onConflict: "store_id,id" }); } catch {}
   }
 
   return (
@@ -3475,6 +3482,7 @@ function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDay
     alert("保存しました！");
     try {
       await supabase.from("settings").upsert({
+        store_id:         getActiveStoreId(),
         id: 1,
         daily_post_goal:  local.daily_post_goal,
         repeat_limit_min: local.repeat_limit_min,
@@ -3484,7 +3492,7 @@ function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDay
         after_work_min:   local.after_work_min,
         show_guarantee:   local.show_guarantee ?? true,
         updated_at:       new Date().toISOString(),
-      });
+      }, { onConflict: "store_id,id" });
     } catch {}
   }
 
@@ -3617,7 +3625,7 @@ function ShiftsPage({ casts, shifts, setShifts }) {
       const s = localShifts[c.name] || {};
       if (s.startTime || s.endTime) {
         next[key] = { startTime: s.startTime || "", endTime: s.endTime || "" };
-        toUpsert.push({ cast_name: c.name, date, start_time: s.startTime || "", end_time: s.endTime || "" });
+        toUpsert.push({ store_id: getActiveStoreId(), cast_name: c.name, date, start_time: s.startTime || "", end_time: s.endTime || "" });
       } else {
         delete next[key];
         toDelete.push(c.name);
@@ -3630,10 +3638,10 @@ function ShiftsPage({ casts, shifts, setShifts }) {
 
     // Supabase sync
     if (toUpsert.length > 0) {
-      try { await supabase.from("shifts").upsert(toUpsert, { onConflict: "cast_name,date" }); } catch {}
+      try { await supabase.from("shifts").upsert(toUpsert, { onConflict: "store_id,cast_name,date" }); } catch {}
     }
     for (const castName of toDelete) {
-      try { await supabase.from("shifts").delete().eq("cast_name", castName).eq("date", date); } catch {}
+      try { await supabase.from("shifts").delete().eq("store_id", getActiveStoreId()).eq("cast_name", castName).eq("date", date); } catch {}
     }
   }
 
