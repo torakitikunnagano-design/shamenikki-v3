@@ -1289,9 +1289,9 @@ function ShindanPage({ casts, setCasts, loggedInCast, onComplete }) {
     setStep("result"); setLoading(true);
     const typeGuess = calcType(answers);
     try {
-      const res = await fetch("https://api.x.ai/v1/chat/completions", {
+      const res = await fetch("/api/xai", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "grok-4.3", max_tokens: 800, reasoning_effort: "none",
           messages: [{ role: "user", content: `あなたはエンタメ業界のパーソナリティコンサルタントです。スタッフのキャラクター診断結果を分析して、自己PR文と写真のアドバイスをしてください。\n\nスタッフ名：${castName}\n診断回答：\n${QUESTIONS.map((q) => `・${q.text} → ${answers[q.id] || "未回答"}`).join("\n")}\n備考：${note || "なし"}\n判定キャラクター：${typeGuess}\n\n以下のフォーマットで返答してください：\n\nキャラクター判定：${typeGuess}\n\nあなたの魅力\n・\n・\n・\n\nおすすめ自己PR文スタイル\n・\n\nブログで使えるフレーズ例\n・\n・\n\n写真撮影のアドバイス\n・\n・` }]
@@ -1692,9 +1692,9 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
     let finalDiary = diary;
     if (textSupport) {
       try {
-        const rwRes = await fetch("https://api.x.ai/v1/chat/completions", {
+        const rwRes = await fetch("/api/xai", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model: "grok-4.3", max_tokens: 800, reasoning_effort: "none",
             messages: [
@@ -1717,9 +1717,9 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
     let sc = 0;
     try {
       // Step 2: AI採点・タイトル生成・画像分析を並列実行
-      const scoreReqPromise = fetch("https://api.x.ai/v1/chat/completions", {
+      const scoreReqPromise = fetch("/api/xai", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model: "grok-4.3", max_tokens: 1000, reasoning_effort: "none",
             messages: [{ role: "user", content: `あなたはエンタメ業界のブログコンサルタントです。スタッフのブログ記事を分析・採点してください。\n\n【投稿ルール】\n最低文字数：${settings.min_text_length}文字 / 今回：${charCountFinal}文字 / 不足：${charShortFinal}文字\n画像必須：${settings.image_required ? "あり" : "なし"} / 画像：${imageFile ? "あり" : "なし"}\n\n必ず以下のフォーマットで返答してください：\n\n総合点：○○点\n\n投稿ルールチェック\n・文字数判定：達成 or 文字数不足\n・画像判定：達成 or 画像不足\n\n改善提案\n・\n・\n\n良い点\n・\n・\n\n改善点\n・\n・\n\n改善タイトル案\n・\n・\n\nキャラクター分析\n・\n\n【スタッフ名】${castName}\n【ブログ本文】${finalDiary}` }]
@@ -1727,9 +1727,9 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
         });
 
       const titleGenPromise = titleAssist
-        ? fetch("https://api.x.ai/v1/chat/completions", {
+        ? fetch("/api/xai", {
             method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               model: "grok-4.3", max_tokens: 100, reasoning_effort: "none",
               messages: [
@@ -1741,9 +1741,9 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
         : Promise.resolve(null);
 
       const imageAnalysisPromise = (imageSupport && imageFile)
-        ? toBase64(imageFile).then((base64) => fetch("https://api.x.ai/v1/chat/completions", {
+        ? toBase64(imageFile).then((base64) => fetch("/api/xai", {
             method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               model: "grok-4.3",
               max_tokens: 1000,
@@ -2177,9 +2177,9 @@ function TitlePage({ casts }) {
     if (!title.trim()) return alert("タイトルを入力してください");
     setLoading(true); setResult(null);
     try {
-      const res = await fetch("https://api.x.ai/v1/chat/completions", {
+      const res = await fetch("/api/xai", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "grok-4.3", max_tokens: 800, reasoning_effort: "none",
           messages: [{ role: "user", content: `風俗店の写メ日記タイトルを分析してください。\n\nタイトル：${title}\n本文：${body || "（未入力）"}\nキャスト：${castName || "未設定"}\n\n以下のフォーマットで返答してください：\n\nタイトル評価：良 or 普 or 改善\n\n良い点\n・\n\n改善点\n・\n\n改善タイトル案（3つ）\n1.\n2.\n3.\n\nクリックされやすい理由\n・` }]
@@ -2292,9 +2292,9 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
 
 金額はすべて円（数値のみ、記号・カンマなし）。必ずこのJSONのみで返してください（説明文不要）：
 {"sessions":[{"courseMin":60,"shimei":"本指名","courseFee":5000,"shimeiRyou":2000,"extCount":0,"extMin":0,"op":0,"subtotal":7000}],"gross":50000,"misc":3000,"dorm":10000,"transport":1000,"takeHome":36000}`;
-      const res = await fetch("https://api.x.ai/v1/chat/completions", {
+      const res = await fetch("/api/xai", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_XAI_API_KEY}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "grok-4.3",
           max_tokens: 2000,
