@@ -2930,12 +2930,43 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
           addedCount++;
         });
 
-        setCasts(next);
-        try { supabase.from("casts").upsert(next.map(toSupabaseCast), { onConflict: "store_id,name" }).then(() => {}).catch(() => {}); } catch {}
-        setSyncResult({ mode: "casts", addedCount, updatedCount, total: incoming.length });
+        // (store_id, name) の重複排除。normalizeName で飾り(新人/🔰)を除去した結果、
+        // 同名が複数できると Postgres の ON CONFLICT が
+        // "cannot affect row a second time" でバッチ全体を拒否し 0件保存になるため必須。
+        // 空名は除外。重複時は heaven_id/heaven_pass を補完して情報を失わない。
+        const dedupedNext = [];
+        const seenName = new Map(); // normalizedName -> index in dedupedNext
+        for (const c of next) {
+          const key = normalizeName(c.name);
+          if (!key) continue; // 名前空は除外（必須カラム違反も防ぐ）
+          if (seenName.has(key)) {
+            const ex = dedupedNext[seenName.get(key)];
+            if (!ex.heaven_id && c.heaven_id) ex.heaven_id = c.heaven_id;
+            if (!ex.heaven_pass && c.heaven_pass) ex.heaven_pass = c.heaven_pass;
+            continue;
+          }
+          seenName.set(key, dedupedNext.length);
+          dedupedNext.push({ ...c, name: key });
+        }
+
+        setCasts(dedupedNext);
+        // Supabase upsert（supabase-js は reject せず {error} を resolve するので必ず error を見る）
+        try {
+          supabase.from("casts").upsert(dedupedNext.map(toSupabaseCast), { onConflict: "store_id,name" })
+            .then(({ error }) => {
+              if (error) {
+                console.error("[doSync casts upsert] error:", error.message || error, error.details || "", error.hint || "");
+                setSyncResult((p) => ({ ...(p || {}), upsertError: (error.message || String(error)) }));
+              } else {
+                console.log("[doSync casts upsert] saved rows=" + dedupedNext.length);
+              }
+            })
+            .catch((e) => { console.error("[doSync casts upsert] exception:", e?.message || e); setSyncResult((p) => ({ ...(p || {}), upsertError: String(e?.message || e) })); });
+        } catch (e) { console.error("[doSync casts upsert] threw:", e?.message || e); }
+        setSyncResult({ mode: "casts", addedCount, updatedCount, total: dedupedNext.length });
         setShowTodayOnly(false);
         // ロスター保存が完了した後、パスワードを非ブロッキングで埋める（失敗してもロスターは保存済み）
-        fillMitenePasswords(next);
+        fillMitenePasswords(dedupedNext);
       } else {
         if (!Array.isArray(data.shifts)) throw new Error("出勤データが取得できませんでした");
         // 同期データの date は "M/D" 形式 → 給料ページ参照用に "YYYY-MM-DD" キーも書く
@@ -3107,6 +3138,9 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
             : syncResult.mode === "casts"
               ? `✅ キャスト${syncResult.total}人を同期（新規${syncResult.addedCount}人 / 更新${syncResult.updatedCount}人）`
               : `✅ 出勤${syncResult.total}人を同期`}
+          {syncResult.upsertError && (
+            <span style={{ display: "block", marginTop: "6px", color: C.red, fontWeight: "700" }}>⚠️ クラウド保存エラー: {syncResult.upsertError}</span>
+          )}
         </div>
       )}
 
