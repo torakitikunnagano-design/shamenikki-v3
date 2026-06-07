@@ -205,52 +205,9 @@ app.post('/store-sync', async (req, res) => {
     );
 
     console.log('[store-sync] casts=' + casts.length + ' (limit ' + CAST_SYNC_LIMIT + ')');
-
-    // 各キャストページ(C8 member_id)からミテネ用ログインID/パスワードを取得する。
-    // 「登録済」枠の「ログインID : ◯◯◯　パスワード : ◯◯◯」をスクレイプ。
-    // 同時実行を制限し、ページごとにタイムアウト。失敗は黙ってスキップ（クライアント側で既存値維持）。
-    // ※ キャスト同期(mode==='casts')のときだけ実行。出勤同期では走らせず従来速度を維持。
-    if (mode === 'casts') {
-    const CRED_LIMIT = 150;
-    const CRED_CONCURRENCY = 4;
-    const CRED_PAGE_TIMEOUT = 20000;
-    const credTargets = casts.slice(0, CRED_LIMIT); // slice でも要素は同一参照なので casts に反映される
-
-    async function fetchCred(memberId) {
-      let p;
-      try {
-        p = await browser.newPage();
-        await p.setUserAgent(UA);
-        p.setDefaultNavigationTimeout(CRED_PAGE_TIMEOUT);
-        await p.goto(
-          `https://newmanager.cityheaven.net/C8GirlMyPageRegist.php?member_id=${encodeURIComponent(memberId)}&shopdir=${encodeURIComponent(shopdir)}`,
-          { waitUntil: 'domcontentloaded', timeout: CRED_PAGE_TIMEOUT }
-        );
-        return await p.evaluate(() => {
-          const t = (document.body && document.body.innerText) || '';
-          const idM = t.match(/ログイン\s*ID\s*[:：]\s*([0-9A-Za-z_\-]+)/);
-          const pwM = t.match(/パスワード\s*[:：]\s*([^\s　<\n\r]+)/);
-          return { loginId: idM ? idM[1] : null, password: pwM ? pwM[1] : null };
-        });
-      } catch (e) {
-        return { loginId: null, password: null };
-      } finally {
-        if (p) { try { await p.close(); } catch (_) {} }
-      }
-    }
-
-    let credIdx = 0, credOk = 0;
-    async function credWorker() {
-      while (credIdx < credTargets.length) {
-        const c = credTargets[credIdx++];
-        const cred = await fetchCred(c.heavenId);
-        if (cred.loginId) c.heavenId = cred.loginId;   // ページのログインIDを優先（heaven_id）
-        if (cred.password) { c.heavenPass = cred.password; credOk++; } // 毎回上書き（最新に追従）
-      }
-    }
-    await Promise.all(Array.from({ length: CRED_CONCURRENCY }, () => credWorker()));
-    console.log('[store-sync] creds fetched=' + credOk + '/' + credTargets.length);
-    } // end if (mode === 'casts')
+    // ※ ミテネ用パスワード取得は重い(最大数分)ためここでは行わない。
+    //   ロスター(名前/heaven_id)を素早く返して Supabase 保存を最優先にする。
+    //   パスワードは別エンドポイント /mitene-creds で非ブロッキングに取得する。
 
     // シフト一覧を全ページ取得（C9）&start=1,2,… で送りされる
     const MAX_C9_PAGES = 20;
@@ -533,6 +490,76 @@ app.post('/mitene', async (req, res) => {
     result.error = e.message;
     if (browser) { try { await browser.close(); } catch (_) {} }
     res.json(result);
+  }
+});
+
+// ============================================================
+// ミテネ用ログインID/パスワード取得（キャスト同期とは別ステップ・非ブロッキング用）
+//  - 指定 memberIds（バッチ）だけ取得。件数は呼び出し側で絞る（Vercel タイムアウト対策）。
+//  - ここでの失敗はロスター保存に影響しない（別エンドポイント）。
+// ============================================================
+app.post('/mitene-creds', async (req, res) => {
+  const { adminId, adminPass, shopdir, memberIds } = req.body || {};
+  let browser;
+  try {
+    if (!adminId || !adminPass || !shopdir || !Array.isArray(memberIds)) {
+      return res.json({ ok: false, error: 'adminId, adminPass, shopdir, memberIds are required' });
+    }
+    const ids = memberIds.slice(0, 60); // 1回の上限（タイムアウト対策）
+
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const page = await browser.newPage();
+    page.setDefaultNavigationTimeout(60000);
+    await page.setUserAgent(UA);
+
+    // ログイン（/store-sync と同じ手順）
+    await page.goto(`https://newmanager.cityheaven.net/C1Login.php?shopdir=${encodeURIComponent(shopdir)}`, WAIT);
+    const idInput = await findVisible(page, '#id');
+    if (!idInput) throw new Error('id input not found');
+    await idInput.click(); await idInput.type(adminId);
+    const passInput = await findVisible(page, '#pass');
+    if (!passInput) throw new Error('pass input not found');
+    await passInput.click(); await passInput.type(adminPass);
+    const loginBtn = await findVisible(page, 'button[name="login"]');
+    if (!loginBtn) throw new Error('login button not found');
+    await Promise.all([loginBtn.click(), page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 })]);
+
+    const CONCURRENCY = 4, PAGE_TIMEOUT = 20000;
+    async function fetchCred(memberId) {
+      let p;
+      try {
+        p = await browser.newPage();
+        await p.setUserAgent(UA);
+        p.setDefaultNavigationTimeout(PAGE_TIMEOUT);
+        await p.goto(`https://newmanager.cityheaven.net/C8GirlMyPageRegist.php?member_id=${encodeURIComponent(memberId)}&shopdir=${encodeURIComponent(shopdir)}`, { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT });
+        const cred = await p.evaluate(() => {
+          const t = (document.body && document.body.innerText) || '';
+          const idM = t.match(/ログイン\s*ID\s*[:：]\s*([0-9A-Za-z_\-]+)/);
+          const pwM = t.match(/パスワード\s*[:：]\s*([^\s　<\n\r]+)/);
+          return { loginId: idM ? idM[1] : null, password: pwM ? pwM[1] : null };
+        });
+        return { memberId, loginId: cred.loginId, password: cred.password };
+      } catch (e) {
+        return { memberId, loginId: null, password: null };
+      } finally {
+        if (p) { try { await p.close(); } catch (_) {} }
+      }
+    }
+
+    const creds = [];
+    let i = 0;
+    async function worker() {
+      while (i < ids.length) { const id = ids[i++]; creds.push(await fetchCred(id)); }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+    console.log('[mitene-creds] fetched=' + creds.filter(c => c.password).length + '/' + ids.length);
+
+    await browser.close();
+    res.json({ ok: true, creds });
+  } catch (e) {
+    console.log('[mitene-creds] ERROR: ' + e.message);
+    if (browser) { try { await browser.close(); } catch (_) {} }
+    res.json({ ok: false, error: e.message });
   }
 });
 

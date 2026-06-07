@@ -2852,6 +2852,34 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     try { supabase.from("casts").upsert(toSupabaseCast({ ...modal, heaven_id: modalId }), { onConflict: "store_id,name" }).then(() => {}).catch(() => {}); } catch {}
   }
 
+  // ミテネ用パスワードを非ブロッキングで取得してローカル heaven_pass を埋める。
+  // 今日出勤キャストだけを対象＝件数を絞り Vercel タイムアウト内に収める。失敗してもロスターに影響なし。
+  // heaven_pass は端末ローカルのみ（Supabase 非保存）。
+  async function fillMitenePasswords(castList) {
+    try {
+      const targets = (castList || []).filter((c) => {
+        if (!c.heaven_id) return false;
+        const d = shiftDaysFor(shifts, c.name);
+        return Array.isArray(d) && d.some((s) => s.date === todayKey);
+      });
+      const memberIds = targets.map((c) => c.heaven_id);
+      if (memberIds.length === 0) return;
+      const res = await fetch("/api/mitene-creds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir, memberIds }),
+      });
+      const data = await res.json();
+      if (!data.ok || !Array.isArray(data.creds)) return;
+      const pwById = new Map(data.creds.filter((c) => c.password).map((c) => [String(c.memberId), c.password]));
+      if (pwById.size === 0) return;
+      setCasts((prev) => prev.map((c) => {
+        const pw = pwById.get(String(c.heaven_id));
+        return pw ? { ...c, heaven_pass: pw } : c; // ローカルのみ更新（毎回上書き）
+      }));
+    } catch {}
+  }
+
   async function doSync(mode) {
     if (!syncConfig?.adminId || !syncConfig?.adminPass || !syncConfig?.shopdir) {
       setSyncResult({ error: "設定画面で管理者ID・パスワード・shopdirを保存してください" });
@@ -2906,6 +2934,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         try { supabase.from("casts").upsert(next.map(toSupabaseCast), { onConflict: "store_id,name" }).then(() => {}).catch(() => {}); } catch {}
         setSyncResult({ mode: "casts", addedCount, updatedCount, total: incoming.length });
         setShowTodayOnly(false);
+        // ロスター保存が完了した後、パスワードを非ブロッキングで埋める（失敗してもロスターは保存済み）
+        fillMitenePasswords(next);
       } else {
         if (!Array.isArray(data.shifts)) throw new Error("出勤データが取得できませんでした");
         // 同期データの date は "M/D" 形式 → 給料ページ参照用に "YYYY-MM-DD" キーも書く
