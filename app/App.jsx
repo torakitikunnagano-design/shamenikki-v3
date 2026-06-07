@@ -2854,30 +2854,49 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
 
   // ミテネ用パスワードを非ブロッキングで取得してローカル heaven_pass を埋める。
   // 今日出勤キャストだけを対象＝件数を絞り Vercel タイムアウト内に収める。失敗してもロスターに影響なし。
-  // heaven_pass は端末ローカルのみ（Supabase 非保存）。
-  async function fillMitenePasswords(castList) {
+  // heaven_pass は端末ローカルのみ（Supabase 非保存）＝各端末で同期したときにその端末に入る。
+  // バックグラウンドで数十秒かかるため、進捗を syncResult.credStatus で画面に出す。
+  async function fillMitenePasswords(castList, shiftData) {
     try {
+      // 今日出勤の名前集合は「今回の同期で取れた最新シフト(shiftData)」を最優先。無ければ既存stateで判定。
+      const workingNames = new Set();
+      if (Array.isArray(shiftData)) {
+        shiftData.forEach((s) => {
+          if (s && Array.isArray(s.days) && s.days.some((d) => d.date === todayKey)) workingNames.add(normalizeName(s.name));
+        });
+      }
       const targets = (castList || []).filter((c) => {
         if (!c.heaven_id) return false;
+        if (workingNames.size > 0) return workingNames.has(normalizeName(c.name));
         const d = shiftDaysFor(shifts, c.name);
         return Array.isArray(d) && d.some((s) => s.date === todayKey);
       });
       const memberIds = targets.map((c) => c.heaven_id);
-      if (memberIds.length === 0) return;
+      if (memberIds.length === 0) { console.log("[fillMitenePasswords] no today-working targets"); return; }
+
+      setSyncResult((p) => ({ ...(p || {}), credStatus: `今日出勤 ${memberIds.length}人のミテネ用パスワード取得中…（数十秒）` }));
       const res = await fetch("/api/mitene-creds", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir, memberIds }),
       });
       const data = await res.json();
-      if (!data.ok || !Array.isArray(data.creds)) return;
+      if (!data.ok || !Array.isArray(data.creds)) {
+        console.error("[fillMitenePasswords] error:", data && data.error);
+        setSyncResult((p) => ({ ...(p || {}), credStatus: "⚠️ パスワード取得に失敗しました（ロスターは保存済み）" }));
+        return;
+      }
       const pwById = new Map(data.creds.filter((c) => c.password).map((c) => [String(c.memberId), c.password]));
-      if (pwById.size === 0) return;
+      console.log("[fillMitenePasswords] applied=" + pwById.size + "/" + memberIds.length);
       setCasts((prev) => prev.map((c) => {
         const pw = pwById.get(String(c.heaven_id));
         return pw ? { ...c, heaven_pass: pw } : c; // ローカルのみ更新（毎回上書き）
       }));
-    } catch {}
+      setSyncResult((p) => ({ ...(p || {}), credStatus: `✅ 今日出勤 ${pwById.size}人にミテネ用パスワードを設定（この端末のみ）` }));
+    } catch (e) {
+      console.error("[fillMitenePasswords] exception:", e && e.message);
+      setSyncResult((p) => ({ ...(p || {}), credStatus: "⚠️ パスワード取得に失敗しました（ロスターは保存済み）" }));
+    }
   }
 
   async function doSync(mode) {
@@ -2965,8 +2984,9 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         } catch (e) { console.error("[doSync casts upsert] threw:", e?.message || e); }
         setSyncResult({ mode: "casts", addedCount, updatedCount, total: dedupedNext.length });
         setShowTodayOnly(false);
-        // ロスター保存が完了した後、パスワードを非ブロッキングで埋める（失敗してもロスターは保存済み）
-        fillMitenePasswords(dedupedNext);
+        // ロスター保存が完了した後、パスワードを非ブロッキングで埋める（失敗してもロスターは保存済み）。
+        // 今回の同期で取れた最新シフト(data.shifts)を渡して今日出勤を正確に判定。
+        fillMitenePasswords(dedupedNext, data.shifts);
       } else {
         if (!Array.isArray(data.shifts)) throw new Error("出勤データが取得できませんでした");
         // 同期データの date は "M/D" 形式 → 給料ページ参照用に "YYYY-MM-DD" キーも書く
@@ -3140,6 +3160,9 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
               : `✅ 出勤${syncResult.total}人を同期`}
           {syncResult.upsertError && (
             <span style={{ display: "block", marginTop: "6px", color: C.red, fontWeight: "700" }}>⚠️ クラウド保存エラー: {syncResult.upsertError}</span>
+          )}
+          {syncResult.credStatus && (
+            <span style={{ display: "block", marginTop: "6px", color: C.sub, fontWeight: "700" }}>{syncResult.credStatus}</span>
           )}
         </div>
       )}
