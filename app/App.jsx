@@ -79,10 +79,19 @@ function getBusinessTodayKey() {
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
 }
 
-// 名前の正規化: ヘブン表示は「名前」の後に必ず半角/全角スペース＋装飾(「新人🔰」「No2 本指名」等)。
-// よって「最初の半角/全角スペースより前」だけを識別名とする（絵文字列挙より確実）。
+// 名前の正規化: 「半角/全角スペース」「新人」「🔰」のうち最初に現れた位置で切り、その前だけを名前とする。
+// 例: 「えな 新人🔰」「えな新人🔰」「えな🔰」「えな No2 本指名」→ いずれも「えな」。
+// 保険として、切った後に末尾へ残った装飾(絵文字/★☆等)も除去する。
 function normalizeName(s) {
-  return String(s || "").trim().split(/[\s　]/)[0] || "";
+  let name = String(s || "");
+  const cuts = [];
+  const sp = name.search(/[\s　]/);     // 最初の半角/全角スペース
+  const ni = name.indexOf("新人");
+  const mk = name.indexOf("🔰");
+  [sp, ni, mk].forEach((i) => { if (i >= 0) cuts.push(i); });
+  if (cuts.length) name = name.slice(0, Math.min(...cuts));
+  // 末尾に残った装飾・空白を除去（保険）
+  return name.replace(/[\s　★☆♪♫♡♥❤◎○●◯◆◇■□▲△▼▽※‼！!♢❀✿✦✧♛👑💖💕✨🌟⭐️⭐🔰]+$/u, "").trim();
 }
 
 // shifts マップ（{ name: M/D配列, name_YMD: {...} }）から、castName に対応する
@@ -2852,8 +2861,13 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       if (!res.ok || !data.casts) throw new Error(data.message || "同期に失敗しました");
 
       if (mode === "casts") {
-        // 掲載順の先頭から CAST_SYNC_LIMIT 名だけ取り込む（ボットは全件返してOK）
-        const incoming = (data.casts || []).slice(0, CAST_SYNC_LIMIT);
+        // 掲載順の先頭 CAST_SYNC_LIMIT 名 ∪ 出勤データに載っているキャスト（100位以降でも取り込む）
+        const all = data.casts || [];
+        const top = all.slice(0, CAST_SYNC_LIMIT);
+        const shiftNames = new Set();
+        for (const k in shifts) { if (Array.isArray(shifts[k])) shiftNames.add(normalizeName(k)); }
+        const extra = all.slice(CAST_SYNC_LIMIT).filter((c) => shiftNames.has(normalizeName(c.name)));
+        const incoming = [...top, ...extra];
         let addedCount = 0, updatedCount = 0;
         const next = [...casts];
 
