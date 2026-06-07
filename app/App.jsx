@@ -179,22 +179,30 @@ function ensureStoreMigration() {
       }
     });
 
-    // 旧バグの誤シード掃除: 非オリジナル店に initCasts/initScores/initCourses が
-    // そのまま seed されていた場合のみ除去する（モック既定と一致するものだけ。実データは消さない）。
-    // これをしないと localStorage→Supabase 再シードで誤データが復活してしまう。
+    // 旧バグの誤シード掃除: 非オリジナル店に焼き付いたモック(さくら/みお/りな 等)を除去する。
+    // 完全一致だと配列が少しでも書き換わっていると効かない（前回これで効かなかった）。
+    // そこで「モックの行だけ」を要素単位で除去し、実データ・ヘブン認証(heaven_id/heaven_pass)は残す。
+    // ※ sync_config には一切触れない（別キー）。オリジナル店(nadeshiko)は対象外。
     const active = getActiveStoreId();
     if (active !== DEFAULT_STORE_ID) {
-      const rm = (key) => { try { localStorage.removeItem(key); } catch {} };
-      // casts / courses はモック既定が静的なので完全一致で判定
-      if (localStorage.getItem("shamenikki_casts::" + active) === JSON.stringify(initCasts)) rm("shamenikki_casts::" + active);
-      if (localStorage.getItem("shamenikki_courses::" + active) === JSON.stringify(initCourses)) rm("shamenikki_courses::" + active);
-      // scores はタイムスタンプが動的なので「全 id が小さい(=モック 1,2,3)」を目印に判定（実データは Date.now の巨大 id）
-      try {
-        const sc = JSON.parse(localStorage.getItem("shamenikki_scores::" + active) || "null");
-        if (Array.isArray(sc) && sc.length > 0 && sc.every((s) => typeof s.id === "number" && s.id < 100000)) {
-          rm("shamenikki_scores::" + active);
-        }
-      } catch {}
+      const cleanArray = (key, isMock) => {
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) return;
+          const arr = JSON.parse(raw);
+          if (!Array.isArray(arr)) return;
+          const kept = arr.filter((x) => !isMock(x));
+          if (kept.length !== arr.length) localStorage.setItem(key, JSON.stringify(kept));
+        } catch {}
+      };
+      // casts: モック名 かつ ヘブン認証が空の行だけ除去（認証入り・実キャストは残す）
+      const mockNames = new Set(initCasts.map((c) => c.name));
+      cleanArray("shamenikki_casts::" + active, (c) => mockNames.has(c.name) && !c.heaven_id && !c.heaven_pass);
+      // scores: モックは id が小さい(1,2,3)。実データは Date.now の巨大 id
+      cleanArray("shamenikki_scores::" + active, (s) => typeof s.id === "number" && s.id < 100000);
+      // courses: モックの id:minutes(1:60/2:90/3:120) に一致する行だけ除去
+      const mockCourses = new Set(initCourses.map((c) => c.id + ":" + c.minutes));
+      cleanArray("shamenikki_courses::" + active, (c) => mockCourses.has(c.id + ":" + c.minutes));
     }
   } catch {}
 }
