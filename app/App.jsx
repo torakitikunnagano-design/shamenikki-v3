@@ -293,15 +293,21 @@ function App() {
     location.reload();
   }
 
-  // 店舗切替のリロードをまたいで現在の画面を復元（sessionStorage を1回だけ消費）
+  // 店舗切替のリロードをまたいで現在の画面を復元する。
+  // 注意: 初期化関数は「純粋」にする。SSRハイドレーション不一致でツリーが再マウントされると
+  //       初期化が再実行されるため、ここで removeItem すると2回目の実行で値が消え、復元が失われる
+  //       （= 管理ログイン画面からキャスト画面へ飛んでいた原因）。破棄は下の useEffect で1回だけ行う。
   const [switchRestore] = useState(() => {
     if (typeof window === "undefined") return null;
     try {
       const raw = sessionStorage.getItem("shamenikki_switch_restore");
-      if (raw) { sessionStorage.removeItem("shamenikki_switch_restore"); return JSON.parse(raw); }
-    } catch {}
-    return null;
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
   });
+  useEffect(() => {
+    // 復元値は1回使ったら破棄（通常リロードでは従来どおり再ロックされるように）
+    try { sessionStorage.removeItem("shamenikki_switch_restore"); } catch {}
+  }, []);
   const [mode, setMode] = useState(switchRestore?.mode ?? "cast");
   const [adminUnlocked, setAdminUnlocked] = useState(switchRestore?.adminUnlocked ?? false);
   const [passInput, setPassInput] = useState("");
