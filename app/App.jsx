@@ -3231,6 +3231,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                     {diagData?.type && <Tag label={`${diagData.type}${isLocked ? " 🔒" : ""}`} color={isLocked ? C.red : C.blue} />}
                     {guarantee[c.name]?.type && <Tag label={guarantee[c.name].type === "daily" ? "日保証" : "トータル保証"} color={C.yellow} />}
                   </div>
+                  {/* ヘブンID（同期で取得・表示のみ。手動設定は廃止） */}
+                  <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", margin: "6px 0 0" }}>ID: {c.heaven_id || "未設定"}</p>
                   {(() => {
                     const g = guarantee[c.name];
                     if (!g?.dailyAmount || !g?.endDate) return null;
@@ -3259,11 +3261,11 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
                   <MiteneButton cast={c} />
+                  <button onClick={() => alert("明細アップロードは準備中です（次のステップで実装）")} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.blue}60`, background: `${C.blue}10`, color: C.blue, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                    明細UP
+                  </button>
                   <button onClick={() => openGuaranteeModal(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     保証設定
-                  </button>
-                  <button onClick={() => openModal(c)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.accent}45`, background: `${C.accent}10`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
-                    ID設定
                   </button>
                   <button onClick={() => toggle(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${c.is_active ? C.red : C.green}45`, background: `${c.is_active ? C.red : C.green}10`, color: c.is_active ? C.red : C.green, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
                     {c.is_active ? "停止" : "再開"}
