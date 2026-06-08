@@ -1,5 +1,5 @@
-import App from './App'
+import AuthGate from './AuthGate'
 
 export default function Page() {
-  return <App />
+  return <AuthGate />
 }

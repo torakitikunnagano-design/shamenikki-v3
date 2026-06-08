@@ -807,7 +807,8 @@ function App() {
     }
   }
 
-  function logout() { setAdminUnlocked(false); setMode("cast"); }
+  // 管理ログアウト＝Supabase Auth からもサインアウト（外側のログイン画面へ戻る）
+  function logout() { setAdminUnlocked(false); setMode("cast"); try { supabase.auth.signOut(); } catch {} }
   function castLogout() { setLoggedInCast(null); setSessionPass(""); setCastPage("score"); setShowShindan(false); }
   function handleCastLogin(name, pass) {
     setLoggedInCast(name);
