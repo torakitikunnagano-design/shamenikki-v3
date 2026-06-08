@@ -19,11 +19,22 @@ export default function AuthGate() {
 
   useEffect(() => {
     let mounted = true;
+    // 初期判定は getSession を権威とする（localStorage の保存セッションを復元）
     supabase.auth.getSession()
-      .then(({ data }) => { if (mounted) setSession(data?.session ?? null); })
-      .catch(() => { if (mounted) setSession(null); });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
-      setSession(sess ?? null);
+      .then(({ data, error }) => {
+        console.log("[AuthGate] getSession hasSession=" + !!(data && data.session) + (error ? " error=" + error.message : ""));
+        if (mounted) setSession(data?.session ?? null);
+      })
+      .catch((e) => { console.error("[AuthGate] getSession threw:", e && e.message); if (mounted) setSession(null); });
+
+    // onAuthStateChange は「明示的な SIGNED_OUT のときだけ」ログイン画面へ。
+    // それ以外で session が来たら採用（ログイン直後/復元/更新）。session が無い非SIGNED_OUTイベントは
+    // 無視＝バックグラウンドのトークン更新失敗などで有効セッションが誤って弾かれるのを防ぐ。
+    const { data: sub } = supabase.auth.onAuthStateChange((event, sess) => {
+      console.log("[AuthGate] event=" + event + " hasSession=" + !!sess);
+      if (!mounted) return;
+      if (event === "SIGNED_OUT") { setSession(null); return; }
+      if (sess) setSession(sess);
     });
     return () => { mounted = false; try { sub.subscription.unsubscribe(); } catch {} };
   }, []);
