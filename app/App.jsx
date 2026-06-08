@@ -966,7 +966,7 @@ function App() {
                 </nav>
               )}
 
-              <div style={{ padding: "20px 16px", maxWidth: "680px", margin: "0 auto" }}>
+              <div style={{ padding: "20px 16px", maxWidth: (mode === "admin" && page === "cast") ? "1280px" : "680px", margin: "0 auto" }}>
                 {mode === "cast" && showShindan && <ShindanPage casts={casts} setCasts={setCasts} loggedInCast={loggedInCast} onComplete={() => { setShowShindan(false); setCastPage("score"); }} />}
                 {mode === "cast" && !showShindan && page === "score"       && <ScorePage casts={casts} settings={settings} scores={scores} setScores={setScores} loggedInCast={loggedInCast} sessionPass={sessionPass} onRetryDiagnosis={() => setShowShindan(true)} />}
                 {mode === "cast" && !showShindan && page === "salary"      && <SalaryPage loggedInCast={loggedInCast} casts={casts} courses={courses} shifts={shifts} />}
@@ -3207,7 +3207,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
             </button>
           ))}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: "10px", alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: "10px", alignItems: "start" }}>
           {casts.filter((c) => { if (!showTodayOnly) return true; const d = shiftDaysFor(shifts, c.name); return Array.isArray(d) && d.some((s) => s.date === todayKey); }).map((c) => {
             let diagData = null;
             try { const s = localStorage.getItem(skey(`cast_type_${c.heaven_id || c.name}`)); if (s) diagData = JSON.parse(s); } catch {}
