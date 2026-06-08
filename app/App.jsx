@@ -3207,15 +3207,17 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
             </button>
           ))}
         </div>
-        <div style={{ display: "grid", gap: "10px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: "10px", alignItems: "start" }}>
           {casts.filter((c) => { if (!showTodayOnly) return true; const d = shiftDaysFor(shifts, c.name); return Array.isArray(d) && d.some((s) => s.date === todayKey); }).map((c) => {
             let diagData = null;
             try { const s = localStorage.getItem(skey(`cast_type_${c.heaven_id || c.name}`)); if (s) diagData = JSON.parse(s); } catch {}
             const isLocked = (diagData?.retries ?? 0) >= 2;
             const _days = shiftDaysFor(shifts, c.name);
             const todayShift = Array.isArray(_days) ? _days.find((s) => s.date === todayKey) : null;
+            // 違反カレンダー表示中（保証の開始/終了日あり）のカードは横長なので2列ぶち抜きにする
+            const hasCalendar = !!(guarantee[c.name]?.startDate && guarantee[c.name]?.endDate);
             return (
-            <div key={c.name} style={{ ...card, borderColor: c.is_active ? `${C.green}40` : C.border }}>
+            <div key={c.name} style={{ ...card, borderColor: c.is_active ? `${C.green}40` : C.border, gridColumn: hasCalendar ? "1 / -1" : undefined }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
