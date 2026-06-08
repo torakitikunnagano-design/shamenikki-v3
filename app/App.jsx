@@ -611,15 +611,22 @@ function App() {
             }
           } catch {}
         } else {
-          // Supabaseにデータあり → { "cast_name_date": {startTime, endTime} } に復元
-          // prev（localStorage由来）を優先してマージ: doSyncが書いた配列キー等を上書きしない
+          // Supabaseにデータあり → 2形式を復元:
+          //  (1) "cast_name_YYYY-MM-DD" → {startTime,endTime}（給料/カレンダー参照用）
+          //  (2) "cast_name" → [{date:M/D,start,end}]（今日出勤フィルタ shiftDaysFor 用）
+          //  ※(2)が無いと別端末でクラウドから読んだだけでは今日出勤が出ない。
           const rebuilt = {};
+          const arrays = {};
           data.forEach((row) => {
-            rebuilt[`${row.cast_name}_${row.date}`] = {
-              startTime: row.start_time,
-              endTime:   row.end_time,
-            };
+            rebuilt[`${row.cast_name}_${row.date}`] = { startTime: row.start_time, endTime: row.end_time };
+            if (row.date && row.date.length >= 10) {
+              const md = `${parseInt(row.date.slice(5, 7), 10)}/${parseInt(row.date.slice(8, 10), 10)}`; // YYYY-MM-DD→M/D(ゼロ詰めなし)
+              if (!arrays[row.cast_name]) arrays[row.cast_name] = [];
+              arrays[row.cast_name].push({ date: md, start: row.start_time, end: row.end_time });
+            }
           });
+          Object.assign(rebuilt, arrays);
+          // prev（localStorage由来）を優先してマージ: doSyncが書いたローカルの最新を上書きしない
           setShifts((prev) => ({ ...rebuilt, ...prev }));
         }
       } catch {}
@@ -2991,6 +2998,9 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         if (!Array.isArray(data.shifts)) throw new Error("出勤データが取得できませんでした");
         // 同期データの date は "M/D" 形式 → 給料ページ参照用に "YYYY-MM-DD" キーも書く
         const jstYear = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).slice(0, 4);
+        const store = getActiveStoreId();
+        const shiftRows = [];           // Supabase 保存用
+        const seenRow = new Set();      // (store_id,cast_name,date) 重複排除
         setShifts((prev) => {
           const updated = { ...prev };
           data.shifts.forEach(({ name, days }) => {
@@ -3001,10 +3011,31 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
               const [m, d] = date.split("/");
               const ymd = `${jstYear}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
               updated[`${name}_${ymd}`] = { startTime: start || "", endTime: end || "" };
+              const rk = `${store}::${name}::${ymd}`;
+              if (!seenRow.has(rk)) {
+                seenRow.add(rk);
+                shiftRows.push({ store_id: store, cast_name: name, date: ymd, start_time: start || "", end_time: end || "" });
+              }
             });
           });
           return updated;
         });
+        // Supabase へ upsert（出勤同期はこれまでローカルだけだった＝クラウド未保存のバグを修正）。
+        // supabase-js は reject せず {error} を resolve するので必ず error を見る。
+        if (shiftRows.length > 0) {
+          try {
+            supabase.from("shifts").upsert(shiftRows, { onConflict: "store_id,cast_name,date" })
+              .then(({ error }) => {
+                if (error) {
+                  console.error("[doSync shifts upsert] error:", error.message || error, error.details || "", error.hint || "");
+                  setSyncResult((p) => ({ ...(p || {}), upsertError: (error.message || String(error)) }));
+                } else {
+                  console.log("[doSync shifts upsert] saved rows=" + shiftRows.length);
+                }
+              })
+              .catch((e) => { console.error("[doSync shifts upsert] exception:", e?.message || e); setSyncResult((p) => ({ ...(p || {}), upsertError: String(e?.message || e) })); });
+          } catch (e) { console.error("[doSync shifts upsert] threw:", e?.message || e); }
+        }
         setSyncResult({ mode: "shifts", total: data.shifts.length });
         setShowTodayOnly(true);
       }
