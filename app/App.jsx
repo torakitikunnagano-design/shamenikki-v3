@@ -3258,13 +3258,13 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   )}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
-                  <button onClick={() => openModal(c)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.accent}45`, background: `${C.accent}10`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
-                    ID設定
-                  </button>
+                  <MiteneButton cast={c} />
                   <button onClick={() => openGuaranteeModal(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     保証設定
                   </button>
-                  <MiteneButton cast={c} />
+                  <button onClick={() => openModal(c)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.accent}45`, background: `${C.accent}10`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                    ID設定
+                  </button>
                   <button onClick={() => toggle(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${c.is_active ? C.red : C.green}45`, background: `${c.is_active ? C.red : C.green}10`, color: c.is_active ? C.red : C.green, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
                     {c.is_active ? "停止" : "再開"}
                   </button>
