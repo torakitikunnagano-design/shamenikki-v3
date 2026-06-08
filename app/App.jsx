@@ -2768,6 +2768,68 @@ function MiteneButton({ cast }) {
 }
 
 // ============================================================
+// 明細アップロード（キャストごと）: Supabase Storage "statements" + salary_statements
+//  - cast_id は salary_records と同じ規約（heaven_id 優先、無ければ name）
+//  - 失敗時は必ず error を確認してアラート（握りつぶさない）
+// ============================================================
+function StatementUpButton({ cast, done, onUploaded }) {
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState(null);
+  const fileRef = useRef(null);
+
+  const castId = cast?.heaven_id || cast?.name || "";
+  const date = getBusinessToday(); // v1は今日の日付。日付選択を足すときはここ1か所を変える
+
+  async function handleFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (fileRef.current) fileRef.current.value = ""; // 同じファイル再選択を可能に
+    if (!file) return;
+    if (!castId) { alert("このキャストにはIDが無いためアップロードできません（キャスト同期でIDを取得してください）"); return; }
+    setUploading(true); setErr(null);
+    try {
+      const store = getActiveStoreId();
+      const safeCast = String(castId).replace(/[^a-zA-Z0-9_-]/g, "_"); // パス安全化（日本語名対策）
+      const m = (file.name || "").match(/\.([a-zA-Z0-9]+)$/);
+      const ext = (m ? m[1] : (file.type.includes("pdf") ? "pdf" : file.type.includes("png") ? "png" : "jpg")).toLowerCase();
+      const path = `${store}/${safeCast}/${date}_${Date.now()}.${ext}`;
+
+      // 1) Storage へアップロード（非公開バケット statements）
+      const up = await supabase.storage.from("statements").upload(path, file, { upsert: true, contentType: file.type || undefined });
+      if (up.error) { setErr("アップロード失敗"); setUploading(false); alert("明細アップロードに失敗しました: " + up.error.message); return; }
+
+      // 2) salary_statements に upsert（主キー store_id, cast_id, date）
+      const { error: dbErr } = await supabase.from("salary_statements").upsert(
+        { store_id: store, cast_id: castId, date, image_path: path, uploaded_at: new Date().toISOString() },
+        { onConflict: "store_id,cast_id,date" }
+      );
+      if (dbErr) { setErr("保存失敗"); setUploading(false); alert("明細情報の保存に失敗しました: " + dbErr.message); return; }
+
+      if (onUploaded) onUploaded(castId);
+    } catch (e) {
+      setErr("エラー");
+      alert("明細アップロードでエラー: " + (e && e.message ? e.message : e));
+    }
+    setUploading(false);
+  }
+
+  const color = done ? C.green : C.blue;
+  return (
+    <>
+      <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={handleFile} style={{ display: "none" }} />
+      <button
+        onClick={() => { if (!uploading && fileRef.current) fileRef.current.click(); }}
+        disabled={uploading}
+        style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${color}60`, background: `${color}10`, color: uploading ? C.muted : color, fontWeight: "700", cursor: uploading ? "not-allowed" : "pointer", fontSize: "11px", whiteSpace: "nowrap", opacity: uploading ? 0.65 : 1 }}>
+        {uploading ? "アップ中…" : (done ? "明細UP ✓済" : "明細UP")}
+      </button>
+      {err && (
+        <p style={{ fontSize: "9px", color: C.red, fontWeight: "700", margin: "-2px 0 0", maxWidth: "130px", lineHeight: 1.35 }}>{err}</p>
+      )}
+    </>
+  );
+}
+
+// ============================================================
 // キャスト管理
 // ============================================================
 function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, settings }) {
@@ -2789,6 +2851,23 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const [openCalCell, setOpenCalCell] = useState(null); // { castName, date } | null
   const todayKey = getBusinessTodayKey();
   const todayISO = getBusinessToday();
+
+  // 本日の明細アップロード済み cast_id 集合（salary_statements を読んで「済」判定。開き直しても保つ）
+  const [statementsDone, setStatementsDone] = useState(() => new Set());
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase.from("salary_statements")
+          .select("cast_id, image_path")
+          .eq("store_id", getActiveStoreId())
+          .eq("date", todayISO);
+        if (!active || error || !Array.isArray(data)) return;
+        setStatementsDone(new Set(data.filter((r) => r.image_path).map((r) => String(r.cast_id))));
+      } catch {}
+    })();
+    return () => { active = false; };
+  }, [todayISO]);
 
   const guaranteeCtx = { casts, guarantee, violations, cutDays, shifts, settings, scores, extraWorkdays };
 
@@ -3261,9 +3340,11 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
                   <MiteneButton cast={c} />
-                  <button onClick={() => alert("明細アップロードは準備中です（次のステップで実装）")} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.blue}60`, background: `${C.blue}10`, color: C.blue, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
-                    明細UP
-                  </button>
+                  <StatementUpButton
+                    cast={c}
+                    done={statementsDone.has(String(c.heaven_id || c.name))}
+                    onUploaded={(id) => setStatementsDone((prev) => { const n = new Set(prev); n.add(String(id)); return n; })}
+                  />
                   <button onClick={() => openGuaranteeModal(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     保証設定
                   </button>
