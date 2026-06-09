@@ -1322,7 +1322,7 @@ function ShindanPage({ casts, setCasts, loggedInCast, onComplete }) {
         supabase.from("casts").upsert(
           toSupabaseCast({ ...cast, type: typeGuess, disclose, shindan_note: disclose === "YES" ? note : null }),
           { onConflict: "store_id,name" }
-        ).then(() => {}).catch(() => {});
+        ).then(({ error }) => { if (error) console.error("[analyzeAndSave casts upsert]", error.message, error.details, error.hint); }).catch((e) => console.error("[analyzeAndSave casts upsert] exception:", e?.message || e));
       } catch {}
     } catch { setResult({ type: typeGuess, detail: "分析中にエラーが発生しました。" }); }
     saveLock({ type: typeGuess, retries: lockData.retries + 1 });
@@ -1497,7 +1497,7 @@ function useSupportSettings(castId) {
           supabase.from("support_settings").upsert(
             { store_id: getActiveStoreId(), cast_id: castId, image_support: next.imageSupport, text_support: next.textSupport, title_assist: next.titleAssist, updated_at: new Date().toISOString() },
             { onConflict: "store_id,cast_id" }
-          ).then(() => {}).catch(() => {});
+          ).then(({ error }) => { if (error) console.error("[support update upsert]", error.message, error.details, error.hint); }).catch((e) => console.error("[support update upsert] exception:", e?.message || e));
         } catch {}
       }
       return next;
@@ -1810,7 +1810,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
       }
       const newScore = { id: Date.now(), cast_name: castName, diary: finalDiary, result: scoreText, posted_at: autoPostedAtISO, has_image: !!imageFile, image_hash: imageHash, score: sc };
       setScores((prev) => [newScore, ...prev]);
-      try { supabase.from("scores").upsert({ ...newScore, store_id: getActiveStoreId() }, { onConflict: "id" }).then(() => {}).catch(() => {}); } catch {}
+      try { supabase.from("scores").upsert({ ...newScore, store_id: getActiveStoreId() }, { onConflict: "id" }).then(({ error }) => { if (error) console.error("[post scores upsert]", error.message, error.details, error.hint); }).catch((e) => console.error("[post scores upsert] exception:", e?.message || e)); } catch {}
       setLoading(false);
     }
   }
@@ -2389,17 +2389,32 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
     if (!staffShift) { setStartTime(""); setEndTime(""); }
     setGross(""); setDorm(""); setMisc(""); setTransport("");
     setSlipOcrDone(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
 
     // Supabase sync：親レコードを先にupsert → 既存sessionsをdelete → 再挿入
     try {
-      await supabase.from("salary_records").upsert(toSupabaseRecord(rec, castId));
-      await supabase.from("salary_sessions").delete().eq("salary_record_id", rec.id);
+      const { error: recErr } = await supabase.from("salary_records").upsert(toSupabaseRecord(rec, castId));
+      if (recErr) {
+        console.error("[salary save salary_records upsert]", recErr.message, recErr.details, recErr.hint);
+        alert("保存に失敗しました: " + recErr.message);
+        return;
+      }
+      const { error: delErr } = await supabase.from("salary_sessions").delete().eq("salary_record_id", rec.id);
+      if (delErr) {
+        console.error("[salary save salary_sessions delete]", delErr.message, delErr.details, delErr.hint);
+        alert("保存に失敗しました: " + delErr.message);
+        return;
+      }
       const sessions = toSupabaseSessions(rec);
       if (sessions.length > 0) {
-        await supabase.from("salary_sessions").insert(sessions);
+        const { error: insErr } = await supabase.from("salary_sessions").insert(sessions);
+        if (insErr) {
+          console.error("[salary save salary_sessions insert]", insErr.message, insErr.details, insErr.hint);
+          alert("保存に失敗しました: " + insErr.message);
+          return;
+        }
       }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
     } catch {}
   }
 
@@ -2883,7 +2898,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     setCasts(updated);
     const toggled = updated.find((c) => c.name === name);
     if (toggled) {
-      try { supabase.from("casts").upsert(toSupabaseCast(toggled), { onConflict: "store_id,name" }).then(() => {}).catch(() => {}); } catch {}
+      try { supabase.from("casts").upsert(toSupabaseCast(toggled), { onConflict: "store_id,name" }).then(({ error }) => { if (error) console.error("[toggle casts upsert]", error.message, error.details, error.hint); }).catch((e) => console.error("[toggle casts upsert] exception:", e?.message || e)); } catch {}
     }
   }
   function openGuaranteeModal(castName) {
@@ -2936,7 +2951,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     setModalSaved(true);
     setTimeout(() => setModal(null), 1000);
     // Supabaseにはheaven_passを送らない（toSupabaseCastが除外する）
-    try { supabase.from("casts").upsert(toSupabaseCast({ ...modal, heaven_id: modalId }), { onConflict: "store_id,name" }).then(() => {}).catch(() => {}); } catch {}
+    try { supabase.from("casts").upsert(toSupabaseCast({ ...modal, heaven_id: modalId }), { onConflict: "store_id,name" }).then(({ error }) => { if (error) console.error("[saveModal casts upsert]", error.message, error.details, error.hint); }).catch((e) => console.error("[saveModal casts upsert] exception:", e?.message || e)); } catch {}
   }
 
   // ミテネ用パスワードを非ブロッキングで取得してローカル heaven_pass を埋める。
@@ -3728,12 +3743,19 @@ function CoursesPage({ courses, setCourses }) {
     const newCourse = { id: Date.now(), minutes: m };
     setCourses([...courses, newCourse].sort((a, b) => a.minutes - b.minutes));
     setNewMin("");
-    try { await supabase.from("courses").upsert({ id: newCourse.id, minutes: newCourse.minutes, store_id: getActiveStoreId() }, { onConflict: "store_id,id" }); } catch {}
+    try {
+      const { error } = await supabase.from("courses").upsert({ id: newCourse.id, minutes: newCourse.minutes, store_id: getActiveStoreId() }, { onConflict: "store_id,id" });
+      if (error) {
+        console.error("[addCourse courses upsert]", error.message, error.details, error.hint);
+        alert("保存に失敗しました: " + error.message);
+        return;
+      }
+    } catch {}
   }
 
   function deleteCourse(id) {
     setCourses(courses.filter((c) => c.id !== id));
-    try { supabase.from("courses").delete().eq("store_id", getActiveStoreId()).eq("id", id).then(() => {}).catch(() => {}); } catch {}
+    try { supabase.from("courses").delete().eq("store_id", getActiveStoreId()).eq("id", id).then(({ error }) => { if (error) console.error("[deleteCourse courses delete]", error.message, error.details, error.hint); }).catch((e) => console.error("[deleteCourse courses delete] exception:", e?.message || e)); } catch {}
   }
 
   function startEdit(c) { setEditId(c.id); setEditMin(String(c.minutes)); }
@@ -3744,7 +3766,14 @@ function CoursesPage({ courses, setCourses }) {
     setCourses(courses.map((c) => c.id === id ? { ...c, minutes: m } : c).sort((a, b) => a.minutes - b.minutes));
     setEditId(null);
     setEditMin("");
-    try { await supabase.from("courses").upsert({ id, minutes: m, store_id: getActiveStoreId() }, { onConflict: "store_id,id" }); } catch {}
+    try {
+      const { error } = await supabase.from("courses").upsert({ id, minutes: m, store_id: getActiveStoreId() }, { onConflict: "store_id,id" });
+      if (error) {
+        console.error("[saveEdit courses upsert]", error.message, error.details, error.hint);
+        alert("保存に失敗しました: " + error.message);
+        return;
+      }
+    } catch {}
   }
 
   return (
@@ -3817,9 +3846,8 @@ function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDay
     setSettings(local); // localStorageに書き込み（useLocalStorage経由）
     setSyncConfig(localSync);
     setCutDays(localCut);
-    alert("保存しました！");
     try {
-      await supabase.from("settings").upsert({
+      const { error } = await supabase.from("settings").upsert({
         store_id:         getActiveStoreId(),
         id: 1,
         daily_post_goal:  local.daily_post_goal,
@@ -3831,6 +3859,12 @@ function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDay
         show_guarantee:   local.show_guarantee ?? true,
         updated_at:       new Date().toISOString(),
       }, { onConflict: "store_id,id" });
+      if (error) {
+        console.error("[settings save upsert]", error.message, error.details, error.hint);
+        alert("保存に失敗しました: " + error.message);
+        return;
+      }
+      alert("保存しました！");
     } catch {}
   }
 
@@ -3971,16 +4005,30 @@ function ShiftsPage({ casts, shifts, setShifts }) {
     });
 
     setShifts(next); // localStorageに書き込み（useLocalStorage経由）
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
 
     // Supabase sync
     if (toUpsert.length > 0) {
-      try { await supabase.from("shifts").upsert(toUpsert, { onConflict: "store_id,cast_name,date" }); } catch {}
+      try {
+        const { error } = await supabase.from("shifts").upsert(toUpsert, { onConflict: "store_id,cast_name,date" });
+        if (error) {
+          console.error("[saveAll shifts upsert]", error.message, error.details, error.hint);
+          alert("保存に失敗しました: " + error.message);
+          return;
+        }
+      } catch {}
     }
     for (const castName of toDelete) {
-      try { await supabase.from("shifts").delete().eq("store_id", getActiveStoreId()).eq("cast_name", castName).eq("date", date); } catch {}
+      try {
+        const { error } = await supabase.from("shifts").delete().eq("store_id", getActiveStoreId()).eq("cast_name", castName).eq("date", date);
+        if (error) {
+          console.error("[saveAll shifts delete]", error.message, error.details, error.hint);
+          alert("削除に失敗しました: " + error.message);
+          return;
+        }
+      } catch {}
     }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
   }
 
   return (
