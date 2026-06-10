@@ -1253,8 +1253,10 @@ function useCastTypeLock(castId) {
           supabase.from("cast_types").upsert(
             { store_id: getActiveStoreId(), cast_id: castId, type: next.type, retries: next.retries, updated_at: new Date().toISOString() },
             { onConflict: "store_id,cast_id" }
-          ).then(() => {}).catch(() => {});
-        } catch {}
+          ).then(({ error }) => {
+            if (error) console.error("saveLock upsert失敗:", error);
+          }).catch((e) => console.error("saveLock 例外:", e));
+        } catch (e) { console.error("saveLock 同期例外:", e); }
       }
       return next;
     });
@@ -1264,7 +1266,12 @@ function useCastTypeLock(castId) {
     setLockData({ type: null, retries: 0 });
     if (key) { try { localStorage.removeItem(skey(key)); } catch {} }
     if (castId) {
-      try { supabase.from("cast_types").delete().eq("store_id", getActiveStoreId()).eq("cast_id", castId).then(() => {}).catch(() => {}); } catch {}
+      try {
+        supabase.from("cast_types").delete().eq("store_id", getActiveStoreId()).eq("cast_id", castId)
+          .then(({ error }) => {
+            if (error) console.error("resetLock delete失敗:", error);
+          }).catch((e) => console.error("resetLock 例外:", e));
+      } catch (e) { console.error("resetLock 同期例外:", e); }
     }
   }
 
@@ -2889,7 +2896,12 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   function resetDiagLock(c) {
     const castId = c.heaven_id || c.name;
     try { localStorage.removeItem(skey(`cast_type_${castId}`)); } catch {}
-    try { supabase.from("cast_types").delete().eq("store_id", getActiveStoreId()).eq("cast_id", castId).then(() => {}).catch(() => {}); } catch {}
+    try {
+      supabase.from("cast_types").delete().eq("store_id", getActiveStoreId()).eq("cast_id", castId)
+        .then(({ error }) => {
+          if (error) console.error("resetDiagLock delete失敗:", error);
+        }).catch((e) => console.error("resetDiagLock 例外:", e));
+    } catch (e) { console.error("resetDiagLock 同期例外:", e); }
     setLockRefresh((n) => n + 1);
   }
 
