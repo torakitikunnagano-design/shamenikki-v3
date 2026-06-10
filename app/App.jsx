@@ -3065,6 +3065,49 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     return () => { active = false; };
   }, [todayISO]);
 
+  // 明細の承認状況（cast_idごとに「最新dateの1件」）。statementsDone とは別管理（既存判定は壊さない）。
+  const [stmtStatus, setStmtStatus] = useState(() => new Map()); // cast_id → { date, approved, approved_at, rejected_at, reject_reason, staff_resolved, staff_resolved_at }
+  const [stmtActionError, setStmtActionError] = useState({});    // cast_id → 保存エラーメッセージ
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data, error } = await supabase.from("salary_statements")
+        .select("cast_id, date, approved, approved_at, rejected_at, reject_reason, staff_resolved, staff_resolved_at")
+        .eq("store_id", getActiveStoreId())
+        .order("date", { ascending: false });
+      if (error) { console.error("承認状況取得失敗:", error); return; }
+      if (!active || !Array.isArray(data)) return;
+      const m = new Map();
+      for (const r of data) {
+        const key = String(r.cast_id);
+        if (!m.has(key)) m.set(key, r); // date降順なので各castで最初に来た行＝最新
+      }
+      setStmtStatus(m);
+    })();
+    return () => { active = false; };
+  }, [todayISO]);
+  function patchStmtStatus(castId, patch) {
+    setStmtStatus((prev) => {
+      const m = new Map(prev);
+      const cur = m.get(String(castId));
+      if (cur) m.set(String(castId), { ...cur, ...patch });
+      return m;
+    });
+  }
+  async function setStaffResolved(castId, st, resolved) {
+    setStmtActionError((e) => ({ ...e, [castId]: "" }));
+    const nowIso = resolved ? new Date().toISOString() : null;
+    const { error } = await supabase.from("salary_statements")
+      .update({ staff_resolved: resolved, staff_resolved_at: nowIso })
+      .eq("store_id", getActiveStoreId()).eq("cast_id", castId).eq("date", st.date);
+    if (error) {
+      console.error("対応状況の保存失敗:", error);
+      setStmtActionError((e) => ({ ...e, [castId]: "保存に失敗しました。もう一度お試しください" }));
+      return;
+    }
+    patchStmtStatus(castId, { staff_resolved: resolved, staff_resolved_at: nowIso });
+  }
+
   const guaranteeCtx = { casts, guarantee, violations, cutDays, shifts, settings, scores, extraWorkdays };
 
   function resetDiagLock(c) {
@@ -3661,6 +3704,54 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   <p style={{ fontSize: "11px", color: C.muted, margin: 0 }}>「保証設定」を押すと違反カレンダーが表示されます</p>
                 )}
               </div>
+              {/* 明細承認状況（スライスC）: cast_id で最新明細の状態を表示。明細が無ければ非表示 */}
+              {(() => {
+                const stCastId = c.heaven_id || c.name;
+                const st = stmtStatus.get(String(stCastId));
+                if (!st) return null;
+                const apprDate = st.approved_at ? String(st.approved_at).slice(0, 10) : "";
+                const resvDate = st.staff_resolved_at ? String(st.staff_resolved_at).slice(0, 10) : "";
+                const isApproved = st.approved === true;
+                const isRejected = !isApproved && !!st.rejected_at;
+                const stErr = stmtActionError[stCastId];
+                return (
+                  <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: `1px solid ${C.border}` }}>
+                    <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, margin: "0 0 8px" }}>明細承認状況</p>
+                    {isApproved ? (
+                      <p style={{ fontSize: "12px", fontWeight: "700", color: C.green, margin: 0 }}>承認済み{apprDate ? `（${apprDate}）` : ""}</p>
+                    ) : isRejected ? (
+                      <div style={{ display: "grid", gap: "6px" }}>
+                        <p style={{ fontSize: "12px", fontWeight: "700", color: C.red, margin: 0 }}>非承認</p>
+                        {st.reject_reason && (
+                          <p style={{ fontSize: "12px", color: C.red, margin: 0, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>理由：{st.reject_reason}</p>
+                        )}
+                        {st.staff_resolved === true ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <span style={{ fontSize: "11px", fontWeight: "700", color: C.green }}>対応済み{resvDate ? `（${resvDate}）` : ""}</span>
+                            <button onClick={() => setStaffResolved(stCastId, st, false)}
+                              style={{ padding: "6px 12px", borderRadius: "12px", border: `1.5px solid ${C.border}`, background: "transparent", color: C.muted, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                              保留中に戻す
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <span style={{ fontSize: "11px", fontWeight: "700", color: C.muted }}>保留中</span>
+                            <button onClick={() => setStaffResolved(stCastId, st, true)}
+                              style={{ padding: "6px 12px", borderRadius: "12px", border: `1.5px solid ${C.green}60`, background: `${C.green}15`, color: C.green, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                              対応済み
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p style={{ fontSize: "12px", fontWeight: "700", color: C.muted, margin: 0 }}>キャスト確認待ち</p>
+                    )}
+                    {stErr && (
+                      <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: "8px 0 0" }}>{stErr}</p>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
             );
           })}
