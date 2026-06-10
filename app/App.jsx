@@ -2286,6 +2286,34 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   const [slipLoading, setSlipLoading] = useState(false);
   const [slipOcrDone, setSlipOcrDone] = useState(false);
 
+  // 明細表示（本人が自分の明細を閲覧）: salary_statements を取得し、非公開バケットの署名付きURLを作る
+  const [statements, setStatements] = useState([]);
+  const [statementUrls, setStatementUrls] = useState({}); // image_path → 署名付きURL
+  useEffect(() => {
+    if (!castId) return;
+    let active = true;
+    (async () => {
+      const { data, error } = await supabase.from("salary_statements")
+        .select("date, image_path, approved, approved_at, uploaded_at")
+        .eq("store_id", getActiveStoreId())
+        .eq("cast_id", castId)
+        .order("date", { ascending: false });
+      if (error) { console.error("明細取得失敗:", error); return; }
+      if (!active) return;
+      setStatements(Array.isArray(data) ? data : []);
+      // 各 image_path の署名付きURLを作成（statements は非公開バケット）
+      const urls = {};
+      for (const row of (data || [])) {
+        if (!row.image_path) continue; // image_path が無い行は画像なし扱い
+        const { data: signed, error: signErr } = await supabase.storage.from("statements").createSignedUrl(row.image_path, 3600);
+        if (signErr) { console.error("署名URL作成失敗:", signErr); continue; }
+        if (signed?.signedUrl) urls[row.image_path] = signed.signedUrl;
+      }
+      if (active) setStatementUrls(urls);
+    })();
+    return () => { active = false; };
+  }, [castId]);
+
   function updateHon(i, key, val) {
     setHons((prev) => prev.map((h, idx) => idx === i ? { ...h, [key]: val } : h));
   }
@@ -2441,6 +2469,42 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   return (
     <div style={{ display: "grid", gap: "16px" }}>
       <Header title="給料記録" sub="1本ごとに入力して手取りを計算" color={C.accent} />
+
+      {/* あなたの明細（管理者がアップロードした明細画像の閲覧。今回は表示のみ） */}
+      <div style={{ ...card }}>
+        <p style={{ fontSize: "13px", color: C.text, fontWeight: "700", marginBottom: "12px" }}>あなたの明細</p>
+        {statements.length === 0 ? (
+          <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>明細はまだありません</p>
+        ) : (
+          <div style={{ display: "grid", gap: "16px" }}>
+            {statements.map((st, i) => {
+              const url = st.image_path ? statementUrls[st.image_path] : null;
+              const approvedDate = st.approved_at ? String(st.approved_at).slice(0, 10) : "";
+              return (
+                <div key={`${st.date}_${i}`} style={{ borderTop: i === 0 ? "none" : `1px solid ${C.border}`, paddingTop: i === 0 ? 0 : "16px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+                    <span style={{ fontSize: "13px", fontWeight: "700", color: C.text }}>{st.date}</span>
+                    {st.approved ? (
+                      <span style={{ fontSize: "11px", fontWeight: "700", color: C.green, background: `${C.green}15`, border: `1px solid ${C.green}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>
+                        承認済み{approvedDate ? `（${approvedDate}）` : ""}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: "11px", fontWeight: "700", color: C.muted, background: `${C.muted}15`, border: `1px solid ${C.muted}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>
+                        未承認
+                      </span>
+                    )}
+                  </div>
+                  {url ? (
+                    <img src={url} alt={`${st.date} の明細`} style={{ width: "100%", borderRadius: "12px", border: `1px solid ${C.border}`, display: "block" }} />
+                  ) : (
+                    <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>画像なし</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* 給料明細から自動入力 */}
       <div style={{ ...card, border: `2px dashed ${C.accent}60` }}>
