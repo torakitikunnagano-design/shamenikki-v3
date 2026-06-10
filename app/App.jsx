@@ -418,17 +418,18 @@ function App() {
             if (stored) {
               const local = JSON.parse(stored);
               if (local.length > 0) {
-                await supabase.from("courses").upsert(local.map((c) => ({ id: c.id, minutes: c.minutes, store_id: getActiveStoreId() })), { onConflict: "store_id,id" });
+                const { error: errCourses } = await supabase.from("courses").upsert(local.map((c) => ({ id: c.id, minutes: c.minutes, store_id: getActiveStoreId() })), { onConflict: "store_id,id" });
+                if (errCourses) console.error("initCourses upsert失敗:", errCourses);
               }
             }
-          } catch {}
+          } catch (e) { console.error("initCourses 例外:", e); }
         } else {
           // 非オリジナル店で Supabase が0件。localStorage にも無いときだけ空にする（誤った空で消さない）
           let localArr = [];
           try { const s = localStorage.getItem(skey("shamenikki_courses")); localArr = s ? JSON.parse(s) : []; } catch {}
           if (!Array.isArray(localArr) || localArr.length === 0) setCourses([]);
         }
-      } catch {}
+      } catch (e) { console.error("initCourses 例外:", e); }
     }
     initCourses();
   }, []);
@@ -444,7 +445,7 @@ function App() {
             const stored = localStorage.getItem(skey("shamenikki_settings"));
             if (stored) {
               const local = JSON.parse(stored);
-              await supabase.from("settings").upsert({
+              const { error: errSettings } = await supabase.from("settings").upsert({
                 store_id:         getActiveStoreId(),
                 id: 1,
                 daily_post_goal:  local.daily_post_goal,
@@ -456,9 +457,10 @@ function App() {
                 show_guarantee:   local.show_guarantee ?? true,
                 updated_at:       new Date().toISOString(),
               }, { onConflict: "store_id,id" });
+              if (errSettings) console.error("initSettings upsert失敗:", errSettings);
               localStorage.setItem("shamenikki_settings_synced", "1");
             }
-          } catch {}
+          } catch (e) { console.error("initSettings 例外:", e); }
         }
 
         // ② ①の後にSupabaseから読み込み（デフォルト行でユーザー設定を上書きしない）
@@ -474,7 +476,7 @@ function App() {
             show_guarantee:   data.show_guarantee,
           });
         }
-      } catch {}
+      } catch (e) { console.error("initSettings 例外:", e); }
     }
     initSettings();
   }, []);
@@ -494,10 +496,11 @@ function App() {
               if (stored) {
                 const local = JSON.parse(stored);
                 if (local.length > 0) {
-                  await supabase.from("casts").upsert(local.map(toSupabaseCast), { onConflict: "store_id,name" });
+                  const { error: errCasts } = await supabase.from("casts").upsert(local.map(toSupabaseCast), { onConflict: "store_id,name" });
+                  if (errCasts) console.error("initCasts upsert失敗:", errCasts);
                 }
               }
-            } catch {}
+            } catch (e) { console.error("initCasts 例外:", e); }
           } else {
             // 非オリジナル店で Supabase が0件。ただし localStorage に既存データがあるなら
             // 「誤った空（店舗往復時の取得失敗等）」の可能性が高いので破壊しない（141件を消さない）。
@@ -529,7 +532,7 @@ function App() {
             setCasts(merged);
           } catch {}
         }
-      } catch {}
+      } catch (e) { console.error("initCasts 例外:", e); }
     }
     initCasts();
   }, []);
@@ -549,7 +552,7 @@ function App() {
               if (stored) {
                 const local = JSON.parse(stored);
                 if (local.length > 0) {
-                  await supabase.from("scores").upsert(local.map((s) => ({
+                  const { error: errScores } = await supabase.from("scores").upsert(local.map((s) => ({
                     store_id:   getActiveStoreId(),
                     id:         s.id,
                     cast_name:  s.cast_name,
@@ -559,9 +562,10 @@ function App() {
                     has_image:  s.has_image,
                     score:      s.score,
                   })), { onConflict: "id" });
+                  if (errScores) console.error("initScores upsert失敗:", errScores);
                 }
               }
-            } catch {}
+            } catch (e) { console.error("initScores 例外:", e); }
           } else {
             // 非オリジナル店で Supabase が0件。localStorage にも無いときだけ空にする（誤った空で消さない）
             let localArr = [];
@@ -580,7 +584,7 @@ function App() {
             score:     s.score,
           })));
         }
-      } catch {}
+      } catch (e) { console.error("initScores 例外:", e); }
     }
     initScores();
   }, []);
@@ -606,10 +610,11 @@ function App() {
                 end_time:   val.endTime   || "",
               }));
               if (rows.length > 0) {
-                await supabase.from("shifts").upsert(rows, { onConflict: "store_id,cast_name,date" });
+                const { error: errShifts } = await supabase.from("shifts").upsert(rows, { onConflict: "store_id,cast_name,date" });
+                if (errShifts) console.error("initShifts upsert失敗:", errShifts);
               }
             }
-          } catch {}
+          } catch (e) { console.error("initShifts 例外:", e); }
         } else {
           // Supabaseにデータあり → 2形式を復元:
           //  (1) "cast_name_YYYY-MM-DD" → {startTime,endTime}（給料/カレンダー参照用）
@@ -629,7 +634,7 @@ function App() {
           // prev（localStorage由来）を優先してマージ: doSyncが書いたローカルの最新を上書きしない
           setShifts((prev) => ({ ...rebuilt, ...prev }));
         }
-      } catch {}
+      } catch (e) { console.error("initShifts 例外:", e); }
     }
     initShifts();
   }, []);
@@ -654,16 +659,17 @@ function App() {
               })
               .filter(Boolean);
             if (rows.length > 0) {
-              await supabase.from("cast_types").upsert(rows, { onConflict: "store_id,cast_id" });
+              const { error: errCastTypes } = await supabase.from("cast_types").upsert(rows, { onConflict: "store_id,cast_id" });
+              if (errCastTypes) console.error("initCastTypes upsert失敗:", errCastTypes);
             }
-          } catch {}
+          } catch (e) { console.error("initCastTypes 例外:", e); }
         } else {
           // Supabaseにデータあり → 各行をlocalStorageに書き戻す（ハイドレート）
           data.forEach((row) => {
             try { localStorage.setItem(skey(`cast_type_${row.cast_id}`), JSON.stringify({ type: row.type, retries: row.retries })); } catch {}
           });
         }
-      } catch {}
+      } catch (e) { console.error("initCastTypes 例外:", e); }
     }
     initCastTypes();
   }, []);
@@ -694,9 +700,10 @@ function App() {
               })
               .filter(Boolean);
             if (rows.length > 0) {
-              await supabase.from("support_settings").upsert(rows, { onConflict: "store_id,cast_id" });
+              const { error: errSupport } = await supabase.from("support_settings").upsert(rows, { onConflict: "store_id,cast_id" });
+              if (errSupport) console.error("initSupportSettings upsert失敗:", errSupport);
             }
-          } catch {}
+          } catch (e) { console.error("initSupportSettings 例外:", e); }
         } else {
           // Supabaseにデータあり → 各行をlocalStorageに書き戻す（ハイドレート）
           data.forEach((row) => {
@@ -709,7 +716,7 @@ function App() {
             } catch {}
           });
         }
-      } catch {}
+      } catch (e) { console.error("initSupportSettings 例外:", e); }
     }
     initSupportSettings();
   }, []);
@@ -730,16 +737,19 @@ function App() {
               const recs = JSON.parse(localStorage.getItem(fullKey)) || [];
               for (const rec of recs) {
                 // 親レコードを先に upsert
-                await supabase.from("salary_records").upsert(toSupabaseRecord(rec, castId));
+                const { error: errSalRec } = await supabase.from("salary_records").upsert(toSupabaseRecord(rec, castId));
+                if (errSalRec) console.error("initSalaryRecords upsert失敗:", errSalRec);
                 // 既存sessionを削除してから再挿入（重複防止）
-                await supabase.from("salary_sessions").delete().eq("salary_record_id", rec.id);
+                const { error: errSalSessDel } = await supabase.from("salary_sessions").delete().eq("salary_record_id", rec.id);
+                if (errSalSessDel) console.error("initSalaryRecords delete失敗:", errSalSessDel);
                 const sessions = toSupabaseSessions(rec);
                 if (sessions.length > 0) {
-                  await supabase.from("salary_sessions").insert(sessions);
+                  const { error: errSalSessIns } = await supabase.from("salary_sessions").insert(sessions);
+                  if (errSalSessIns) console.error("initSalaryRecords insert失敗:", errSalSessIns);
                 }
               }
             }
-          } catch {}
+          } catch (e) { console.error("initSalaryRecords 例外:", e); }
         } else {
           // Supabaseにデータあり → sessionsも取得してlocalStorageに書き戻す（ハイドレート）
           try {
@@ -792,7 +802,7 @@ function App() {
             });
           } catch {}
         }
-      } catch {}
+      } catch (e) { console.error("initSalaryRecords 例外:", e); }
     }
     initSalaryRecords();
   }, []);
