@@ -2294,7 +2294,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
     let active = true;
     (async () => {
       const { data, error } = await supabase.from("salary_statements")
-        .select("date, image_path, approved, approved_at, uploaded_at")
+        .select("date, image_path, approved, approved_at, rejected_at, reject_reason, uploaded_at")
         .eq("store_id", getActiveStoreId())
         .eq("cast_id", castId)
         .order("date", { ascending: false });
@@ -2313,6 +2313,44 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
     })();
     return () => { active = false; };
   }, [castId]);
+
+  // 明細の承認/非承認（本人操作）。キーは store_id, cast_id, date。
+  const [rejectingDate, setRejectingDate] = useState(null); // 理由入力中の明細date（1件のみ開く）
+  const [rejectReason, setRejectReason] = useState("");
+  const [actionError, setActionError] = useState({}); // date → 保存エラーメッセージ
+  function patchStatement(date, patch) {
+    setStatements((prev) => prev.map((s) => (s.date === date ? { ...s, ...patch } : s)));
+  }
+  async function approveStatement(st) {
+    setActionError((e) => ({ ...e, [st.date]: "" }));
+    const nowIso = new Date().toISOString();
+    const { error } = await supabase.from("salary_statements")
+      .update({ approved: true, approved_at: nowIso, rejected_at: null, reject_reason: null })
+      .eq("store_id", getActiveStoreId()).eq("cast_id", castId).eq("date", st.date);
+    if (error) {
+      console.error("承認の保存失敗:", error);
+      setActionError((e) => ({ ...e, [st.date]: "保存に失敗しました。もう一度お試しください" }));
+      return;
+    }
+    patchStatement(st.date, { approved: true, approved_at: nowIso, rejected_at: null, reject_reason: null });
+  }
+  async function rejectStatement(st) {
+    const text = rejectReason.trim();
+    if (!text) return; // 理由が空なら送信しない
+    setActionError((e) => ({ ...e, [st.date]: "" }));
+    const nowIso = new Date().toISOString();
+    const { error } = await supabase.from("salary_statements")
+      .update({ approved: false, rejected_at: nowIso, reject_reason: text })
+      .eq("store_id", getActiveStoreId()).eq("cast_id", castId).eq("date", st.date);
+    if (error) {
+      console.error("非承認の保存失敗:", error);
+      setActionError((e) => ({ ...e, [st.date]: "保存に失敗しました。もう一度お試しください" }));
+      return;
+    }
+    patchStatement(st.date, { approved: false, rejected_at: nowIso, reject_reason: text });
+    setRejectingDate(null);
+    setRejectReason("");
+  }
 
   function updateHon(i, key, val) {
     setHons((prev) => prev.map((h, idx) => idx === i ? { ...h, [key]: val } : h));
@@ -2480,13 +2518,21 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
             {statements.map((st, i) => {
               const url = st.image_path ? statementUrls[st.image_path] : null;
               const approvedDate = st.approved_at ? String(st.approved_at).slice(0, 10) : "";
+              const isApproved = st.approved === true;
+              const isRejected = !isApproved && !!st.rejected_at;
+              const isPending  = !isApproved && !isRejected; // 承認も非承認もされていない未対応状態
+              const err = actionError[st.date];
               return (
                 <div key={`${st.date}_${i}`} style={{ borderTop: i === 0 ? "none" : `1px solid ${C.border}`, paddingTop: i === 0 ? 0 : "16px" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
                     <span style={{ fontSize: "13px", fontWeight: "700", color: C.text }}>{st.date}</span>
-                    {st.approved ? (
+                    {isApproved ? (
                       <span style={{ fontSize: "11px", fontWeight: "700", color: C.green, background: `${C.green}15`, border: `1px solid ${C.green}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>
                         承認済み{approvedDate ? `（${approvedDate}）` : ""}
+                      </span>
+                    ) : isRejected ? (
+                      <span style={{ fontSize: "11px", fontWeight: "700", color: C.red, background: `${C.red}15`, border: `1px solid ${C.red}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>
+                        非承認
                       </span>
                     ) : (
                       <span style={{ fontSize: "11px", fontWeight: "700", color: C.muted, background: `${C.muted}15`, border: `1px solid ${C.muted}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>
@@ -2498,6 +2544,60 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                     <img src={url} alt={`${st.date} の明細`} style={{ width: "100%", borderRadius: "12px", border: `1px solid ${C.border}`, display: "block" }} />
                   ) : (
                     <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>画像なし</p>
+                  )}
+
+                  {/* 非承認の理由表示 */}
+                  {isRejected && st.reject_reason && (
+                    <p style={{ fontSize: "12px", color: C.red, margin: "8px 0 0", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>理由：{st.reject_reason}</p>
+                  )}
+
+                  {/* 未対応：承認 / 非承認の操作 */}
+                  {isPending && (
+                    rejectingDate === st.date ? (
+                      <div style={{ marginTop: "10px", display: "grid", gap: "8px" }}>
+                        <textarea
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="非承認の理由を入力してください"
+                          rows={3}
+                          style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: "12px", border: `1.5px solid ${C.border}`, fontSize: "13px", color: C.text, outline: "none", resize: "vertical", fontFamily: "inherit" }}
+                        />
+                        {!rejectReason.trim() && (
+                          <p style={{ fontSize: "11px", color: C.muted, margin: 0 }}>理由を入力してください</p>
+                        )}
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            onClick={() => rejectStatement(st)}
+                            disabled={!rejectReason.trim()}
+                            style={{ flex: 1, padding: "9px", borderRadius: "12px", border: "none", background: rejectReason.trim() ? C.red : C.muted, color: "#fff", fontWeight: "700", fontSize: "13px", cursor: rejectReason.trim() ? "pointer" : "not-allowed", opacity: rejectReason.trim() ? 1 : 0.6 }}>
+                            送信
+                          </button>
+                          <button
+                            onClick={() => { setRejectingDate(null); setRejectReason(""); }}
+                            style={{ padding: "9px 14px", borderRadius: "12px", border: `1.5px solid ${C.border}`, background: "transparent", color: C.muted, fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>
+                            キャンセル
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
+                        <button
+                          onClick={() => approveStatement(st)}
+                          style={{ flex: 1, padding: "9px", borderRadius: "12px", border: `1.5px solid ${C.green}60`, background: `${C.green}15`, color: C.green, fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>
+                          承認
+                        </button>
+                        <button
+                          onClick={() => { setRejectingDate(st.date); setRejectReason(""); setActionError((e2) => ({ ...e2, [st.date]: "" })); }}
+                          style={{ flex: 1, padding: "9px", borderRadius: "12px", border: `1.5px solid ${C.red}60`, background: `${C.red}15`, color: C.red, fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>
+                          非承認
+                        </button>
+                      </div>
+                    )
+                  )}
+
+                  {/* 保存エラー表示 */}
+                  {err && (
+                    <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: "8px 0 0" }}>{err}</p>
                   )}
                 </div>
               );
