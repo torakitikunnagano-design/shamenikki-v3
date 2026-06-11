@@ -644,21 +644,13 @@ function App() {
             }
           } catch (e) { console.error("initShifts 例外:", e); }
         } else {
-          // Supabaseにデータあり → 2形式を復元:
-          //  (1) "cast_name_YYYY-MM-DD" → {startTime,endTime}（給料/カレンダー参照用）
-          //  (2) "cast_name" → [{date:M/D,start,end}]（今日出勤フィルタ shiftDaysFor 用）
-          //  ※(2)が無いと別端末でクラウドから読んだだけでは今日出勤が出ない。
+          // Supabaseにデータあり → "cast_name_YYYY-MM-DD" → {startTime,endTime}（給料/カレンダー参照用）のみ復元。
+          // 名前→M/D配列（今日出勤フィルタ用）は復元しない: 年なしM/Dを過去全行から作ると
+          // 過去・キャンセル済みの出勤が今日扱いになるため。M/D配列は同期(doSync)だけが作る情報源にする。
           const rebuilt = {};
-          const arrays = {};
           data.forEach((row) => {
             rebuilt[`${row.cast_name}_${row.date}`] = { startTime: row.start_time, endTime: row.end_time };
-            if (row.date && row.date.length >= 10) {
-              const md = `${parseInt(row.date.slice(5, 7), 10)}/${parseInt(row.date.slice(8, 10), 10)}`; // YYYY-MM-DD→M/D(ゼロ詰めなし)
-              if (!arrays[row.cast_name]) arrays[row.cast_name] = [];
-              arrays[row.cast_name].push({ date: md, start: row.start_time, end: row.end_time });
-            }
           });
-          Object.assign(rebuilt, arrays);
           // prev（localStorage由来）を優先してマージ: doSyncが書いたローカルの最新を上書きしない
           setShifts((prev) => ({ ...rebuilt, ...prev }));
         }
@@ -3441,7 +3433,10 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         const shiftRows = [];           // Supabase 保存用
         const seenRow = new Set();      // (store_id,cast_name,date) 重複排除
         setShifts((prev) => {
-          const updated = { ...prev };
+          // 名前→M/D配列は「総入れ替え」: 前回同期の残骸（ヘブン側で消えた出勤）が今日出勤に紛れるのを防ぐ。
+          // "名前_YYYY-MM-DD" キー（オブジェクト値）は給料・時間表示用にそのまま保持する。
+          const updated = {};
+          for (const k in prev) { if (!Array.isArray(prev[k])) updated[k] = prev[k]; }
           data.shifts.forEach(({ name, days }) => {
             if (!name || !Array.isArray(days)) return;
             updated[name] = days; // 今日出勤フィルタ用 (M/D 配列)
