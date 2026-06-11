@@ -14,7 +14,7 @@ const WAIT = { waitUntil: 'domcontentloaded', timeout: 60000 };
 
 // キャスト同期で取り込む上位N名（ヘブンのキャスト一覧の掲載順・先頭から）。退店者が大量に残る店舗対策。
 // NADESHIKO は名簿70名で上限未満なので影響なし。あとで変えたいときはこの数値だけ変更する。
-const CAST_SYNC_LIMIT = 100;
+const CAST_SYNC_LIMIT = 300;
 
 async function findBtn(page, matchFn) {
   const hs = await page.$$('a, button, input[type=button], input[type=submit]');

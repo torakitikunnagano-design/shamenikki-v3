@@ -156,7 +156,7 @@ const DEFAULT_STORES = [
 
 // キャスト同期で保存する上位N名（ヘブン掲載順の先頭から）。退店者が大量に残る店舗対策。
 // クライアント側で制限するので VPS ボット編集は不要。NADESHIKO は70名で上限未満＝影響なし。
-const CAST_SYNC_LIMIT = 100;
+const CAST_SYNC_LIMIT = 300;
 
 // 名前空間化しない共通キー（店舗で分けない）
 const COMMON_KEYS = new Set([
