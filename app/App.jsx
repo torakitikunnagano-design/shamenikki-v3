@@ -2579,6 +2579,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
               const isRejected = !isApproved && !!st.rejected_at;
               const isPending  = !isApproved && !isRejected; // 承認も非承認もされていない未対応状態
               const err = actionError[st.date];
+              const bd = stmtBreakdowns[st.date]; // 内訳がある日は写真を出さず、ボタンも内訳内に置く
               return (
                 <div key={`${st.date}_${i}`} style={{ borderTop: i === 0 ? "none" : `1px solid ${C.border}`, paddingTop: i === 0 ? 0 : "16px" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
@@ -2599,7 +2600,6 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                   </div>
                   {/* 給料内訳（salary_records/sessions がある日付のみ。無ければ従来どおり写真のみ） */}
                   {(() => {
-                    const bd = stmtBreakdowns[st.date];
                     if (!bd) return null;
                     const yen = (n) => (Number(n) || 0).toLocaleString("ja-JP");
                     const r = bd.rec;
@@ -2624,16 +2624,33 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                           {Number(r.dorm) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>寮費　-{yen(r.dorm)}円</p> : null}
                           {Number(r.misc) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>雑費　-{yen(r.misc)}円</p> : null}
                           {Number(r.transport) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>交通費　-{yen(r.transport)}円</p> : null}
-                          <p style={{ fontSize: "16px", fontWeight: "700", color: C.accent, margin: "4px 0 0" }}>手取り　{yen(r.take_home)}円</p>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap", marginTop: "4px" }}>
+                            <p style={{ fontSize: "16px", fontWeight: "700", color: C.accent, margin: 0 }}>手取り　{yen(r.take_home)}円</p>
+                            {isPending && rejectingDate !== st.date && (
+                              <div style={{ display: "flex", gap: "6px" }}>
+                                <button
+                                  onClick={() => approveStatement(st)}
+                                  style={{ padding: "7px 14px", borderRadius: "12px", border: `1.5px solid ${C.green}60`, background: `${C.green}15`, color: C.green, fontWeight: "700", fontSize: "12px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                                  承認
+                                </button>
+                                <button
+                                  onClick={() => { setRejectingDate(st.date); setRejectReason(""); setActionError((e2) => ({ ...e2, [st.date]: "" })); }}
+                                  style={{ padding: "7px 14px", borderRadius: "12px", border: `1.5px solid ${C.red}60`, background: `${C.red}15`, color: C.red, fontWeight: "700", fontSize: "12px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                                  非承認
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
                   })()}
-                  {url ? (
+                  {/* 内訳がある日は写真を出さない（内訳が正） */}
+                  {!bd && (url ? (
                     <img src={url} alt={`${st.date} の明細`} style={{ width: "100%", borderRadius: "12px", border: `1px solid ${C.border}`, display: "block" }} />
                   ) : (
                     <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>画像なし</p>
-                  )}
+                  ))}
 
                   {/* 非承認の理由表示 */}
                   {isRejected && st.reject_reason && (
@@ -2669,6 +2686,8 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                         </div>
                       </div>
                     ) : (
+                      // 内訳がある日のボタンは内訳ブロック内（手取り行の右）に出すため、ここは内訳が無い日のみ
+                      !bd && (
                       <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
                         <button
                           onClick={() => approveStatement(st)}
@@ -2681,6 +2700,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                           非承認
                         </button>
                       </div>
+                      )
                     )
                   )}
 
