@@ -2317,6 +2317,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   // 明細表示（本人が自分の明細を閲覧）: salary_statements を取得し、非公開バケットの署名付きURLを作る
   const [statements, setStatements] = useState([]);
   const [statementUrls, setStatementUrls] = useState({}); // image_path → 署名付きURL
+  const [stmtBreakdowns, setStmtBreakdowns] = useState({}); // date → { rec: salary_records行, sessions: salary_sessions行[] }
   useEffect(() => {
     if (!castId) return;
     let active = true;
@@ -2329,6 +2330,34 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
       if (error) { console.error("明細取得失敗:", error); return; }
       if (!active) return;
       setStatements(Array.isArray(data) ? data : []);
+      // 給料内訳（salary_records＋salary_sessions）を明細の日付でまとめて取得（in検索）
+      try {
+        const dates = (data || []).map((r) => r.date).filter(Boolean);
+        if (dates.length > 0) {
+          const { data: recs, error: recErr } = await supabase.from("salary_records")
+            .select("id, date, gross, dorm, misc, transport, take_home")
+            .eq("store_id", getActiveStoreId())
+            .eq("cast_id", castId)
+            .in("date", dates);
+          if (recErr) {
+            console.error("給料内訳取得失敗:", recErr);
+          } else if (Array.isArray(recs) && recs.length > 0) {
+            const ids = recs.map((r) => r.id);
+            const { data: sess, error: sessErr } = await supabase.from("salary_sessions")
+              .select("salary_record_id, seq, course_min, shimei, fee, shimei_ryou, op")
+              .in("salary_record_id", ids)
+              .order("seq", { ascending: true });
+            if (sessErr) console.error("給料セッション取得失敗:", sessErr);
+            const byRec = {};
+            (sess || []).forEach((s2) => { (byRec[s2.salary_record_id] = byRec[s2.salary_record_id] || []).push(s2); });
+            // 同一日付に複数レコードがある場合は新しいid（保存時刻由来）を優先
+            const sorted = [...recs].sort((a, b) => Number(b.id) - Number(a.id));
+            const byDate = {};
+            sorted.forEach((r) => { if (!byDate[r.date]) byDate[r.date] = { rec: r, sessions: byRec[r.id] || [] }; });
+            if (active) setStmtBreakdowns(byDate);
+          }
+        }
+      } catch (e) { console.error("給料内訳取得例外:", e); }
       // 各 image_path の署名付きURLを作成（statements は非公開バケット）
       const urls = {};
       for (const row of (data || [])) {
@@ -2568,6 +2597,38 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                       </span>
                     )}
                   </div>
+                  {/* 給料内訳（salary_records/sessions がある日付のみ。無ければ従来どおり写真のみ） */}
+                  {(() => {
+                    const bd = stmtBreakdowns[st.date];
+                    if (!bd) return null;
+                    const yen = (n) => (Number(n) || 0).toLocaleString("ja-JP");
+                    const r = bd.rec;
+                    return (
+                      <div style={{ marginBottom: "10px", border: `1px solid ${C.border}`, borderRadius: "12px", padding: "12px", display: "grid", gap: "8px", background: "#fff" }}>
+                        {bd.sessions.length > 0 && (
+                          <div style={{ display: "grid", gap: "4px" }}>
+                            {bd.sessions.map((s2, j) => (
+                              <p key={j} style={{ fontSize: "12px", color: C.text, margin: 0, lineHeight: 1.7 }}>
+                                <span style={{ fontWeight: "700" }}>{j + 1}本目</span>
+                                {Number(s2.course_min) ? `　コース${s2.course_min}分` : ""}
+                                {s2.shimei ? `　${s2.shimei}` : ""}
+                                {Number(s2.fee) ? `　金額${yen(s2.fee)}円` : ""}
+                                {Number(s2.shimei_ryou) ? `　指名料${yen(s2.shimei_ryou)}円` : ""}
+                                {Number(s2.op) ? `　OP${yen(s2.op)}円` : ""}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "8px", display: "grid", gap: "3px" }}>
+                          <p style={{ fontSize: "12px", color: C.text, margin: 0 }}>総支給　{yen(r.gross)}円</p>
+                          {Number(r.dorm) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>寮費　-{yen(r.dorm)}円</p> : null}
+                          {Number(r.misc) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>雑費　-{yen(r.misc)}円</p> : null}
+                          {Number(r.transport) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>交通費　-{yen(r.transport)}円</p> : null}
+                          <p style={{ fontSize: "16px", fontWeight: "700", color: C.accent, margin: "4px 0 0" }}>手取り　{yen(r.take_home)}円</p>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {url ? (
                     <img src={url} alt={`${st.date} の明細`} style={{ width: "100%", borderRadius: "12px", border: `1px solid ${C.border}`, display: "block" }} />
                   ) : (
