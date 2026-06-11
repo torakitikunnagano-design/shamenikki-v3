@@ -4354,7 +4354,7 @@ function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDay
 // 出勤時間設定（管理者）
 // ============================================================
 function ShiftsPage({ casts, shifts, setShifts }) {
-  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+  const today = getBusinessToday();
   const [date, setDate] = useState(today);
   const [localShifts, setLocalShifts] = useState({});
   const [saved, setSaved] = useState(false);
