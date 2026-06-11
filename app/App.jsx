@@ -91,6 +91,8 @@ function normalizeName(s) {
     const cut = name.slice(0, star).trim();
     if (cut) name = cut;
   }
+  // 装飾語が名前の前に付く店舗対策（例:「新人 せいな」→「せいな」）。切る前に装飾語自体を消す。
+  name = name.replace(/新人|体験割|体験|🔰/g, " ").trim();
   const cuts = [];
   const sp = name.search(/[\s　]/);     // 最初の半角/全角スペース
   const ni = name.indexOf("新人");
