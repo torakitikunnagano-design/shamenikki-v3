@@ -84,6 +84,13 @@ function getBusinessTodayKey() {
 // 保険として、切った後に末尾へ残った装飾(絵文字/★☆等)も除去する。
 function normalizeName(s) {
   let name = String(s || "");
+  // ☆/★ を含む店舗対策: 最初の ☆/★ より前だけを残し前後空白をトリム（例: あみり☆ガ→あみり）。
+  // 切り出し結果が空になる場合（先頭が ☆/★ 等）は元の名前をそのまま使う（消さない）。
+  const star = name.search(/[★☆]/);
+  if (star >= 0) {
+    const cut = name.slice(0, star).trim();
+    if (cut) name = cut;
+  }
   const cuts = [];
   const sp = name.search(/[\s　]/);     // 最初の半角/全角スペース
   const ni = name.indexOf("新人");
