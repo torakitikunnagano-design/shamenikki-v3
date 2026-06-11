@@ -3224,6 +3224,12 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
           if (s && Array.isArray(s.days) && s.days.some((d) => d.date === todayKey)) workingNames.add(normalizeName(s.name));
         });
       }
+      // shiftData に載らないキャスト（新人等）対策: アプリの shifts state（出勤同期由来・一括ミテネ画面と同じ情報源）
+      // からも今日出勤の名前を追加して和集合にする。名前キーの M/D 配列（shiftDaysFor が走査する形式）を todayKey で判定。
+      for (const k in shifts) {
+        const d = shifts[k];
+        if (Array.isArray(d) && d.some((s) => s && s.date === todayKey)) workingNames.add(normalizeName(k));
+      }
       const targets = (castList || []).filter((c) => {
         if (!c.heaven_id) return false;
         if (workingNames.size > 0) return workingNames.has(normalizeName(c.name));
