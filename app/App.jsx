@@ -3159,10 +3159,12 @@ function MiteneButton({ cast }) {
 // 明細アップロード（キャストごと）: Supabase Storage "statements" + salary_statements
 //  - cast_id は salary_records と同じ規約（heaven_id 優先、無ければ name）
 //  - 失敗時は必ず error を確認してアラート（握りつぶさない）
+//  - モーダル式: アップロード＋明細承認状況（stmt/stmtErr/onResolve は CastPage の stmtStatus 系を参照のみ）
 // ============================================================
-function StatementUpButton({ cast, done, onUploaded }) {
+function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve }) {
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState(null);
+  const [open, setOpen] = useState(false);
   const fileRef = useRef(null);
 
   const castId = cast?.heaven_id || cast?.name || "";
@@ -3200,18 +3202,99 @@ function StatementUpButton({ cast, done, onUploaded }) {
     setUploading(false);
   }
 
-  const color = done ? C.green : C.blue;
+  // 非承認（スタッフ未対応）はカードのボタンで気づけるように ⚠ 表示（最優先）
+  const needsAttention = !!(stmt && stmt.approved !== true && stmt.rejected_at && stmt.staff_resolved !== true);
+  const color = needsAttention ? C.red : done ? C.green : C.blue;
+  const label = uploading ? "アップ中…" : needsAttention ? "明細UP ⚠" : (done ? "明細UP ✓済" : "明細UP");
+
+  // 承認状況の派生値（モーダル内表示用。データ取得・更新は CastPage 側のまま）
+  const isApproved = stmt?.approved === true;
+  const isRejected = !isApproved && !!stmt?.rejected_at;
+  const apprDate = stmt?.approved_at ? String(stmt.approved_at).slice(0, 10) : "";
+  const resvDate = stmt?.staff_resolved_at ? String(stmt.staff_resolved_at).slice(0, 10) : "";
+
   return (
     <>
       <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={handleFile} style={{ display: "none" }} />
       <button
-        onClick={() => { if (!uploading && fileRef.current) fileRef.current.click(); }}
-        disabled={uploading}
-        style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${color}60`, background: `${color}10`, color: uploading ? C.muted : color, fontWeight: "700", cursor: uploading ? "not-allowed" : "pointer", fontSize: "11px", whiteSpace: "nowrap", opacity: uploading ? 0.65 : 1 }}>
-        {uploading ? "アップ中…" : (done ? "明細UP ✓済" : "明細UP")}
+        onClick={() => setOpen(true)}
+        style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${color}60`, background: `${color}10`, color: uploading ? C.muted : color, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+        {label}
       </button>
-      {err && (
-        <p style={{ fontSize: "9px", color: C.red, fontWeight: "700", margin: "-2px 0 0", maxWidth: "130px", lineHeight: 1.35 }}>{err}</p>
+      {open && (
+        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(61,26,78,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...card, width: "100%", maxWidth: "440px", maxHeight: "85vh", overflowY: "auto", display: "grid", gap: "14px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <p style={{ fontSize: "14px", fontWeight: "700", color: C.text, margin: 0 }}>明細UP — {cast?.name}</p>
+              <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "16px", lineHeight: 1 }}>✕</button>
+            </div>
+
+            {/* a) 明細アップロード */}
+            <div style={{ border: `1.5px solid ${C.border}`, borderRadius: "12px", padding: "12px", display: "grid", gap: "8px" }}>
+              <p style={{ fontSize: "13px", fontWeight: "700", color: C.text, margin: 0 }}>明細アップロード（本日 {date}）</p>
+              {done ? (
+                <>
+                  <p style={{ fontSize: "12px", fontWeight: "700", color: C.green, margin: 0 }}>✓済（本日アップ済み）</p>
+                  <button
+                    onClick={() => { if (!uploading && fileRef.current) fileRef.current.click(); }}
+                    disabled={uploading}
+                    style={{ padding: "8px", borderRadius: "10px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: uploading ? C.muted : C.yellow, fontWeight: "700", fontSize: "12px", cursor: uploading ? "not-allowed" : "pointer" }}>
+                    {uploading ? "アップ中…" : "差し替え"}
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => { if (!uploading && fileRef.current) fileRef.current.click(); }}
+                  disabled={uploading}
+                  style={{ padding: "10px", borderRadius: "10px", border: `1.5px solid ${C.blue}60`, background: `${C.blue}10`, color: uploading ? C.muted : C.blue, fontWeight: "700", fontSize: "12px", cursor: uploading ? "not-allowed" : "pointer" }}>
+                  {uploading ? "アップ中…" : "画像を選択してアップ"}
+                </button>
+              )}
+              {err && (
+                <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: 0 }}>{err}</p>
+              )}
+            </div>
+
+            {/* b) 明細承認状況（カード下部から移設。表示のみ・ロジックは CastPage 側） */}
+            <div style={{ border: `1.5px solid ${C.border}`, borderRadius: "12px", padding: "12px", display: "grid", gap: "8px" }}>
+              <p style={{ fontSize: "13px", fontWeight: "700", color: C.text, margin: 0 }}>明細承認状況</p>
+              {!stmt ? (
+                <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>明細データがありません</p>
+              ) : isApproved ? (
+                <p style={{ fontSize: "12px", fontWeight: "700", color: C.green, margin: 0 }}>承認済み{apprDate ? `（${apprDate}）` : ""}</p>
+              ) : isRejected ? (
+                <div style={{ display: "grid", gap: "6px" }}>
+                  <p style={{ fontSize: "12px", fontWeight: "700", color: C.red, margin: 0 }}>非承認</p>
+                  {stmt.reject_reason && (
+                    <p style={{ fontSize: "12px", color: C.red, margin: 0, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>理由：{stmt.reject_reason}</p>
+                  )}
+                  {stmt.staff_resolved === true ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: "11px", fontWeight: "700", color: C.green }}>対応済み{resvDate ? `（${resvDate}）` : ""}</span>
+                      <button onClick={() => onResolve && onResolve(stmt, false)}
+                        style={{ padding: "6px 12px", borderRadius: "12px", border: `1.5px solid ${C.border}`, background: "transparent", color: C.muted, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                        保留中に戻す
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: "11px", fontWeight: "700", color: C.muted }}>保留中</span>
+                      <button onClick={() => onResolve && onResolve(stmt, true)}
+                        style={{ padding: "6px 12px", borderRadius: "12px", border: `1.5px solid ${C.green}60`, background: `${C.green}15`, color: C.green, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                        対応済み
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p style={{ fontSize: "12px", fontWeight: "700", color: C.muted, margin: 0 }}>キャスト確認待ち</p>
+              )}
+              {stmtErr && (
+                <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: 0 }}>{stmtErr}</p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
@@ -4085,6 +4168,9 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                     cast={c}
                     done={statementsDone.has(String(c.heaven_id || c.name))}
                     onUploaded={(id) => setStatementsDone((prev) => { const n = new Set(prev); n.add(String(id)); return n; })}
+                    stmt={stmtStatus.get(String(c.heaven_id || c.name))}
+                    stmtErr={stmtActionError[c.heaven_id || c.name]}
+                    onResolve={(st, resolved) => setStaffResolved(c.heaven_id || c.name, st, resolved)}
                   />
                   <IdentityDocsButton cast={c} />
                   <button onClick={() => openGuaranteeModal(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
@@ -4109,54 +4195,6 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   <p style={{ fontSize: "11px", color: C.muted, margin: 0 }}>「保証設定」を押すと違反カレンダーが表示されます</p>
                 )}
               </div>
-              {/* 明細承認状況（スライスC）: cast_id で最新明細の状態を表示。明細が無ければ非表示 */}
-              {(() => {
-                const stCastId = c.heaven_id || c.name;
-                const st = stmtStatus.get(String(stCastId));
-                if (!st) return null;
-                const apprDate = st.approved_at ? String(st.approved_at).slice(0, 10) : "";
-                const resvDate = st.staff_resolved_at ? String(st.staff_resolved_at).slice(0, 10) : "";
-                const isApproved = st.approved === true;
-                const isRejected = !isApproved && !!st.rejected_at;
-                const stErr = stmtActionError[stCastId];
-                return (
-                  <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: `1px solid ${C.border}` }}>
-                    <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, margin: "0 0 8px" }}>明細承認状況</p>
-                    {isApproved ? (
-                      <p style={{ fontSize: "12px", fontWeight: "700", color: C.green, margin: 0 }}>承認済み{apprDate ? `（${apprDate}）` : ""}</p>
-                    ) : isRejected ? (
-                      <div style={{ display: "grid", gap: "6px" }}>
-                        <p style={{ fontSize: "12px", fontWeight: "700", color: C.red, margin: 0 }}>非承認</p>
-                        {st.reject_reason && (
-                          <p style={{ fontSize: "12px", color: C.red, margin: 0, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>理由：{st.reject_reason}</p>
-                        )}
-                        {st.staff_resolved === true ? (
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                            <span style={{ fontSize: "11px", fontWeight: "700", color: C.green }}>対応済み{resvDate ? `（${resvDate}）` : ""}</span>
-                            <button onClick={() => setStaffResolved(stCastId, st, false)}
-                              style={{ padding: "6px 12px", borderRadius: "12px", border: `1.5px solid ${C.border}`, background: "transparent", color: C.muted, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
-                              保留中に戻す
-                            </button>
-                          </div>
-                        ) : (
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                            <span style={{ fontSize: "11px", fontWeight: "700", color: C.muted }}>保留中</span>
-                            <button onClick={() => setStaffResolved(stCastId, st, true)}
-                              style={{ padding: "6px 12px", borderRadius: "12px", border: `1.5px solid ${C.green}60`, background: `${C.green}15`, color: C.green, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
-                              対応済み
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <p style={{ fontSize: "12px", fontWeight: "700", color: C.muted, margin: 0 }}>キャスト確認待ち</p>
-                    )}
-                    {stErr && (
-                      <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: "8px 0 0" }}>{stErr}</p>
-                    )}
-                  </div>
-                );
-              })()}
             </div>
             );
           })}
