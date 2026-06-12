@@ -78,6 +78,21 @@ function getBusinessToday() {
 function toBusinessDate(ts) {
   return new Date(new Date(ts).getTime() + 3 * 3600000).toISOString().slice(0, 10);
 }
+// "M/D" → "YYYY-MM-DD"（年跨ぎ対応）: 今年で組んだ結果が営業日基準で180日以上未来なら前年、
+// 180日以上過去なら翌年とみなす（12月のシフトを1月に同期／1月のシフトを12月に見る両方向に対応）
+function mdToYMD(md) {
+  const [m, d] = String(md || "").split("/").map(Number);
+  if (!m || !d) return "";
+  const todayStr = getBusinessToday();
+  const year = Number(todayStr.slice(0, 4));
+  const pad = (n) => String(n).padStart(2, "0");
+  const mk = (y) => `${y}-${pad(m)}-${pad(d)}`;
+  const base = new Date(todayStr).getTime();
+  const diff = Math.round((new Date(mk(year)).getTime() - base) / 86400000);
+  if (diff >= 180) return mk(year - 1);
+  if (diff <= -180) return mk(year + 1);
+  return mk(year);
+}
 function getBusinessTodayKey() {
   const d = new Date(Date.now() + 3 * 3600000);
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
@@ -2314,6 +2329,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   const [statements, setStatements] = useState([]);
   const [statementUrls, setStatementUrls] = useState({}); // image_path → 署名付きURL
   const [stmtBreakdowns, setStmtBreakdowns] = useState({}); // date → { rec: salary_records行, sessions: salary_sessions行[] }
+  const [stmtLoadError, setStmtLoadError] = useState(false); // 取得失敗をUIに出す（無言の空表示と区別する）
   useEffect(() => {
     if (!castId) return;
     let active = true;
@@ -2323,8 +2339,9 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
         .eq("store_id", getActiveStoreId())
         .eq("cast_id", castId)
         .order("date", { ascending: false });
-      if (error) { console.error("明細取得失敗:", error); return; }
+      if (error) { console.error("明細取得失敗:", error); if (active) setStmtLoadError(true); return; }
       if (!active) return;
+      setStmtLoadError(false);
       setStatements(Array.isArray(data) ? data : []);
       // 給料内訳（salary_records＋salary_sessions）を明細の日付でまとめて取得（in検索）
       try {
@@ -2354,14 +2371,18 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
           }
         }
       } catch (e) { console.error("給料内訳取得例外:", e); }
-      // 各 image_path の署名付きURLを作成（statements は非公開バケット）
+      // 各 image_path の署名付きURLを並列作成（statements は非公開バケット）。個別失敗はログして続行（#11）
+      const withImg = (data || []).filter((row) => row.image_path); // image_path が無い行は画像なし扱い
+      const signedResults = await Promise.all(withImg.map((row) =>
+        supabase.storage.from("statements").createSignedUrl(row.image_path, 3600)
+          .then(({ data: signed, error: signErr }) => {
+            if (signErr) { console.error("署名URL作成失敗:", signErr); return null; }
+            return signed?.signedUrl ? { path: row.image_path, url: signed.signedUrl } : null;
+          })
+          .catch((e) => { console.error("署名URL作成失敗:", e); return null; })
+      ));
       const urls = {};
-      for (const row of (data || [])) {
-        if (!row.image_path) continue; // image_path が無い行は画像なし扱い
-        const { data: signed, error: signErr } = await supabase.storage.from("statements").createSignedUrl(row.image_path, 3600);
-        if (signErr) { console.error("署名URL作成失敗:", signErr); continue; }
-        if (signed?.signedUrl) urls[row.image_path] = signed.signedUrl;
-      }
+      signedResults.filter(Boolean).forEach((r) => { urls[r.path] = r.url; });
       if (active) setStatementUrls(urls);
     })();
     return () => { active = false; };
@@ -2564,7 +2585,9 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
       {/* あなたの明細（管理者がアップロードした明細画像の閲覧。今回は表示のみ） */}
       <div style={{ ...card }}>
         <p style={{ fontSize: "13px", color: C.text, fontWeight: "700", marginBottom: "12px" }}>あなたの明細</p>
-        {statements.length === 0 ? (
+        {stmtLoadError ? (
+          <p style={{ fontSize: "12px", color: C.red, fontWeight: "700", margin: 0 }}>明細の読み込みに失敗しました。再読み込みしてください</p>
+        ) : statements.length === 0 ? (
           <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>明細はまだありません</p>
         ) : (
           <div style={{ display: "grid", gap: "16px" }}>
@@ -3173,6 +3196,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   // 明細の承認状況（cast_idごとに「最新dateの1件」）。statementsDone とは別管理（既存判定は壊さない）。
   const [stmtStatus, setStmtStatus] = useState(() => new Map()); // cast_id → { date, approved, approved_at, rejected_at, reject_reason, staff_resolved, staff_resolved_at }
   const [stmtActionError, setStmtActionError] = useState({});    // cast_id → 保存エラーメッセージ
+  const [stmtStatusError, setStmtStatusError] = useState(false); // 取得失敗をUIに出す（無言と区別する）
   useEffect(() => {
     let active = true;
     (async () => {
@@ -3180,8 +3204,9 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         .select("cast_id, date, approved, approved_at, rejected_at, reject_reason, staff_resolved, staff_resolved_at")
         .eq("store_id", getActiveStoreId())
         .order("date", { ascending: false });
-      if (error) { console.error("承認状況取得失敗:", error); return; }
+      if (error) { console.error("承認状況取得失敗:", error); if (active) setStmtStatusError(true); return; }
       if (!active || !Array.isArray(data)) return;
+      setStmtStatusError(false);
       const m = new Map();
       for (const r of data) {
         const key = String(r.cast_id);
@@ -3241,8 +3266,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     let autoStart = "", autoEnd = "";
     const days = shifts[castName];
     if (Array.isArray(days) && days.length > 0) {
-      const year = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).slice(0, 4);
-      const toYMD = (md) => { const [m, d] = md.split("/"); return `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`; };
+      const toYMD = mdToYMD; // 年跨ぎ対応の共通ヘルパー（#6）
       const sorted = [...days].map((s) => s.date).filter(Boolean).sort((a, b) => toYMD(a) < toYMD(b) ? -1 : 1);
       autoStart = toYMD(sorted[0]);
       autoEnd   = toYMD(sorted[sorted.length - 1]);
@@ -3431,8 +3455,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         fillMitenePasswords(dedupedNext, data.shifts);
       } else {
         if (!Array.isArray(data.shifts)) throw new Error("出勤データが取得できませんでした");
-        // 同期データの date は "M/D" 形式 → 給料ページ参照用に "YYYY-MM-DD" キーも書く
-        const jstYear = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).slice(0, 4);
+        // 同期データの date は "M/D" 形式 → 給料ページ参照用に "YYYY-MM-DD" キーも書く（年跨ぎは mdToYMD が補正）
         const store = getActiveStoreId();
         const shiftRows = [];           // Supabase 保存用
         const seenRow = new Set();      // (store_id,cast_name,date) 重複排除
@@ -3446,8 +3469,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
             updated[name] = days; // 今日出勤フィルタ用 (M/D 配列)
             days.forEach(({ date, start, end }) => {
               if (!date) return;
-              const [m, d] = date.split("/");
-              const ymd = `${jstYear}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+              const ymd = mdToYMD(date);
+              if (!ymd) return;
               updated[`${name}_${ymd}`] = { startTime: start || "", endTime: end || "" };
               const rk = `${store}::${name}::${ymd}`;
               if (!seenRow.has(rk)) {
@@ -3644,6 +3667,9 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
             </button>
           ))}
         </div>
+        {stmtStatusError && (
+          <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: "0 0 8px" }}>明細の承認状況の読み込みに失敗しました。再読み込みしてください</p>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: "10px", alignItems: "start" }}>
           {casts.filter((c) => { if (!showTodayOnly) return true; const d = shiftDaysFor(shifts, c.name); return Array.isArray(d) && d.some((s) => s.date === todayKey); }).map((c) => {
             let diagData = null;
