@@ -3061,6 +3061,13 @@ function getMiteneRemaining(castId) {
 function fmtMiteneAt(iso) {
   try { return new Date(iso).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" }); } catch { return ""; }
 }
+// レスポンスから残数を解決。remainingAfter が数値でなければ remainingBefore - sent で補完
+// （残り0になるとヘブン側の「残り回数：N/20」表記が消えて readRemaining が null になるケース対策）
+function resolveMiteneRemaining(data) {
+  if (typeof data?.remainingAfter === "number" && Number.isFinite(data.remainingAfter)) return data.remainingAfter;
+  if (typeof data?.remainingBefore === "number" && Number.isFinite(data.remainingBefore)) return Math.max(0, data.remainingBefore - (data.sent ?? 0));
+  return null;
+}
 
 // ============================================================
 // ミテネ送信ボタン（キャストごと・状態は各ボタンが個別に保持）
@@ -3096,8 +3103,9 @@ function MiteneButton({ cast }) {
       const data = await res.json();
       if (data.ok) {
         const bt = data.byTab || {};
-        setMsg(`${data.sent ?? 0}件送信（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・マイガール${bt["マイガール"] || 0}）／残り${data.remainingAfter ?? "?"}回`);
-        saveMiteneRemaining(cast.heaven_id || cast.name, data.remainingAfter); // 常時表示用に保存
+        const remAfter = resolveMiteneRemaining(data); // remainingAfter が無ければ before - sent で補完
+        setMsg(`${data.sent ?? 0}件送信（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・マイガール${bt["マイガール"] || 0}）／残り${remAfter ?? "?"}回`);
+        saveMiteneRemaining(cast.heaven_id || cast.name, remAfter); // 常時表示用に保存
       } else {
         setErr(data.error || "送信に失敗しました");
       }
@@ -4816,8 +4824,9 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
           const sent = data.sent ?? 0;
           totalSent += sent;
           successCount++;
-          saveMiteneRemaining(c.heaven_id || c.name, data.remainingAfter); // 常時表示用に保存
-          updateRow(c.name, { status: "done", msg: `${sent}件（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・マイガール${bt["マイガール"] || 0}）／残り${data.remainingAfter ?? "?"}回` });
+          const remAfter = resolveMiteneRemaining(data); // remainingAfter が無ければ before - sent で補完
+          saveMiteneRemaining(c.heaven_id || c.name, remAfter); // 常時表示用に保存
+          updateRow(c.name, { status: "done", msg: `${sent}件（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・マイガール${bt["マイガール"] || 0}）／残り${remAfter ?? "?"}回` });
         } else {
           const em = data.error || "送信に失敗しました";
           errors.push(`${c.name}：${em}`);
