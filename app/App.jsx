@@ -3935,6 +3935,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                 const selIsSyncWork = !!selSI?.startTime;
                 const selIsManualWork = extraList.includes(selDate);
                 const selIsWorkday = selIsSyncWork || selIsManualWork;
+                const selViols = (violations[c.name] || []).filter((v) => v.date === selDate); // 出勤でなくなった日でも違反が残っていれば解除できるように
                 const selShiftStr = selSI?.startTime && selSI?.endTime ? `${selSI.startTime.slice(0, 5)}〜${selSI.endTime.slice(0, 5)}` : null;
                 return (
                   <div style={{ marginTop: "8px", padding: "12px 14px", borderRadius: "12px", background: `${C.accent}06`, border: `1.5px solid ${C.accent}30` }}>
@@ -3950,7 +3951,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                         </button>
                       </div>
                     )}
-                    {selIsWorkday && (
+                    {(selIsWorkday || selViols.length > 0) && (
                       <>
                         <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 6px" }}>違反</p>
                         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
