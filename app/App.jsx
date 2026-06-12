@@ -3896,19 +3896,18 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   const isManualWork = extraList.includes(ymd);
                   const isWorkday = isSyncWork || isManualWork;
                   const shiftStr = si?.startTime && si?.endTime ? `${si.startTime.slice(0, 5)}-${si.endTime.slice(0, 5)}` : null;
-                  // 状態別の色分け（優先度: 違反 > 今日 > 出勤 > なし）。今日かつ違反は違反色＋青枠、選択中はどの状態でも枠accent＋影。
+                  // 状態別の色分け（優先度: 違反 > 今日 > 出勤 > なし）。違反は今日でも赤を優先。選択中の表現は boxShadow のみ。
                   const hasViol = dayViols.length > 0;
                   let cellBg, cellBorder, dateClr;
                   if (hasViol) {
-                    cellBg = `${C.red}12`; cellBorder = isToday ? `2px solid ${C.blue}` : `1.5px solid ${C.red}60`; dateClr = C.red;
+                    cellBg = `${C.red}25`; cellBorder = `2px solid ${C.red}`; dateClr = C.red;
                   } else if (isToday) {
-                    cellBg = `${C.blue}12`; cellBorder = `2px solid ${C.blue}`; dateClr = C.blue;
+                    cellBg = `${C.blue}18`; cellBorder = `2px solid ${C.blue}`; dateClr = C.blue;
                   } else if (isWorkday) {
-                    cellBg = `${C.accent}20`; cellBorder = `1.5px solid ${C.accent}70`; dateClr = C.text;
+                    cellBg = `${C.accent}25`; cellBorder = `1.5px solid ${C.accent}`; dateClr = C.text;
                   } else {
                     cellBg = "white"; cellBorder = "1.5px solid #d8d8e0"; dateClr = C.text;
                   }
-                  if (isSel) cellBorder = `2px solid ${C.accent}`;
                   return (
                     <div key={ymd}
                       onClick={() => setOpenCalCell((prev) => prev?.castName === c.name && prev?.date === ymd ? null : { castName: c.name, date: ymd })}
