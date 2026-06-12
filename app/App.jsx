@@ -3069,6 +3069,20 @@ function MiteneButton({ cast }) {
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState(null);
   const [err, setErr] = useState(null);
+  // 送信数（1〜50・既定5）。姫デコブーストは1日50回枠があるため上限50。店舗名前空間で記憶。
+  const [sendCount, setSendCount] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem(skey("mitene_send_count")), 10);
+      if (v >= 1 && v <= 50) return v;
+    } catch {}
+    return 5;
+  });
+  function changeCount(v) {
+    const n = parseInt(v, 10);
+    if (!(n >= 1 && n <= 50)) return;
+    setSendCount(n);
+    try { localStorage.setItem(skey("mitene_send_count"), String(n)); } catch {}
+  }
   const hasPass = !!(cast?.heaven_id && cast?.heaven_pass);
 
   async function send() {
@@ -3077,7 +3091,7 @@ function MiteneButton({ cast }) {
       const res = await fetch("/api/heaven-mitene", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ heavenId: cast.heaven_id, heavenPass: cast.heaven_pass, max: 5 }),
+        body: JSON.stringify({ heavenId: cast.heaven_id, heavenPass: cast.heaven_pass, max: sendCount }),
       });
       const data = await res.json();
       if (data.ok) {
@@ -3097,12 +3111,23 @@ function MiteneButton({ cast }) {
   const rem = getMiteneRemaining(cast?.heaven_id || cast?.name); // 当営業日の保存値のみ返る
   return (
     <>
-      <button
-        onClick={send}
-        disabled={disabled}
-        style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.accent2}55`, background: `${C.accent2}10`, color: disabled ? C.muted : C.accent2, fontWeight: "700", cursor: disabled ? "not-allowed" : "pointer", fontSize: "11px", whiteSpace: "nowrap", opacity: disabled ? 0.65 : 1 }}>
-        {sending ? "送信中…" : "💌ミテネ送信"}
-      </button>
+      <div style={{ display: "flex", gap: "4px", alignItems: "stretch" }}>
+        <button
+          onClick={send}
+          disabled={disabled}
+          style={{ flex: 1, padding: "7px 8px", borderRadius: "12px", border: `1.5px solid ${C.accent2}55`, background: `${C.accent2}10`, color: disabled ? C.muted : C.accent2, fontWeight: "700", cursor: disabled ? "not-allowed" : "pointer", fontSize: "11px", whiteSpace: "nowrap", opacity: disabled ? 0.65 : 1 }}>
+          {sending ? "送信中…" : "💌ミテネ送信"}
+        </button>
+        <select
+          value={sendCount}
+          onChange={(e) => changeCount(e.target.value)}
+          disabled={sending}
+          style={{ borderRadius: "10px", border: `1.5px solid ${C.accent2}55`, background: "white", color: sending ? C.muted : C.accent2, fontWeight: "700", fontSize: "11px", padding: "0 2px", cursor: sending ? "not-allowed" : "pointer" }}>
+          {Array.from({ length: 50 }, (_, i) => i + 1).map((n) => (
+            <option key={n} value={n}>{n}回</option>
+          ))}
+        </select>
+      </div>
       {rem && (
         <p style={{ fontSize: "9px", color: C.muted, fontWeight: "700", margin: "-2px 0 0", textAlign: "center", whiteSpace: "nowrap" }}>ミテネ残り{rem.remaining}回（{fmtMiteneAt(rem.at)}時点）</p>
       )}
