@@ -3165,10 +3165,37 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState(null);
   const [open, setOpen] = useState(false);
+  const [breakdown, setBreakdown] = useState(null); // { rec, sessions } | null（承認対象日の給料内訳）
+  const [bdError, setBdError] = useState(false);
   const fileRef = useRef(null);
 
   const castId = cast?.heaven_id || cast?.name || "";
   const date = getBusinessToday(); // v1は今日の日付。日付選択を足すときはここ1か所を変える
+
+  // モーダルを開いたときのみ、承認状況の日付(stmt.date)の給料内訳を取得（カード一覧のレンダリングでは引かない）
+  useEffect(() => {
+    if (!open || !stmt?.date || !castId) { setBreakdown(null); return; }
+    let active = true;
+    (async () => {
+      setBdError(false);
+      setBreakdown(null);
+      const { data: recs, error: recErr } = await supabase.from("salary_records")
+        .select("id, date, gross, dorm, misc, transport, take_home")
+        .eq("store_id", getActiveStoreId())
+        .eq("cast_id", castId)
+        .eq("date", stmt.date);
+      if (recErr) { console.error("給料内訳取得失敗:", recErr); if (active) setBdError(true); return; }
+      if (!active || !Array.isArray(recs) || recs.length === 0) return; // 給料データが無い日は内訳なし（バッジのみ）
+      const rec = [...recs].sort((a, b) => Number(b.id) - Number(a.id))[0]; // 同一日付複数行は新しいidを採用
+      const { data: sess, error: sessErr } = await supabase.from("salary_sessions")
+        .select("salary_record_id, seq, course_min, shimei, fee, shimei_ryou, op")
+        .eq("salary_record_id", rec.id)
+        .order("seq", { ascending: true });
+      if (sessErr) { console.error("給料セッション取得失敗:", sessErr); if (active) setBdError(true); return; }
+      if (active) setBreakdown({ rec, sessions: sess || [] });
+    })();
+    return () => { active = false; };
+  }, [open, stmt?.date, castId]);
 
   async function handleFile(e) {
     const file = e.target.files && e.target.files[0];
@@ -3289,6 +3316,39 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
               ) : (
                 <p style={{ fontSize: "12px", fontWeight: "700", color: C.muted, margin: 0 }}>キャスト確認待ち</p>
               )}
+              {/* 承認対象日(stmt.date)の給料内訳。給料データが無い日は非表示 */}
+              {bdError && (
+                <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: 0 }}>内訳の読み込みに失敗しました</p>
+              )}
+              {breakdown && (() => {
+                const yen = (n) => (Number(n) || 0).toLocaleString("ja-JP");
+                const r = breakdown.rec;
+                return (
+                  <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "8px", display: "grid", gap: "8px" }}>
+                    {breakdown.sessions.length > 0 && (
+                      <div style={{ display: "grid", gap: "4px" }}>
+                        {breakdown.sessions.map((s2, j) => (
+                          <p key={j} style={{ fontSize: "12px", color: C.text, margin: 0, lineHeight: 1.7 }}>
+                            <span style={{ fontWeight: "700" }}>{j + 1}本目</span>
+                            {Number(s2.course_min) ? `　コース${s2.course_min}分` : ""}
+                            {s2.shimei ? `　${s2.shimei}` : ""}
+                            {Number(s2.fee) ? `　金額${yen(s2.fee)}円` : ""}
+                            {Number(s2.shimei_ryou) ? `　指名料${yen(s2.shimei_ryou)}円` : ""}
+                            {Number(s2.op) ? `　OP${yen(s2.op)}円` : ""}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "8px", display: "grid", gap: "3px" }}>
+                      <p style={{ fontSize: "12px", color: C.text, margin: 0 }}>総支給　{yen(r.gross)}円</p>
+                      {Number(r.dorm) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>寮費　-{yen(r.dorm)}円</p> : null}
+                      {Number(r.misc) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>雑費　-{yen(r.misc)}円</p> : null}
+                      {Number(r.transport) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>交通費　-{yen(r.transport)}円</p> : null}
+                      <p style={{ fontSize: "16px", fontWeight: "700", color: C.accent, margin: "4px 0 0" }}>手取り　{yen(r.take_home)}円</p>
+                    </div>
+                  </div>
+                );
+              })()}
               {stmtErr && (
                 <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: 0 }}>{stmtErr}</p>
               )}
