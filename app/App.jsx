@@ -3036,6 +3036,32 @@ function calcGuaranteeResult(castName, ctx) {
 }
 
 // ============================================================
+// ミテネ残り回数の保存/読み出し（localStorage・skeyで店舗名前空間化）。
+// 残数はキャスト個人の当日枠（残り回数：N/20）なので、営業日(朝6時切替)が変わった古い値は表示しない。
+// ============================================================
+function saveMiteneRemaining(castId, remaining) {
+  if (!castId || typeof remaining !== "number" || !Number.isFinite(remaining)) return; // 数値で返ったときのみ保存
+  try {
+    const key = skey("mitene_remaining");
+    const map = JSON.parse(localStorage.getItem(key) || "{}");
+    map[String(castId)] = { remaining, at: new Date().toISOString() };
+    localStorage.setItem(key, JSON.stringify(map));
+  } catch {}
+}
+function getMiteneRemaining(castId) {
+  if (!castId) return null;
+  try {
+    const map = JSON.parse(localStorage.getItem(skey("mitene_remaining")) || "{}");
+    const rec = map[String(castId)];
+    if (!rec || typeof rec.remaining !== "number" || !rec.at) return null;
+    if (toBusinessDate(rec.at) !== getBusinessToday()) return null; // 営業日が変わった古い数字は出さない
+    return rec;
+  } catch { return null; }
+}
+function fmtMiteneAt(iso) {
+  try { return new Date(iso).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" }); } catch { return ""; }
+}
+
 // ============================================================
 // ミテネ送信ボタン（キャストごと・状態は各ボタンが個別に保持）
 // ============================================================
@@ -3057,6 +3083,7 @@ function MiteneButton({ cast }) {
       if (data.ok) {
         const bt = data.byTab || {};
         setMsg(`${data.sent ?? 0}件送信（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・マイガール${bt["マイガール"] || 0}）／残り${data.remainingAfter ?? "?"}回`);
+        saveMiteneRemaining(cast.heaven_id || cast.name, data.remainingAfter); // 常時表示用に保存
       } else {
         setErr(data.error || "送信に失敗しました");
       }
@@ -3067,6 +3094,7 @@ function MiteneButton({ cast }) {
   }
 
   const disabled = !hasPass || sending;
+  const rem = getMiteneRemaining(cast?.heaven_id || cast?.name); // 当営業日の保存値のみ返る
   return (
     <>
       <button
@@ -3075,6 +3103,9 @@ function MiteneButton({ cast }) {
         style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.accent2}55`, background: `${C.accent2}10`, color: disabled ? C.muted : C.accent2, fontWeight: "700", cursor: disabled ? "not-allowed" : "pointer", fontSize: "11px", whiteSpace: "nowrap", opacity: disabled ? 0.65 : 1 }}>
         {sending ? "送信中…" : "💌ミテネ送信"}
       </button>
+      {rem && (
+        <p style={{ fontSize: "9px", color: C.muted, fontWeight: "700", margin: "-2px 0 0", textAlign: "center", whiteSpace: "nowrap" }}>ミテネ残り{rem.remaining}回（{fmtMiteneAt(rem.at)}時点）</p>
+      )}
       {!hasPass && (
         <p style={{ fontSize: "9px", color: C.muted, margin: "-2px 0 0", textAlign: "center" }}>要ID設定</p>
       )}
@@ -4724,6 +4755,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
           const sent = data.sent ?? 0;
           totalSent += sent;
           successCount++;
+          saveMiteneRemaining(c.heaven_id || c.name, data.remainingAfter); // 常時表示用に保存
           updateRow(c.name, { status: "done", msg: `${sent}件（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・マイガール${bt["マイガール"] || 0}）／残り${data.remainingAfter ?? "?"}回` });
         } else {
           const em = data.error || "送信に失敗しました";
@@ -4803,13 +4835,18 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
       ) : (
         <div style={{ ...card, display: "grid", gap: "8px" }}>
           <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, margin: "0 0 4px" }}>今日出勤 {todayCasts.length}人（{storeLabel}）</p>
-          {displayRows.map((r) => (
+          {displayRows.map((r) => {
+            const rc = todayCasts.find((x) => x.name === r.name);
+            const rem = getMiteneRemaining(rc ? (rc.heaven_id || rc.name) : r.name);
+            return (
             <div key={r.name} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "10px", border: `1px solid ${C.border}`, background: C.surface }}>
               <span style={{ fontWeight: "700", fontSize: "13px", color: C.text, minWidth: "64px" }}>{r.name}</span>
               {r.sendable ? badge("送信可", C.green) : badge("要ID設定（スキップ）", C.muted)}
+              {rem && <span style={{ fontSize: "10px", color: C.muted, fontWeight: "700", whiteSpace: "nowrap" }}>残り{rem.remaining}回（{fmtMiteneAt(rem.at)}）</span>}
               {r.msg && <span style={{ fontSize: "11px", color: statusColor[r.status] || C.muted, lineHeight: 1.35, flex: 1 }}>{r.msg}</span>}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
