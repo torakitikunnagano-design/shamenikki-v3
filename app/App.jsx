@@ -3896,16 +3896,17 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   const isManualWork = extraList.includes(ymd);
                   const isWorkday = isSyncWork || isManualWork;
                   const shiftStr = si?.startTime && si?.endTime ? `${si.startTime.slice(0, 5)}-${si.endTime.slice(0, 5)}` : null;
-                  const cellBg = isSel ? `${C.accent}15` : isWorkday ? `${C.accent}10` : "white";
+                  // 視認性: 出勤なし日は薄グレー背景（opacityで薄くしない）／今日は青背景＋青太字／出勤日はやや濃いピンク
+                  const cellBg = isSel ? `${C.accent}15` : isToday ? `${C.blue}10` : isWorkday ? `${C.accent}18` : "#f7f7f9";
                   const borderClr = isToday ? C.blue : isSel ? C.accent : isWorkday ? `${C.accent}60` : C.border;
                   const borderW = (isToday || isSel) ? "2px" : "1.5px";
                   return (
                     <div key={ymd}
                       onClick={() => setOpenCalCell((prev) => prev?.castName === c.name && prev?.date === ymd ? null : { castName: c.name, date: ymd })}
-                      style={{ width: "50px", minHeight: "60px", border: `${borderW} solid ${borderClr}`, borderRadius: "10px", padding: "4px 2px", textAlign: "center", cursor: "pointer", background: cellBg, userSelect: "none", opacity: isWorkday ? 1 : 0.55, boxShadow: isSel ? `0 2px 8px ${C.accent}25` : "none" }}>
-                      <p style={{ fontSize: "11px", fontWeight: "700", margin: "0 0 1px", color: isToday ? C.blue : isWorkday ? C.text : C.muted }}>{mm}/{dd}</p>
+                      style={{ width: "50px", minHeight: "60px", border: `${borderW} solid ${borderClr}`, borderRadius: "10px", padding: "4px 2px", textAlign: "center", cursor: "pointer", background: cellBg, userSelect: "none", boxShadow: isSel ? `0 2px 8px ${C.accent}25` : "none" }}>
+                      <p style={{ fontSize: "12px", fontWeight: "700", margin: "0 0 1px", color: isToday ? C.blue : isWorkday ? C.text : "#8a8a96" }}>{mm}/{dd}</p>
                       <p style={{ fontSize: "10px", margin: "0 0 2px", color: dow === "日" ? C.red : dow === "土" ? C.blue : C.muted }}>{dow}</p>
-                      {shiftStr && <p style={{ fontSize: "8px", color: C.muted, margin: "0 0 1px", lineHeight: 1.3 }}>{shiftStr}</p>}
+                      {shiftStr && <p style={{ fontSize: "9px", color: C.muted, margin: "0 0 1px", lineHeight: 1.3 }}>{shiftStr}</p>}
                       {isManualWork && !isSyncWork && <p style={{ fontSize: "8px", color: C.accent, margin: "0 0 1px", fontWeight: "700" }}>出勤</p>}
                       {!isWorkday && <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 1px" }}>＋</p>}
                       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1px" }}>
