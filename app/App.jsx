@@ -666,12 +666,41 @@ function App() {
           // Supabaseにデータあり → "cast_name_YYYY-MM-DD" → {startTime,endTime}（給料/カレンダー参照用）のみ復元。
           // 名前→M/D配列（今日出勤フィルタ用）は復元しない: 年なしM/Dを過去全行から作ると
           // 過去・キャンセル済みの出勤が今日扱いになるため。M/D配列は同期(doSync)だけが作る情報源にする。
+          // キーは正規化名で作る: 旧データに「うるる 🔰」等の装飾付き cast_name が残っていても参照側と一致させる。
           const rebuilt = {};
+          const dirty = []; // 正規化で名前が変わる行 = 装飾付きの旧行（後段でクリーン名へ移行）
           data.forEach((row) => {
-            rebuilt[`${row.cast_name}_${row.date}`] = { startTime: row.start_time, endTime: row.end_time };
+            const clean = normalizeName(row.cast_name);
+            if (!clean) return; // 正規化で空になる行は復元・移行とも対象外（旧行は消さない）
+            rebuilt[`${clean}_${row.date}`] = { startTime: row.start_time, endTime: row.end_time };
+            if (clean !== row.cast_name) dirty.push({ ...row, clean });
           });
           // prev（localStorage由来）を優先してマージ: doSyncが書いたローカルの最新を上書きしない
           setShifts((prev) => ({ ...rebuilt, ...prev }));
+          // 一回限りの移行: 装飾付き旧行をクリーン名で upsert し直し、成功したときだけ旧行を削除する。
+          // クリーン名の行が既にあっても upsert が上書きするだけなので、再実行されても安全（冪等）。
+          // upsert/delete が失敗したら旧行は残す＝データを失わない方向に倒す。
+          if (dirty.length > 0) {
+            try {
+              // 同一バッチ内で (clean,date) が重複すると upsert がエラーになるため先に重複排除
+              const upMap = new Map();
+              dirty.forEach((r) => upMap.set(`${r.clean}::${r.date}`, { store_id: r.store_id, cast_name: r.clean, date: r.date, start_time: r.start_time || "", end_time: r.end_time || "" }));
+              const { error: errUp } = await supabase.from("shifts").upsert([...upMap.values()], { onConflict: "store_id,cast_name,date" });
+              if (errUp) {
+                console.error("initShifts 正規化移行 upsert失敗:", errUp);
+              } else {
+                // 旧行の削除は装飾名ごとにまとめて実行（バッチ）。失敗した名前の旧行は残す。
+                const byOldName = new Map();
+                dirty.forEach((r) => { if (!byOldName.has(r.cast_name)) byOldName.set(r.cast_name, []); byOldName.get(r.cast_name).push(r.date); });
+                for (const [oldName, dates] of byOldName) {
+                  const { error: errDel } = await supabase.from("shifts").delete()
+                    .eq("store_id", getActiveStoreId()).eq("cast_name", oldName).in("date", dates);
+                  if (errDel) console.error("initShifts 正規化移行 delete失敗:", oldName, errDel);
+                }
+                console.log(`initShifts 正規化移行: ${dirty.length}行をクリーン名へ移行`);
+              }
+            } catch (e) { console.error("initShifts 正規化移行 例外:", e); }
+          }
         }
       } catch (e) { console.error("initShifts 例外:", e); }
     }
@@ -3869,16 +3898,19 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
           for (const k in prev) { if (!Array.isArray(prev[k])) updated[k] = prev[k]; }
           data.shifts.forEach(({ name, days }) => {
             if (!name || !Array.isArray(days)) return;
-            updated[name] = days; // 今日出勤フィルタ用 (M/D 配列)
+            // ボット由来の装飾（🔰/新人/スペース以降）を保存前に除去し、casts側の名前と揃える
+            const cleanName = normalizeName(name);
+            if (!cleanName) return;
+            updated[cleanName] = days; // 今日出勤フィルタ用 (M/D 配列)
             days.forEach(({ date, start, end }) => {
               if (!date) return;
               const ymd = mdToYMD(date);
               if (!ymd) return;
-              updated[`${name}_${ymd}`] = { startTime: start || "", endTime: end || "" };
-              const rk = `${store}::${name}::${ymd}`;
+              updated[`${cleanName}_${ymd}`] = { startTime: start || "", endTime: end || "" };
+              const rk = `${store}::${cleanName}::${ymd}`;
               if (!seenRow.has(rk)) {
                 seenRow.add(rk);
-                shiftRows.push({ store_id: store, cast_name: name, date: ymd, start_time: start || "", end_time: end || "" });
+                shiftRows.push({ store_id: store, cast_name: cleanName, date: ymd, start_time: start || "", end_time: end || "" });
               }
             });
           });
