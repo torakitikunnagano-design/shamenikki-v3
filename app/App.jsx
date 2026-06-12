@@ -3900,7 +3900,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   const hasViol = dayViols.length > 0;
                   let cellBg, cellBorder, dateClr;
                   if (hasViol) {
-                    cellBg = `${C.red}25`; cellBorder = `2px solid ${C.red}`; dateClr = C.red;
+                    cellBg = C.red; cellBorder = `2px solid ${C.red}`; dateClr = "white"; // ベタ赤＋白文字で違反日を最強調
                   } else if (isToday) {
                     cellBg = `${C.blue}18`; cellBorder = `2px solid ${C.blue}`; dateClr = C.blue;
                   } else if (isWorkday) {
@@ -3913,13 +3913,13 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                       onClick={() => setOpenCalCell((prev) => prev?.castName === c.name && prev?.date === ymd ? null : { castName: c.name, date: ymd })}
                       style={{ width: "50px", minHeight: "60px", border: cellBorder, borderRadius: "10px", padding: "4px 2px", textAlign: "center", cursor: "pointer", background: cellBg, userSelect: "none", boxShadow: isSel ? `0 2px 8px ${C.accent}25` : "none" }}>
                       <p style={{ fontSize: "12px", fontWeight: "700", margin: "0 0 1px", color: dateClr }}>{mm}/{dd}</p>
-                      <p style={{ fontSize: "10px", margin: "0 0 2px", color: dow === "日" ? C.red : dow === "土" ? C.blue : C.muted }}>{dow}</p>
-                      {shiftStr && <p style={{ fontSize: "9px", color: C.muted, margin: "0 0 1px", lineHeight: 1.3 }}>{shiftStr}</p>}
-                      {isManualWork && !isSyncWork && <p style={{ fontSize: "8px", color: C.accent, margin: "0 0 1px", fontWeight: "700" }}>出勤</p>}
-                      {!isWorkday && <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 1px" }}>＋</p>}
+                      <p style={{ fontSize: "10px", margin: "0 0 2px", color: hasViol ? "white" : dow === "日" ? C.red : dow === "土" ? C.blue : C.muted }}>{dow}</p>
+                      {shiftStr && <p style={{ fontSize: "9px", color: hasViol ? "white" : C.muted, margin: "0 0 1px", lineHeight: 1.3 }}>{shiftStr}</p>}
+                      {isManualWork && !isSyncWork && <p style={{ fontSize: "8px", color: hasViol ? "white" : C.accent, margin: "0 0 1px", fontWeight: "700" }}>出勤</p>}
+                      {!isWorkday && <p style={{ fontSize: "11px", color: hasViol ? "white" : C.muted, margin: "0 0 1px" }}>＋</p>}
                       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1px" }}>
                         {dayViols.map((v, i) => (
-                          <span key={i} style={{ fontSize: "9px", fontWeight: "700", color: "white", background: C.red, borderRadius: "2px", padding: "0 2px", lineHeight: "14px" }}>{VL[v.type] || "?"}</span>
+                          <span key={i} style={{ fontSize: "9px", fontWeight: "700", color: C.red, background: "white", borderRadius: "2px", padding: "0 2px", lineHeight: "14px" }}>{VL[v.type] || "?"}</span>
                         ))}
                       </div>
                     </div>
