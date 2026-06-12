@@ -3165,37 +3165,55 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState(null);
   const [open, setOpen] = useState(false);
-  const [breakdown, setBreakdown] = useState(null); // { rec, sessions } | null（承認対象日の給料内訳）
+  const [history, setHistory] = useState([]);       // 直近5件の salary_statements（履歴一覧）
+  const [histError, setHistError] = useState(false);
+  const [breakdowns, setBreakdowns] = useState({}); // date → { rec, sessions }
   const [bdError, setBdError] = useState(false);
   const fileRef = useRef(null);
 
   const castId = cast?.heaven_id || cast?.name || "";
   const date = getBusinessToday(); // v1は今日の日付。日付選択を足すときはここ1か所を変える
 
-  // モーダルを開いたときのみ、承認状況の日付(stmt.date)の給料内訳を取得（カード一覧のレンダリングでは引かない）
+  // モーダルを開いたときのみ取得（カード一覧のレンダリングでは引かない）。対応トグル後の再読込にも使う。
+  async function loadHistory() {
+    if (!castId) return;
+    setHistError(false); setBdError(false);
+    const { data, error } = await supabase.from("salary_statements")
+      .select("date, approved, approved_at, rejected_at, reject_reason, staff_resolved, staff_resolved_at")
+      .eq("store_id", getActiveStoreId())
+      .eq("cast_id", castId)
+      .order("date", { ascending: false })
+      .limit(5);
+    if (error) { console.error("明細履歴取得失敗:", error); setHistError(true); return; }
+    const rows = Array.isArray(data) ? data : [];
+    setHistory(rows);
+    // 内訳: 日付リストの in 検索でまとめて2クエリ（SalaryPage と同じパターン）
+    const dates = rows.map((r) => r.date).filter(Boolean);
+    if (dates.length === 0) { setBreakdowns({}); return; }
+    const { data: recs, error: recErr } = await supabase.from("salary_records")
+      .select("id, date, gross, dorm, misc, transport, take_home")
+      .eq("store_id", getActiveStoreId())
+      .eq("cast_id", castId)
+      .in("date", dates);
+    if (recErr) { console.error("給料内訳取得失敗:", recErr); setBdError(true); return; }
+    if (!Array.isArray(recs) || recs.length === 0) { setBreakdowns({}); return; }
+    const ids = recs.map((r) => r.id);
+    const { data: sess, error: sessErr } = await supabase.from("salary_sessions")
+      .select("salary_record_id, seq, course_min, shimei, fee, shimei_ryou, op")
+      .in("salary_record_id", ids)
+      .order("seq", { ascending: true });
+    if (sessErr) { console.error("給料セッション取得失敗:", sessErr); setBdError(true); return; }
+    const byRec = {};
+    (sess || []).forEach((s2) => { (byRec[s2.salary_record_id] = byRec[s2.salary_record_id] || []).push(s2); });
+    const sorted = [...recs].sort((a, b) => Number(b.id) - Number(a.id)); // 同一日付複数行は新しいidを採用
+    const byDate = {};
+    sorted.forEach((r) => { if (!byDate[r.date]) byDate[r.date] = { rec: r, sessions: byRec[r.id] || [] }; });
+    setBreakdowns(byDate);
+  }
   useEffect(() => {
-    if (!open || !stmt?.date || !castId) { setBreakdown(null); return; }
-    let active = true;
-    (async () => {
-      setBdError(false);
-      setBreakdown(null);
-      const { data: recs, error: recErr } = await supabase.from("salary_records")
-        .select("id, date, gross, dorm, misc, transport, take_home")
-        .eq("store_id", getActiveStoreId())
-        .eq("cast_id", castId)
-        .eq("date", stmt.date);
-      if (recErr) { console.error("給料内訳取得失敗:", recErr); if (active) setBdError(true); return; }
-      if (!active || !Array.isArray(recs) || recs.length === 0) return; // 給料データが無い日は内訳なし（バッジのみ）
-      const rec = [...recs].sort((a, b) => Number(b.id) - Number(a.id))[0]; // 同一日付複数行は新しいidを採用
-      const { data: sess, error: sessErr } = await supabase.from("salary_sessions")
-        .select("salary_record_id, seq, course_min, shimei, fee, shimei_ryou, op")
-        .eq("salary_record_id", rec.id)
-        .order("seq", { ascending: true });
-      if (sessErr) { console.error("給料セッション取得失敗:", sessErr); if (active) setBdError(true); return; }
-      if (active) setBreakdown({ rec, sessions: sess || [] });
-    })();
-    return () => { active = false; };
-  }, [open, stmt?.date, castId]);
+    if (!open) { setHistory([]); setBreakdowns({}); return; }
+    loadHistory();
+  }, [open, castId]);
 
   async function handleFile(e) {
     const file = e.target.files && e.target.files[0];
@@ -3233,12 +3251,6 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
   const needsAttention = !!(stmt && stmt.approved !== true && stmt.rejected_at && stmt.staff_resolved !== true);
   const color = needsAttention ? C.red : done ? C.green : C.blue;
   const label = uploading ? "アップ中…" : needsAttention ? "明細UP ⚠" : (done ? "明細UP ✓済" : "明細UP");
-
-  // 承認状況の派生値（モーダル内表示用。データ取得・更新は CastPage 側のまま）
-  const isApproved = stmt?.approved === true;
-  const isRejected = !isApproved && !!stmt?.rejected_at;
-  const apprDate = stmt?.approved_at ? String(stmt.approved_at).slice(0, 10) : "";
-  const resvDate = stmt?.staff_resolved_at ? String(stmt.staff_resolved_at).slice(0, 10) : "";
 
   return (
     <>
@@ -3282,73 +3294,88 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
               )}
             </div>
 
-            {/* b) 明細承認状況（カード下部から移設。表示のみ・ロジックは CastPage 側） */}
-            <div style={{ border: `1.5px solid ${C.border}`, borderRadius: "12px", padding: "12px", display: "grid", gap: "8px" }}>
-              <p style={{ fontSize: "13px", fontWeight: "700", color: C.text, margin: 0 }}>明細承認状況</p>
-              {!stmt ? (
+            {/* b) 明細承認状況（直近5件の履歴一覧。取得はモーダルを開いたときのみ） */}
+            <div style={{ border: `1.5px solid ${C.border}`, borderRadius: "12px", padding: "12px", display: "grid", gap: "10px" }}>
+              <p style={{ fontSize: "13px", fontWeight: "700", color: C.text, margin: 0 }}>明細承認状況（直近5件）</p>
+              {histError ? (
+                <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: 0 }}>明細の読み込みに失敗しました</p>
+              ) : history.length === 0 ? (
                 <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>明細データがありません</p>
-              ) : isApproved ? (
-                <p style={{ fontSize: "12px", fontWeight: "700", color: C.green, margin: 0 }}>承認済み{apprDate ? `（${apprDate}）` : ""}</p>
-              ) : isRejected ? (
-                <div style={{ display: "grid", gap: "6px" }}>
-                  <p style={{ fontSize: "12px", fontWeight: "700", color: C.red, margin: 0 }}>非承認</p>
-                  {stmt.reject_reason && (
-                    <p style={{ fontSize: "12px", color: C.red, margin: 0, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>理由：{stmt.reject_reason}</p>
-                  )}
-                  {stmt.staff_resolved === true ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                      <span style={{ fontSize: "11px", fontWeight: "700", color: C.green }}>対応済み{resvDate ? `（${resvDate}）` : ""}</span>
-                      <button onClick={() => onResolve && onResolve(stmt, false)}
-                        style={{ padding: "6px 12px", borderRadius: "12px", border: `1.5px solid ${C.border}`, background: "transparent", color: C.muted, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
-                        保留中に戻す
-                      </button>
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                      <span style={{ fontSize: "11px", fontWeight: "700", color: C.muted }}>保留中</span>
-                      <button onClick={() => onResolve && onResolve(stmt, true)}
-                        style={{ padding: "6px 12px", borderRadius: "12px", border: `1.5px solid ${C.green}60`, background: `${C.green}15`, color: C.green, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
-                        対応済み
-                      </button>
-                    </div>
-                  )}
-                </div>
               ) : (
-                <p style={{ fontSize: "12px", fontWeight: "700", color: C.muted, margin: 0 }}>キャスト確認待ち</p>
+                history.map((st, i) => {
+                  const isApproved = st.approved === true;
+                  const isRejected = !isApproved && !!st.rejected_at;
+                  const apprDate = st.approved_at ? String(st.approved_at).slice(0, 10) : "";
+                  const resvDate = st.staff_resolved_at ? String(st.staff_resolved_at).slice(0, 10) : "";
+                  const bd = breakdowns[st.date];
+                  return (
+                    <div key={`${st.date}_${i}`} style={{ borderTop: i === 0 ? "none" : `1px solid ${C.border}`, paddingTop: i === 0 ? 0 : "10px", display: "grid", gap: "6px" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                        <span style={{ fontSize: "12px", fontWeight: "700", color: C.text }}>{st.date}</span>
+                        {isApproved ? (
+                          <span style={{ fontSize: "11px", fontWeight: "700", color: C.green, background: `${C.green}15`, border: `1px solid ${C.green}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>承認済み{apprDate ? `（${apprDate}）` : ""}</span>
+                        ) : isRejected ? (
+                          <span style={{ fontSize: "11px", fontWeight: "700", color: C.red, background: `${C.red}15`, border: `1px solid ${C.red}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>非承認</span>
+                        ) : (
+                          <span style={{ fontSize: "11px", fontWeight: "700", color: C.muted, background: `${C.muted}15`, border: `1px solid ${C.muted}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>キャスト確認待ち</span>
+                        )}
+                      </div>
+                      {isRejected && st.reject_reason && (
+                        <p style={{ fontSize: "12px", color: C.red, margin: 0, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>理由：{st.reject_reason}</p>
+                      )}
+                      {isRejected && (st.staff_resolved === true ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "700", color: C.green }}>対応済み{resvDate ? `（${resvDate}）` : ""}</span>
+                          <button onClick={async () => { if (onResolve) { await onResolve(st, false); loadHistory(); } }}
+                            style={{ padding: "6px 12px", borderRadius: "12px", border: `1.5px solid ${C.border}`, background: "transparent", color: C.muted, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                            保留中に戻す
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "700", color: C.muted }}>保留中</span>
+                          <button onClick={async () => { if (onResolve) { await onResolve(st, true); loadHistory(); } }}
+                            style={{ padding: "6px 12px", borderRadius: "12px", border: `1.5px solid ${C.green}60`, background: `${C.green}15`, color: C.green, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                            対応済み
+                          </button>
+                        </div>
+                      ))}
+                      {bd && (() => {
+                        const yen = (n) => (Number(n) || 0).toLocaleString("ja-JP");
+                        const r = bd.rec;
+                        return (
+                          <div style={{ display: "grid", gap: "6px" }}>
+                            {bd.sessions.length > 0 && (
+                              <div style={{ display: "grid", gap: "4px" }}>
+                                {bd.sessions.map((s2, j) => (
+                                  <p key={j} style={{ fontSize: "12px", color: C.text, margin: 0, lineHeight: 1.7 }}>
+                                    <span style={{ fontWeight: "700" }}>{j + 1}本目</span>
+                                    {Number(s2.course_min) ? `　コース${s2.course_min}分` : ""}
+                                    {s2.shimei ? `　${s2.shimei}` : ""}
+                                    {Number(s2.fee) ? `　金額${yen(s2.fee)}円` : ""}
+                                    {Number(s2.shimei_ryou) ? `　指名料${yen(s2.shimei_ryou)}円` : ""}
+                                    {Number(s2.op) ? `　OP${yen(s2.op)}円` : ""}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                            <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "6px", display: "grid", gap: "3px" }}>
+                              <p style={{ fontSize: "12px", color: C.text, margin: 0 }}>総支給　{yen(r.gross)}円</p>
+                              {Number(r.dorm) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>寮費　-{yen(r.dorm)}円</p> : null}
+                              {Number(r.misc) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>雑費　-{yen(r.misc)}円</p> : null}
+                              {Number(r.transport) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>交通費　-{yen(r.transport)}円</p> : null}
+                              <p style={{ fontSize: "15px", fontWeight: "700", color: C.accent, margin: "2px 0 0" }}>手取り　{yen(r.take_home)}円</p>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })
               )}
-              {/* 承認対象日(stmt.date)の給料内訳。給料データが無い日は非表示 */}
               {bdError && (
                 <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: 0 }}>内訳の読み込みに失敗しました</p>
               )}
-              {breakdown && (() => {
-                const yen = (n) => (Number(n) || 0).toLocaleString("ja-JP");
-                const r = breakdown.rec;
-                return (
-                  <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "8px", display: "grid", gap: "8px" }}>
-                    {breakdown.sessions.length > 0 && (
-                      <div style={{ display: "grid", gap: "4px" }}>
-                        {breakdown.sessions.map((s2, j) => (
-                          <p key={j} style={{ fontSize: "12px", color: C.text, margin: 0, lineHeight: 1.7 }}>
-                            <span style={{ fontWeight: "700" }}>{j + 1}本目</span>
-                            {Number(s2.course_min) ? `　コース${s2.course_min}分` : ""}
-                            {s2.shimei ? `　${s2.shimei}` : ""}
-                            {Number(s2.fee) ? `　金額${yen(s2.fee)}円` : ""}
-                            {Number(s2.shimei_ryou) ? `　指名料${yen(s2.shimei_ryou)}円` : ""}
-                            {Number(s2.op) ? `　OP${yen(s2.op)}円` : ""}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                    <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "8px", display: "grid", gap: "3px" }}>
-                      <p style={{ fontSize: "12px", color: C.text, margin: 0 }}>総支給　{yen(r.gross)}円</p>
-                      {Number(r.dorm) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>寮費　-{yen(r.dorm)}円</p> : null}
-                      {Number(r.misc) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>雑費　-{yen(r.misc)}円</p> : null}
-                      {Number(r.transport) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>交通費　-{yen(r.transport)}円</p> : null}
-                      <p style={{ fontSize: "16px", fontWeight: "700", color: C.accent, margin: "4px 0 0" }}>手取り　{yen(r.take_home)}円</p>
-                    </div>
-                  </div>
-                );
-              })()}
               {stmtErr && (
                 <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: 0 }}>{stmtErr}</p>
               )}
