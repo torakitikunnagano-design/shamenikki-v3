@@ -3385,6 +3385,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const [violations, setViolations] = useLocalStorage("shamenikki_violations", {});
   const [extraWorkdays, setExtraWorkdays] = useLocalStorage("shamenikki_extra_workdays", {});
   const [gModal, setGModal] = useState(null); // cast name | null
+  const [calModal, setCalModal] = useState(null); // 違反カレンダーを開いているキャスト名 | null
   const [gForm, setGForm] = useState({ type: "total", dailyAmount: "", startDate: "", endDate: "" });
   const [gSaved, setGSaved] = useState(false);
   const [cutDays] = useLocalStorage("shamenikki_cut_days", initCutDays);
@@ -3855,6 +3856,115 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         </div>
       )}
 
+      {/* 違反カレンダーモーダル（カード常時展開から移設。ロジック・stateは無改修） */}
+      {calModal && guarantee[calModal]?.startDate && guarantee[calModal]?.endDate && (() => {
+        const c = casts.find((x) => x.name === calModal) || { name: calModal };
+        const { startDate, endDate } = guarantee[c.name];
+        const DOW = ["日", "月", "火", "水", "木", "金", "土"];
+        const VL = { late: "遅", early: "早", absent: "欠", complaint: "ク" };
+        const dates = [];
+        const [sy, sm, sd] = startDate.split("-").map(Number);
+        const [ey, em, ed] = endDate.split("-").map(Number);
+        const cur = new Date(sy, sm - 1, sd);
+        const end = new Date(ey, em - 1, ed);
+        const pad = (n) => String(n).padStart(2, "0");
+        while (cur <= end) {
+          dates.push(`${cur.getFullYear()}-${pad(cur.getMonth() + 1)}-${pad(cur.getDate())}`);
+          cur.setDate(cur.getDate() + 1);
+        }
+        const selDate = openCalCell?.castName === c.name ? openCalCell.date : null;
+        const extraList = extraWorkdays[c.name] || [];
+        return (
+          <div onClick={() => setCalModal(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "720px", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(255,107,157,0.2)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <div>
+                  <p style={{ fontWeight: "700", fontSize: "18px", color: C.text, margin: "0 0 4px" }}>{c.name}</p>
+                  <p style={{ color: C.accent, fontSize: "12px", margin: 0 }}>違反カレンダー</p>
+                </div>
+                <button onClick={() => setCalModal(null)} style={{ background: `${C.accent}15`, border: "none", width: "32px", height: "32px", borderRadius: "50%", fontSize: "18px", cursor: "pointer", color: C.accent, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                {dates.map((ymd) => {
+                  const [yy, mm, dd] = ymd.split("-").map(Number);
+                  const dow = DOW[new Date(yy, mm - 1, dd).getDay()];
+                  const isToday = ymd === todayISO;
+                  const isSel = ymd === selDate;
+                  const dayViols = (violations[c.name] || []).filter((v) => v.date === ymd);
+                  const si = shifts[`${c.name}_${ymd}`];
+                  const isSyncWork = !!si?.startTime;
+                  const isManualWork = extraList.includes(ymd);
+                  const isWorkday = isSyncWork || isManualWork;
+                  const shiftStr = si?.startTime && si?.endTime ? `${si.startTime.slice(0, 5)}-${si.endTime.slice(0, 5)}` : null;
+                  const cellBg = isSel ? `${C.accent}15` : isWorkday ? `${C.accent}10` : "white";
+                  const borderClr = isToday ? C.blue : isSel ? C.accent : isWorkday ? `${C.accent}60` : C.border;
+                  const borderW = (isToday || isSel) ? "2px" : "1.5px";
+                  return (
+                    <div key={ymd}
+                      onClick={() => setOpenCalCell((prev) => prev?.castName === c.name && prev?.date === ymd ? null : { castName: c.name, date: ymd })}
+                      style={{ width: "50px", minHeight: "60px", border: `${borderW} solid ${borderClr}`, borderRadius: "10px", padding: "4px 2px", textAlign: "center", cursor: "pointer", background: cellBg, userSelect: "none", opacity: isWorkday ? 1 : 0.55, boxShadow: isSel ? `0 2px 8px ${C.accent}25` : "none" }}>
+                      <p style={{ fontSize: "11px", fontWeight: "700", margin: "0 0 1px", color: isToday ? C.blue : isWorkday ? C.text : C.muted }}>{mm}/{dd}</p>
+                      <p style={{ fontSize: "10px", margin: "0 0 2px", color: dow === "日" ? C.red : dow === "土" ? C.blue : C.muted }}>{dow}</p>
+                      {shiftStr && <p style={{ fontSize: "8px", color: C.muted, margin: "0 0 1px", lineHeight: 1.3 }}>{shiftStr}</p>}
+                      {isManualWork && !isSyncWork && <p style={{ fontSize: "8px", color: C.accent, margin: "0 0 1px", fontWeight: "700" }}>出勤</p>}
+                      {!isWorkday && <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 1px" }}>＋</p>}
+                      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1px" }}>
+                        {dayViols.map((v, i) => (
+                          <span key={i} style={{ fontSize: "9px", fontWeight: "700", color: "white", background: C.red, borderRadius: "2px", padding: "0 2px", lineHeight: "14px" }}>{VL[v.type] || "?"}</span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p style={{ fontSize: "10px", color: C.muted, margin: "6px 0 0", lineHeight: 1.6 }}>
+                色つき＝出勤日 / 青枠＝今日 ／ 遅＝遅刻・早＝早退・欠＝当日欠勤・ク＝クレーム
+              </p>
+              {selDate && (() => {
+                const [sy2, sm2, sd2] = selDate.split("-").map(Number);
+                const selSI = shifts[`${c.name}_${selDate}`];
+                const selIsSyncWork = !!selSI?.startTime;
+                const selIsManualWork = extraList.includes(selDate);
+                const selIsWorkday = selIsSyncWork || selIsManualWork;
+                const selShiftStr = selSI?.startTime && selSI?.endTime ? `${selSI.startTime.slice(0, 5)}〜${selSI.endTime.slice(0, 5)}` : null;
+                return (
+                  <div style={{ marginTop: "8px", padding: "12px 14px", borderRadius: "12px", background: `${C.accent}06`, border: `1.5px solid ${C.accent}30` }}>
+                    <p style={{ fontSize: "12px", fontWeight: "700", color: C.accent, margin: "0 0 4px" }}>
+                      {sm2}/{sd2}{selIsSyncWork ? "（出勤・同期済み）" : selIsManualWork ? "（出勤・手動）" : ""}
+                    </p>
+                    {selShiftStr && <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 8px" }}>{selShiftStr}</p>}
+                    {!selIsSyncWork && (
+                      <div style={{ marginBottom: "8px" }}>
+                        <button onClick={() => toggleExtraWorkday(c.name, selDate)}
+                          style={{ padding: "6px 14px", borderRadius: "20px", border: `1.5px solid ${selIsManualWork ? C.accent : C.border}`, background: selIsManualWork ? `${C.accent}18` : "white", color: selIsManualWork ? C.accent : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                          {selIsManualWork ? "✓ この日は出勤（保証に追加中）" : "この日は出勤（保証に追加）"}
+                        </button>
+                      </div>
+                    )}
+                    {selIsWorkday && (
+                      <>
+                        <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 6px" }}>違反</p>
+                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                          {[["late", "遅刻"], ["early", "早退"], ["absent", "当日欠勤"], ["complaint", "クレーム"]].map(([type, label]) => {
+                            const on = (violations[c.name] || []).some((v) => v.type === type && v.date === selDate);
+                            return (
+                              <button key={type} onClick={() => toggleViolation(c.name, type, selDate)}
+                                style={{ padding: "6px 14px", borderRadius: "20px", border: `1.5px solid ${on ? C.red : C.border}`, background: on ? `${C.red}15` : "white", color: on ? C.red : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
         <button onClick={() => doSync("casts")} disabled={syncLoading !== null} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.blue}`, background: syncLoading !== null ? `${C.blue}08` : `${C.blue}15`, color: C.blue, fontWeight: "700", cursor: syncLoading !== null ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
           {syncLoading === "casts" ? "同期中..." : "👥 キャスト同期"}
@@ -3897,10 +4007,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
             const isLocked = (diagData?.retries ?? 0) >= 2;
             const _days = shiftDaysFor(shifts, c.name);
             const todayShift = Array.isArray(_days) ? _days.find((s) => s.date === todayKey) : null;
-            // 違反カレンダー表示中（保証の開始/終了日あり）のカードは横長なので2列ぶち抜きにする
-            const hasCalendar = !!(guarantee[c.name]?.startDate && guarantee[c.name]?.endDate);
             return (
-            <div key={c.name} style={{ ...card, borderColor: c.is_active ? `${C.green}40` : C.border, gridColumn: hasCalendar ? "1 / -1" : undefined }}>
+            <div key={c.name} style={{ ...card, borderColor: c.is_active ? `${C.green}40` : C.border }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
@@ -3964,104 +4072,11 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                 </div>
               </div>
               <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: `1px solid ${C.border}` }}>
-                {guarantee[c.name]?.startDate && guarantee[c.name]?.endDate ? (() => {
-                  const { startDate, endDate } = guarantee[c.name];
-                  const DOW = ["日", "月", "火", "水", "木", "金", "土"];
-                  const VL = { late: "遅", early: "早", absent: "欠", complaint: "ク" };
-                  const dates = [];
-                  const [sy, sm, sd] = startDate.split("-").map(Number);
-                  const [ey, em, ed] = endDate.split("-").map(Number);
-                  const cur = new Date(sy, sm - 1, sd);
-                  const end = new Date(ey, em - 1, ed);
-                  const pad = (n) => String(n).padStart(2, "0");
-                  while (cur <= end) {
-                    dates.push(`${cur.getFullYear()}-${pad(cur.getMonth() + 1)}-${pad(cur.getDate())}`);
-                    cur.setDate(cur.getDate() + 1);
-                  }
-                  const selDate = openCalCell?.castName === c.name ? openCalCell.date : null;
-                  const extraList = extraWorkdays[c.name] || [];
-                  return (
-                    <>
-                      <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, margin: "0 0 8px" }}>違反カレンダー</p>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                        {dates.map((ymd) => {
-                          const [yy, mm, dd] = ymd.split("-").map(Number);
-                          const dow = DOW[new Date(yy, mm - 1, dd).getDay()];
-                          const isToday = ymd === todayISO;
-                          const isSel = ymd === selDate;
-                          const dayViols = (violations[c.name] || []).filter((v) => v.date === ymd);
-                          const si = shifts[`${c.name}_${ymd}`];
-                          const isSyncWork = !!si?.startTime;
-                          const isManualWork = extraList.includes(ymd);
-                          const isWorkday = isSyncWork || isManualWork;
-                          const shiftStr = si?.startTime && si?.endTime ? `${si.startTime.slice(0, 5)}-${si.endTime.slice(0, 5)}` : null;
-                          const cellBg = isSel ? `${C.accent}15` : isWorkday ? `${C.accent}10` : "white";
-                          const borderClr = isToday ? C.blue : isSel ? C.accent : isWorkday ? `${C.accent}60` : C.border;
-                          const borderW = (isToday || isSel) ? "2px" : "1.5px";
-                          return (
-                            <div key={ymd}
-                              onClick={() => setOpenCalCell((prev) => prev?.castName === c.name && prev?.date === ymd ? null : { castName: c.name, date: ymd })}
-                              style={{ width: "50px", minHeight: "60px", border: `${borderW} solid ${borderClr}`, borderRadius: "10px", padding: "4px 2px", textAlign: "center", cursor: "pointer", background: cellBg, userSelect: "none", opacity: isWorkday ? 1 : 0.55, boxShadow: isSel ? `0 2px 8px ${C.accent}25` : "none" }}>
-                              <p style={{ fontSize: "11px", fontWeight: "700", margin: "0 0 1px", color: isToday ? C.blue : isWorkday ? C.text : C.muted }}>{mm}/{dd}</p>
-                              <p style={{ fontSize: "10px", margin: "0 0 2px", color: dow === "日" ? C.red : dow === "土" ? C.blue : C.muted }}>{dow}</p>
-                              {shiftStr && <p style={{ fontSize: "8px", color: C.muted, margin: "0 0 1px", lineHeight: 1.3 }}>{shiftStr}</p>}
-                              {isManualWork && !isSyncWork && <p style={{ fontSize: "8px", color: C.accent, margin: "0 0 1px", fontWeight: "700" }}>出勤</p>}
-                              {!isWorkday && <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 1px" }}>＋</p>}
-                              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1px" }}>
-                                {dayViols.map((v, i) => (
-                                  <span key={i} style={{ fontSize: "9px", fontWeight: "700", color: "white", background: C.red, borderRadius: "2px", padding: "0 2px", lineHeight: "14px" }}>{VL[v.type] || "?"}</span>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <p style={{ fontSize: "10px", color: C.muted, margin: "6px 0 0", lineHeight: 1.6 }}>
-                        色つき＝出勤日 / 青枠＝今日 ／ 遅＝遅刻・早＝早退・欠＝当日欠勤・ク＝クレーム
-                      </p>
-                      {selDate && (() => {
-                        const [sy2, sm2, sd2] = selDate.split("-").map(Number);
-                        const selSI = shifts[`${c.name}_${selDate}`];
-                        const selIsSyncWork = !!selSI?.startTime;
-                        const selIsManualWork = extraList.includes(selDate);
-                        const selIsWorkday = selIsSyncWork || selIsManualWork;
-                        const selShiftStr = selSI?.startTime && selSI?.endTime ? `${selSI.startTime.slice(0, 5)}〜${selSI.endTime.slice(0, 5)}` : null;
-                        return (
-                          <div style={{ marginTop: "8px", padding: "12px 14px", borderRadius: "12px", background: `${C.accent}06`, border: `1.5px solid ${C.accent}30` }}>
-                            <p style={{ fontSize: "12px", fontWeight: "700", color: C.accent, margin: "0 0 4px" }}>
-                              {sm2}/{sd2}{selIsSyncWork ? "（出勤・同期済み）" : selIsManualWork ? "（出勤・手動）" : ""}
-                            </p>
-                            {selShiftStr && <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 8px" }}>{selShiftStr}</p>}
-                            {!selIsSyncWork && (
-                              <div style={{ marginBottom: "8px" }}>
-                                <button onClick={() => toggleExtraWorkday(c.name, selDate)}
-                                  style={{ padding: "6px 14px", borderRadius: "20px", border: `1.5px solid ${selIsManualWork ? C.accent : C.border}`, background: selIsManualWork ? `${C.accent}18` : "white", color: selIsManualWork ? C.accent : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
-                                  {selIsManualWork ? "✓ この日は出勤（保証に追加中）" : "この日は出勤（保証に追加）"}
-                                </button>
-                              </div>
-                            )}
-                            {selIsWorkday && (
-                              <>
-                                <p style={{ fontSize: "11px", color: C.muted, margin: "0 0 6px" }}>違反</p>
-                                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                                  {[["late", "遅刻"], ["early", "早退"], ["absent", "当日欠勤"], ["complaint", "クレーム"]].map(([type, label]) => {
-                                    const on = (violations[c.name] || []).some((v) => v.type === type && v.date === selDate);
-                                    return (
-                                      <button key={type} onClick={() => toggleViolation(c.name, type, selDate)}
-                                        style={{ padding: "6px 14px", borderRadius: "20px", border: `1.5px solid ${on ? C.red : C.border}`, background: on ? `${C.red}15` : "white", color: on ? C.red : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
-                                        {label}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </>
-                  );
-                })() : (
+                {guarantee[c.name]?.startDate && guarantee[c.name]?.endDate ? (
+                  <button onClick={() => setCalModal(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.accent}50`, background: `${C.accent}08`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                    📅 違反カレンダー
+                  </button>
+                ) : (
                   <p style={{ fontSize: "11px", color: C.muted, margin: 0 }}>「保証設定」を押すと違反カレンダーが表示されます</p>
                 )}
               </div>
