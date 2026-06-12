@@ -3154,6 +3154,169 @@ function StatementUpButton({ cast, done, onUploaded }) {
 }
 
 // ============================================================
+// 個人情報アップロード（スタッフ管理画面のみ）: Storage "identity-docs" + identity_documents
+//  - doc_type: 'id_card'（本人確認書類）| 'residence'（住民票）
+//  - cast_id は明細UP/salary_records と同じ規約（heaven_id 優先、無ければ name）
+//  - 全Supabase操作の { error } を必ずチェックし、失敗は枠内に赤字表示（H3ルール）
+// ============================================================
+function IdentityDocsButton({ cast }) {
+  const [open, setOpen] = useState(false);
+  const [docs, setDocs] = useState({});       // doc_type → { image_path, uploaded_at }
+  const [loadError, setLoadError] = useState(false);
+  const [slotErr, setSlotErr] = useState({}); // doc_type → エラーメッセージ
+  const [busy, setBusy] = useState({});       // doc_type → アップ中
+  const [viewUrl, setViewUrl] = useState({}); // doc_type → 署名付きURL
+  const fileRefs = { id_card: useRef(null), residence: useRef(null) };
+
+  const castId = cast?.heaven_id || cast?.name || "";
+
+  async function loadDocs() {
+    setLoadError(false);
+    const { data, error } = await supabase.from("identity_documents")
+      .select("doc_type, image_path, uploaded_at")
+      .eq("store_id", getActiveStoreId())
+      .eq("cast_id", castId);
+    if (error) { console.error("個人情報取得失敗:", error); setLoadError(true); return; }
+    const m = {};
+    (data || []).forEach((r) => { m[r.doc_type] = r; });
+    setDocs(m);
+  }
+
+  function openModal() {
+    if (!castId) { alert("このキャストにはIDが無いためアップロードできません"); return; }
+    setOpen(true);
+    setViewUrl({});
+    setSlotErr({});
+    loadDocs();
+  }
+
+  async function handleFile(docType, e) {
+    const file = e.target.files && e.target.files[0];
+    if (fileRefs[docType].current) fileRefs[docType].current.value = ""; // 同じファイル再選択を可能に
+    if (!file) return;
+    setBusy((b) => ({ ...b, [docType]: true }));
+    setSlotErr((s) => ({ ...s, [docType]: "" }));
+    try {
+      const store = getActiveStoreId();
+      const safeCast = String(castId).replace(/[^a-zA-Z0-9_-]/g, "_"); // パス安全化（日本語名対策）
+      const mt = (file.name || "").match(/\.([a-zA-Z0-9]+)$/);
+      const ext = (mt ? mt[1] : (file.type.includes("pdf") ? "pdf" : file.type.includes("png") ? "png" : "jpg")).toLowerCase();
+      const path = `${store}/${safeCast}/${docType}_${Date.now()}.${ext}`;
+
+      const up = await supabase.storage.from("identity-docs").upload(path, file, { upsert: true, contentType: file.type || undefined });
+      if (up.error) {
+        console.error("個人情報アップロード失敗:", up.error);
+        setSlotErr((s) => ({ ...s, [docType]: "アップロードに失敗しました" }));
+        setBusy((b) => ({ ...b, [docType]: false }));
+        return;
+      }
+      const nowIso = new Date().toISOString();
+      const { error: dbErr } = await supabase.from("identity_documents").upsert(
+        { store_id: store, cast_id: castId, doc_type: docType, image_path: path, uploaded_at: nowIso },
+        { onConflict: "store_id,cast_id,doc_type" }
+      );
+      if (dbErr) {
+        console.error("個人情報保存失敗:", dbErr);
+        setSlotErr((s) => ({ ...s, [docType]: "保存に失敗しました" }));
+        setBusy((b) => ({ ...b, [docType]: false }));
+        return;
+      }
+      setDocs((d) => ({ ...d, [docType]: { doc_type: docType, image_path: path, uploaded_at: nowIso } }));
+      setViewUrl((v) => ({ ...v, [docType]: null })); // 差し替え後は古いプレビューを消す
+    } catch (e2) {
+      console.error("個人情報アップロード例外:", e2);
+      setSlotErr((s) => ({ ...s, [docType]: "保存に失敗しました" }));
+    }
+    setBusy((b) => ({ ...b, [docType]: false }));
+  }
+
+  async function showImage(docType) {
+    const doc = docs[docType];
+    if (!doc?.image_path) return;
+    setSlotErr((s) => ({ ...s, [docType]: "" }));
+    const { data, error } = await supabase.storage.from("identity-docs").createSignedUrl(doc.image_path, 600);
+    if (error) { console.error("署名URL作成失敗:", error); setSlotErr((s) => ({ ...s, [docType]: "画像の表示に失敗しました" })); return; }
+    if (data?.signedUrl) setViewUrl((v) => ({ ...v, [docType]: data.signedUrl }));
+  }
+
+  const SLOTS = [
+    { type: "id_card",   label: "本人確認書類", sub: "免許証/パスポート/マイナンバーのいずれか" },
+    { type: "residence", label: "住民票",       sub: "" },
+  ];
+  const fmtUp = (iso) => (iso ? String(iso).slice(0, 16).replace("T", " ") : "");
+  const hasAll = !!(docs.id_card && docs.residence);
+  const btnColor = hasAll ? C.green : C.accent;
+
+  return (
+    <>
+      <button
+        onClick={openModal}
+        style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${btnColor}60`, background: `${btnColor}10`, color: btnColor, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+        {hasAll ? "個人情報UP ✓済" : "個人情報UP"}
+      </button>
+      {open && (
+        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(61,26,78,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...card, width: "100%", maxWidth: "440px", maxHeight: "85vh", overflowY: "auto", display: "grid", gap: "14px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <p style={{ fontSize: "14px", fontWeight: "700", color: C.text, margin: 0 }}>個人情報UP — {cast?.name}</p>
+              <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "16px", lineHeight: 1 }}>✕</button>
+            </div>
+            {loadError && (
+              <p style={{ fontSize: "12px", color: C.red, fontWeight: "700", margin: 0 }}>読み込みに失敗しました。開き直してください</p>
+            )}
+            {SLOTS.map(({ type, label, sub }) => {
+              const doc = docs[type];
+              const err2 = slotErr[type];
+              const uploading = !!busy[type];
+              return (
+                <div key={type} style={{ border: `1.5px solid ${C.border}`, borderRadius: "12px", padding: "12px", display: "grid", gap: "8px" }}>
+                  <div>
+                    <p style={{ fontSize: "13px", fontWeight: "700", color: C.text, margin: 0 }}>{label}</p>
+                    {sub && <p style={{ fontSize: "11px", color: C.muted, margin: "2px 0 0" }}>{sub}</p>}
+                  </div>
+                  <input ref={fileRefs[type]} type="file" accept="image/*,application/pdf" onChange={(e) => handleFile(type, e)} style={{ display: "none" }} />
+                  {doc ? (
+                    <>
+                      <p style={{ fontSize: "12px", fontWeight: "700", color: C.green, margin: 0 }}>✓済（{fmtUp(doc.uploaded_at)}）</p>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          onClick={() => showImage(type)}
+                          style={{ flex: 1, padding: "8px", borderRadius: "10px", border: `1.5px solid ${C.blue}60`, background: `${C.blue}10`, color: C.blue, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                          画像を見る
+                        </button>
+                        <button
+                          onClick={() => { if (!uploading && fileRefs[type].current) fileRefs[type].current.click(); }}
+                          disabled={uploading}
+                          style={{ flex: 1, padding: "8px", borderRadius: "10px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: uploading ? C.muted : C.yellow, fontWeight: "700", fontSize: "12px", cursor: uploading ? "not-allowed" : "pointer" }}>
+                          {uploading ? "アップ中…" : "差し替え"}
+                        </button>
+                      </div>
+                      {viewUrl[type] && (
+                        <img src={viewUrl[type]} alt={label} style={{ width: "100%", borderRadius: "10px", border: `1px solid ${C.border}`, display: "block" }} />
+                      )}
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => { if (!uploading && fileRefs[type].current) fileRefs[type].current.click(); }}
+                      disabled={uploading}
+                      style={{ padding: "10px", borderRadius: "10px", border: `1.5px solid ${C.accent}60`, background: `${C.accent}10`, color: uploading ? C.muted : C.accent, fontWeight: "700", fontSize: "12px", cursor: uploading ? "not-allowed" : "pointer" }}>
+                      {uploading ? "アップ中…" : "画像を選択してアップ"}
+                    </button>
+                  )}
+                  {err2 && (
+                    <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: 0 }}>{err2}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ============================================================
 // キャスト管理
 // ============================================================
 function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, settings }) {
@@ -3729,6 +3892,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                     done={statementsDone.has(String(c.heaven_id || c.name))}
                     onUploaded={(id) => setStatementsDone((prev) => { const n = new Set(prev); n.add(String(id)); return n; })}
                   />
+                  <IdentityDocsButton cast={c} />
                   <button onClick={() => openGuaranteeModal(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     保証設定
                   </button>
