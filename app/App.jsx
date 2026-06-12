@@ -74,6 +74,10 @@ const initCutDays = { diary: 1, late: 1, early: 1, absent: 2, complaint: 1 };
 function getBusinessToday() {
   return new Date(Date.now() + 3 * 3600000).toISOString().slice(0, 10);
 }
+// posted_at 等のタイムスタンプ → 営業日 (YYYY-MM-DD)。getBusinessToday と同じ +3h 方式（朝6時切り替え）
+function toBusinessDate(ts) {
+  return new Date(new Date(ts).getTime() + 3 * 3600000).toISOString().slice(0, 10);
+}
 function getBusinessTodayKey() {
   const d = new Date(Date.now() + 3 * 3600000);
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
@@ -1144,7 +1148,7 @@ function CastLoginScreen({ casts, onLogin }) {
 function MyGuaranteePage({ casts, scores, settings, loggedInCast }) {
   const selectedCast = loggedInCast || "";
   const today = getBusinessToday();
-  const todayPosts = scores.filter((s) => new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) === today);
+  const todayPosts = scores.filter((s) => toBusinessDate(s.posted_at) === today);
 
   function countValid(posts) {
     const sorted = [...posts].sort((a, b) => new Date(a.posted_at) - new Date(b.posted_at));
@@ -2906,7 +2910,7 @@ function calcDiaryViolations(castName, startDate, endDate, shiftDays, ctx) {
 
     const dayPosts = scores.filter((s) => {
       if (s.cast_name !== castName) return false;
-      try { return new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) === ymd; } catch { return false; }
+      try { return toBusinessDate(s.posted_at) === ymd; } catch { return false; }
     });
     if (dayPosts.length === 0) continue; // 0投稿は安全側でスキップ
 
@@ -3902,7 +3906,7 @@ function GuaranteePage({ casts, scores, settings, shifts, cutDays }) {
   const totalEarned      = guaranteeRows.reduce((s, r) => s + r.gr.earnedGross, 0);
 
   // 今日の投稿達成判定（既存の保証条件チェック）
-  const todayPosts = scores.filter((s) => new Date(s.posted_at).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) === today);
+  const todayPosts = scores.filter((s) => toBusinessDate(s.posted_at) === today);
   function countValid(posts) {
     const sorted = [...posts].sort((a, b) => new Date(a.posted_at) - new Date(b.posted_at));
     let count = 0, last = 0;
