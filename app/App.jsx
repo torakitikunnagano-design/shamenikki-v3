@@ -3523,6 +3523,10 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       return { ...prev, [castName]: newList };
     });
   }
+  // その日の違反を全種類まとめて解除（ワンタッチ解除）
+  function clearViolationsForDate(castName, date) {
+    setViolations((prev) => ({ ...prev, [castName]: (prev[castName] || []).filter((v) => v.date !== date) }));
+  }
   function openModal(c) { setModal(c); setModalId(c.heaven_id || ""); setModalPass(c.heaven_pass || ""); setModalSaved(false); }
   function saveModal() {
     const updatedCast = { ...modal, heaven_id: modalId, heaven_pass: modalPass };
@@ -3957,13 +3961,20 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                           {[["late", "遅刻"], ["early", "早退"], ["absent", "当日欠勤"], ["complaint", "クレーム"]].map(([type, label]) => {
                             const on = (violations[c.name] || []).some((v) => v.type === type && v.date === selDate);
+                            const clr = VLC[type] || "#9a9aa8"; // バッジと同色（遅=ピンク/早=青/欠=赤/ク=灰）
                             return (
                               <button key={type} onClick={() => toggleViolation(c.name, type, selDate)}
-                                style={{ padding: "6px 14px", borderRadius: "20px", border: `1.5px solid ${on ? C.red : C.border}`, background: on ? `${C.red}15` : "white", color: on ? C.red : C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                                style={{ padding: "6px 14px", borderRadius: "20px", border: `1.5px solid ${clr}`, background: on ? clr : "white", color: on ? "white" : clr, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
                                 {label}
                               </button>
                             );
                           })}
+                          {selViols.length > 0 && (
+                            <button onClick={() => clearViolationsForDate(c.name, selDate)}
+                              style={{ padding: "6px 14px", borderRadius: "20px", border: `1.5px solid ${C.muted}`, background: "white", color: C.muted, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                              解除
+                            </button>
+                          )}
                         </div>
                       </>
                     )}
