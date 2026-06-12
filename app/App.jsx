@@ -3862,6 +3862,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         const { startDate, endDate } = guarantee[c.name];
         const DOW = ["日", "月", "火", "水", "木", "金", "土"];
         const VL = { late: "遅", early: "早", absent: "欠", complaint: "ク" };
+        const VLC = { late: C.accent, early: C.blue, absent: C.red, complaint: "#9a9aa8" }; // バッジの種類別色
         const dates = [];
         const [sy, sm, sd] = startDate.split("-").map(Number);
         const [ey, em, ed] = endDate.split("-").map(Number);
@@ -3896,18 +3897,17 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   const isManualWork = extraList.includes(ymd);
                   const isWorkday = isSyncWork || isManualWork;
                   const shiftStr = si?.startTime && si?.endTime ? `${si.startTime.slice(0, 5)}-${si.endTime.slice(0, 5)}` : null;
-                  // 状態別の色分け（優先度: 違反 > 今日 > 出勤 > なし）。違反は今日でも赤を優先。選択中の表現は boxShadow のみ。
+                  // 状態別の色分け（優先度: 違反 > 出勤 > なし）。今日は背景そのまま枠だけ青2px。選択中の表現は boxShadow のみ。
                   const hasViol = dayViols.length > 0;
                   let cellBg, cellBorder, dateClr;
                   if (hasViol) {
                     cellBg = C.red; cellBorder = `2px solid ${C.red}`; dateClr = "white"; // ベタ赤＋白文字で違反日を最強調
-                  } else if (isToday) {
-                    cellBg = `${C.blue}18`; cellBorder = `2px solid ${C.blue}`; dateClr = C.blue;
                   } else if (isWorkday) {
-                    cellBg = `${C.accent}25`; cellBorder = `1.5px solid ${C.accent}`; dateClr = C.text;
+                    cellBg = `${C.blue}15`; cellBorder = `1.5px solid ${C.blue}50`; dateClr = C.text;
                   } else {
                     cellBg = "white"; cellBorder = "1.5px solid #d8d8e0"; dateClr = C.text;
                   }
+                  if (isToday) cellBorder = `2px solid ${C.blue}`; // 今日の印は枠のみ
                   return (
                     <div key={ymd}
                       onClick={() => setOpenCalCell((prev) => prev?.castName === c.name && prev?.date === ymd ? null : { castName: c.name, date: ymd })}
@@ -3919,7 +3919,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                       {!isWorkday && <p style={{ fontSize: "11px", color: hasViol ? "white" : C.muted, margin: "0 0 1px" }}>＋</p>}
                       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1px" }}>
                         {dayViols.map((v, i) => (
-                          <span key={i} style={{ fontSize: "9px", fontWeight: "700", color: C.red, background: "white", borderRadius: "2px", padding: "0 2px", lineHeight: "14px" }}>{VL[v.type] || "?"}</span>
+                          <span key={i} style={{ fontSize: "9px", fontWeight: "700", color: "white", background: VLC[v.type] || "#9a9aa8", border: "1px solid white", borderRadius: "2px", padding: "0 2px", lineHeight: "14px" }}>{VL[v.type] || "?"}</span>
                         ))}
                       </div>
                     </div>
@@ -3927,7 +3927,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                 })}
               </div>
               <p style={{ fontSize: "10px", color: C.muted, margin: "6px 0 0", lineHeight: 1.6 }}>
-                ピンク＝出勤日 / 青＝今日 / 赤＝違反あり ／ 遅＝遅刻・早＝早退・欠＝当日欠勤・ク＝クレーム
+                青＝出勤日 / 赤＝違反あり / 青枠＝今日 ／ 遅=ピンク・早=青・欠=赤・ク=灰
               </p>
               {selDate && (() => {
                 const [sy2, sm2, sd2] = selDate.split("-").map(Number);
