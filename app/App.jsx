@@ -3166,7 +3166,7 @@ function IdentityDocsButton({ cast }) {
   const [slotErr, setSlotErr] = useState({}); // doc_type → エラーメッセージ
   const [busy, setBusy] = useState({});       // doc_type → アップ中
   const [viewUrl, setViewUrl] = useState({}); // doc_type → 署名付きURL
-  const fileRefs = { id_card: useRef(null), residence: useRef(null) };
+  const fileRefs = { interview: useRef(null), id_card: useRef(null), residence: useRef(null) };
 
   const castId = cast?.heaven_id || cast?.name || "";
 
@@ -3240,11 +3240,12 @@ function IdentityDocsButton({ cast }) {
   }
 
   const SLOTS = [
+    { type: "interview", label: "面接書類",     sub: "名前・住所・電話番号の記載があるもの" },
     { type: "id_card",   label: "本人確認書類", sub: "免許証/パスポート/マイナンバーのいずれか" },
     { type: "residence", label: "住民票",       sub: "" },
   ];
   const fmtUp = (iso) => (iso ? String(iso).slice(0, 16).replace("T", " ") : "");
-  const hasAll = !!(docs.id_card && docs.residence);
+  const hasAll = !!(docs.interview && docs.id_card && docs.residence);
   const btnColor = hasAll ? C.green : C.accent;
 
   return (
