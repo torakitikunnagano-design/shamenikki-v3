@@ -3090,6 +3090,18 @@ function getMiteneRemaining(castId) {
 function fmtMiteneAt(iso) {
   try { return new Date(iso).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" }); } catch { return ""; }
 }
+// rem（{remaining, at}）→ 表示ラベル（2画面共通）。rem が無いときは呼び出し側で非表示にする。
+//  - remaining>=1 → 「ミテネ残り◯回（HH:MM時点）」
+//  - remaining===0 / 不明  → 「本日完了（HH:MM時点）」（時間が無ければ時間なし）
+function miteneRemainingLabel(rem) {
+  if (!rem) return "";
+  const t = fmtMiteneAt(rem.at);
+  const when = t ? `（${t}時点）` : "";
+  if (typeof rem.remaining === "number" && Number.isFinite(rem.remaining) && rem.remaining >= 1) {
+    return `ミテネ残り${rem.remaining}回${when}`;
+  }
+  return `本日完了${when}`;
+}
 // レスポンスから残数を解決。remainingAfter が数値でなければ remainingBefore - sent で補完
 // （残り0になるとヘブン側の「残り回数：N/20」表記が消えて readRemaining が null になるケース対策）
 function resolveMiteneRemaining(data) {
@@ -3166,7 +3178,7 @@ function MiteneButton({ cast }) {
         </select>
       </div>
       {rem && (
-        <p style={{ fontSize: "9px", color: C.muted, fontWeight: "700", margin: "-2px 0 0", textAlign: "center", whiteSpace: "nowrap" }}>ミテネ残り{rem.remaining}回（{fmtMiteneAt(rem.at)}時点）</p>
+        <p style={{ fontSize: "9px", color: C.muted, fontWeight: "700", margin: "-2px 0 0", textAlign: "center", whiteSpace: "nowrap" }}>{miteneRemainingLabel(rem)}</p>
       )}
       {!hasPass && (
         <p style={{ fontSize: "9px", color: C.muted, margin: "-2px 0 0", textAlign: "center" }}>要ID設定</p>
@@ -5069,7 +5081,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
             <div key={r.name} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "10px", border: `1px solid ${C.border}`, background: C.surface }}>
               <span style={{ fontWeight: "700", fontSize: "13px", color: C.text, minWidth: "64px" }}>{r.name}</span>
               {r.sendable ? badge("送信可", C.green) : badge("要ID設定（スキップ）", C.muted)}
-              {rem && <span style={{ fontSize: "10px", color: C.muted, fontWeight: "700", whiteSpace: "nowrap" }}>残り{rem.remaining}回（{fmtMiteneAt(rem.at)}）</span>}
+              {rem && <span style={{ fontSize: "10px", color: C.muted, fontWeight: "700", whiteSpace: "nowrap" }}>{miteneRemainingLabel(rem)}</span>}
               {r.msg && <span style={{ fontSize: "11px", color: statusColor[r.status] || C.muted, lineHeight: 1.35, flex: 1 }}>{r.msg}</span>}
             </div>
             );
