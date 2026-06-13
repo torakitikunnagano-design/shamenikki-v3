@@ -4997,9 +4997,11 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
           saveMiteneRemaining(c.heaven_id || c.name, remAfter); // 常時表示用に保存
           let reason = "";
           if (sent === 0) {
+            const st = data.sendableTotal;
             const rb = data.remainingBefore;
-            if (rb === 0) reason = "（理由: 本日の枠を使い切り）";
-            else if (typeof rb === "number" && rb >= 1) reason = "（理由: 送る相手が見つからず／全員送信済みの可能性）";
+            if (typeof st === "number" && st === 0) reason = "（理由: 送る相手なし／全員送信済み）";
+            else if (typeof st === "number" && st >= 1) reason = "（理由: 相手はいたが送信できず／失敗の可能性）";
+            else if (rb === 0) reason = "（理由: 本日の枠を使い切り）";
             else reason = "（理由: 状態を取得できず）";
           }
           updateRow(c.name, { status: "done", msg: `${sent}件（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・マイガール${bt["マイガール"] || 0}）／残り${remAfter ?? "?"}回${reason}` });
