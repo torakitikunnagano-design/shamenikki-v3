@@ -387,6 +387,11 @@ app.post('/mitene', async (req, res) => {
         sent++;
         result.sentUids.push(uid);
         mlog('  sent uid=' + uid + ' remaining ' + remBefore + '->' + remAfter);
+      } else if (clicked && remBefore === 1 && remAfter == null) {
+        // 残り1だった→送信クリック後に「残り回数：N/20」表示が消えた＝0になったとみなして成功カウント
+        sent++;
+        result.sentUids.push(uid);
+        mlog('  sent (reached 0) uid=' + uid + ' remaining 1->0');
       } else {
         mlog('  send not confirmed uid=' + uid + ' remaining ' + remBefore + '->' + remAfter);
       }
