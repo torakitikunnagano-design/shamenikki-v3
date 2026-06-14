@@ -587,6 +587,34 @@ function App() {
     initCasts();
   }, []);
 
+  // 「更新」ボタン用: Supabase から casts を読み直して setCasts するだけの軽量再取得（シード/書き込みはしない）。
+  // データ形は initCasts の「Supabaseにデータあり」分岐と同じ（heaven_pass は localStorage から name 照合でマージ）。
+  async function refreshCasts() {
+    try {
+      const { data, error } = await supabase.from("casts").select("*").eq("store_id", getActiveStoreId());
+      if (error) { console.error("refreshCasts 取得失敗:", error.message, error.details, error.hint); return; }
+      if (!Array.isArray(data) || data.length === 0) return; // 空読みではキャスト一覧を壊さない
+      const stored = localStorage.getItem(skey("shamenikki_casts"));
+      const localCasts = stored ? JSON.parse(stored) : [];
+      const merged = data.map((sc) => {
+        const lc = localCasts.find((l) => l.name === sc.name);
+        return {
+          name:         sc.name,
+          is_active:    sc.is_active,
+          work_start:   sc.work_start   || "",
+          strong:       sc.strong       || "未分析",
+          weak:         sc.weak         || "未分析",
+          heaven_id:    sc.heaven_id    || "",
+          heaven_pass:  lc?.heaven_pass || "",
+          type:         sc.type         ?? undefined,
+          disclose:     sc.disclose     ?? undefined,
+          shindan_note: sc.shindan_note ?? undefined,
+        };
+      });
+      setCasts(merged);
+    } catch (e) { console.error("refreshCasts 例外:", e); }
+  }
+
   // Supabase scores 初期化（起動時1回）
   useEffect(() => {
     async function initScores() {
@@ -1057,7 +1085,7 @@ function App() {
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} shifts={shifts} cutDays={cutDays} />}
-                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} settings={settings} courses={courses} />}
+                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} settings={settings} courses={courses} onRefresh={refreshCasts} />}
                 {mode === "admin" && page === "bulkmitene" && <BulkMitenePage casts={casts} shifts={shifts} syncConfig={syncConfig} />}
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
@@ -3655,7 +3683,7 @@ function IdentityDocsButton({ cast }) {
 // ============================================================
 // キャスト管理
 // ============================================================
-function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, settings, courses = [] }) {
+function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, settings, courses = [], onRefresh }) {
   const [modal, setModal] = useState(null);
   const [modalId, setModalId] = useState("");
   const [modalPass, setModalPass] = useState("");
@@ -3676,6 +3704,10 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const todayKey = getBusinessTodayKey();
   const todayISO = getBusinessToday();
 
+  // 「更新」ボタン用: refreshKey を増やすと下の取得 useEffect が再実行される（再読み込みせずDBから最新化）
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
   // 本日の明細「送信済み」cast_id 集合（salary_statements に当日の送信レコードがあれば「済」。開き直しても保つ）
   const [statementsDone, setStatementsDone] = useState(() => new Set());
   useEffect(() => {
@@ -3691,7 +3723,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       } catch {}
     })();
     return () => { active = false; };
-  }, [todayISO]);
+  }, [todayISO, refreshKey]);
 
   // 明細の承認状況（cast_idごとに「最新dateの1件」）。statementsDone とは別管理（既存判定は壊さない）。
   const [stmtStatus, setStmtStatus] = useState(() => new Map()); // cast_id → { date, approved, approved_at, rejected_at, reject_reason, staff_resolved, staff_resolved_at }
@@ -3715,7 +3747,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       setStmtStatus(m);
     })();
     return () => { active = false; };
-  }, [todayISO]);
+  }, [todayISO, refreshKey]);
   function patchStmtStatus(castId, patch) {
     setStmtStatus((prev) => {
       const m = new Map(prev);
@@ -4269,6 +4301,12 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       })()}
 
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
+        <button
+          onClick={async () => { if (refreshing || syncLoading !== null) return; setRefreshing(true); setRefreshKey((n) => n + 1); try { await onRefresh?.(); } finally { setRefreshing(false); } }}
+          disabled={refreshing || syncLoading !== null}
+          style={{ padding: "8px 16px", borderRadius: "20px", border: `1.5px solid ${C.border}`, background: "transparent", color: C.muted, fontWeight: "700", cursor: (refreshing || syncLoading !== null) ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
+          {refreshing ? "更新中…" : "🔄 更新"}
+        </button>
         <button onClick={() => doSync("casts")} disabled={syncLoading !== null} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.blue}`, background: syncLoading !== null ? `${C.blue}08` : `${C.blue}15`, color: C.blue, fontWeight: "700", cursor: syncLoading !== null ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
           {syncLoading === "casts" ? "同期中..." : "👥 キャスト同期"}
         </button>
