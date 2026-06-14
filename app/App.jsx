@@ -2681,7 +2681,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                                 {Number(s2.shimei_ryou) ? `　指名料${yen(s2.shimei_ryou)}円` : ""}
                                 {Number(s2.ext_fee) ? `　延長料${yen(s2.ext_fee)}円` : ""}
                                 {Number(s2.op) ? `　OP${yen(s2.op)}円` : ""}
-                                <span style={{ fontWeight: "700", color: C.accent }}>　小計{yen((Number(s2.fee)||0)+(Number(s2.shimei_ryou)||0)+(Number(s2.ext_fee)||0)+(Number(s2.op)||0))}円</span>
+                                <span style={{ fontWeight: "800", color: C.text }}>　小計{yen((Number(s2.fee)||0)+(Number(s2.shimei_ryou)||0)+(Number(s2.ext_fee)||0)+(Number(s2.op)||0))}円</span>
                               </p>
                             ))}
                           </div>
@@ -2693,7 +2693,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                           {Number(r.misc) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>雑費　-{yen(r.misc)}円</p> : null}
                           {Number(r.other_amt) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>その他{r.other_label ? `（${r.other_label}）` : ""}　-{yen(r.other_amt)}円</p> : null}
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap", marginTop: "4px" }}>
-                            <p style={{ fontSize: "16px", fontWeight: "700", color: C.accent, margin: 0 }}>手取り　{yen(r.take_home)}円</p>
+                            <p style={{ fontSize: "16px", fontWeight: "800", color: C.text, margin: 0 }}>手取り　{yen(r.take_home)}円</p>
                             {isPending && rejectingDate !== st.date && (
                               <div style={{ display: "flex", gap: "6px" }}>
                                 <button
@@ -3431,7 +3431,7 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
                                     {Number(s2.shimei_ryou) ? `　指名料${yen(s2.shimei_ryou)}円` : ""}
                                     {Number(s2.ext_fee) ? `　延長料${yen(s2.ext_fee)}円` : ""}
                                     {Number(s2.op) ? `　OP${yen(s2.op)}円` : ""}
-                                    <span style={{ fontWeight: "700", color: C.accent }}>　小計{yen((Number(s2.fee)||0)+(Number(s2.shimei_ryou)||0)+(Number(s2.ext_fee)||0)+(Number(s2.op)||0))}円</span>
+                                    <span style={{ fontWeight: "800", color: C.text }}>　小計{yen((Number(s2.fee)||0)+(Number(s2.shimei_ryou)||0)+(Number(s2.ext_fee)||0)+(Number(s2.op)||0))}円</span>
                                   </p>
                                 ))}
                               </div>
@@ -3442,7 +3442,7 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
                               {Number(r.dorm) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>寮費　-{yen(r.dorm)}円</p> : null}
                               {Number(r.misc) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>雑費　-{yen(r.misc)}円</p> : null}
                               {Number(r.other_amt) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>その他{r.other_label ? `（${r.other_label}）` : ""}　-{yen(r.other_amt)}円</p> : null}
-                              <p style={{ fontSize: "15px", fontWeight: "700", color: C.accent, margin: "2px 0 0" }}>手取り　{yen(r.take_home)}円</p>
+                              <p style={{ fontSize: "15px", fontWeight: "800", color: C.text, margin: "2px 0 0" }}>手取り　{yen(r.take_home)}円</p>
                             </div>
                           </div>
                         );
