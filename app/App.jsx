@@ -2358,6 +2358,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   const [transport, setTransport] = useState("");
   const [otherLabel, setOtherLabel] = useState(""); // その他控除の名称（自由入力・店舗ごと）
   const [otherAmt, setOtherAmt] = useState("");     // その他控除の金額（数値・今回はtakeHomeに未反映）
+  const [ocrReadGross, setOcrReadGross] = useState(null); // OCRが読んだ総額（内訳合計との突合用。一致確認後は不要）
   const [saved, setSaved] = useState(false);
   const [slipLoading, setSlipLoading] = useState(false);
   const [slipOcrDone, setSlipOcrDone] = useState(false);
@@ -2474,6 +2475,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   async function readSlip(file) {
     setSlipLoading(true);
     setSlipOcrDone(false);
+    setOcrReadGross(null); // 読み直す前にOCR総額をクリア
     try {
       const base64 = await new Promise((res, rej) => {
         const reader = new FileReader();
@@ -2490,8 +2492,9 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
 - shimeiRyou: 「指名」列の指名料バック額。フリーは0。
 - extCount: 延長回数。数値。
 - extMin: 延長時間（分）。数値。
+- extFee: 延長料金の本人バック額（円）。明細に延長料の記載があればその本人取り分、無ければ0。extCount・extMinとは別の金額フィールド。
 - op: 「オプション」列のオプション料金バック額。courseFeeとは別欄。
-- subtotal: 小計（courseFee+shimeiRyou+延長料金+opの合計）。
+- subtotal: 小計（courseFee+shimeiRyou+extFee+opの合計）。
 
 【合計欄のフィールド定義】
 - gross: 総支給（各本の小計の合計）。正の整数。
@@ -2501,7 +2504,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
 - takeHome: 手取り（gross-misc-dorm-transport）。
 
 金額はすべて円（数値のみ、記号・カンマなし）。必ずこのJSONのみで返してください（説明文不要）：
-{"sessions":[{"courseMin":60,"shimei":"本指名","courseFee":5000,"shimeiRyou":2000,"extCount":0,"extMin":0,"op":0,"subtotal":7000}],"gross":50000,"misc":3000,"dorm":10000,"transport":1000,"takeHome":36000}`;
+{"sessions":[{"courseMin":60,"shimei":"本指名","courseFee":5000,"shimeiRyou":2000,"extCount":0,"extMin":0,"extFee":0,"op":0,"subtotal":7000}],"gross":50000,"misc":3000,"dorm":10000,"transport":1000,"takeHome":36000}`;
       const res = await fetch("/api/xai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2530,11 +2533,12 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
           op: String(Math.abs(s.op || 0) || ""),
           extCount: String(s.extCount || ""),
           extMin: String(s.extMin || ""),
-          extFee: "",
+          extFee: String(Math.abs(s.extFee || 0) || ""),
         };
       });
       setHons(newHons);
       if (parsed.gross != null) setGross(String(Math.abs(parsed.gross)));
+      setOcrReadGross(parsed.gross != null ? Number(parsed.gross) : null);
       if (parsed.dorm != null) setDorm(String(Math.abs(parsed.dorm)));
       if (parsed.misc != null) setMisc(String(Math.abs(parsed.misc)));
       if (parsed.transport != null) setTransport(String(Math.abs(parsed.transport)));
@@ -2557,7 +2561,9 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   const totalExtCount  = activeHons.reduce((s, h) => s + (Number(h.extCount) || 0), 0);
   const totalExtMin    = activeHons.reduce((s, h) => s + (Number(h.extMin) || 0), 0);
   const totalOp        = activeHons.reduce((s, h) => s + (Number(h.op) || 0), 0);
-  const takeHome = (Number(gross) || 0) + (Number(transport) || 0) - (Number(dorm) || 0) - (Number(misc) || 0) - (Number(otherAmt) || 0);
+  // 総支給は各接客の合計（金額fee＋指名料shimeiRyou＋延長料extFee＋OP op）から自動計算（手入力 gross は不使用）
+  const computedGross = activeHons.reduce((s, h) => s + (Number(h.fee) || 0) + (Number(h.shimeiRyou) || 0) + (Number(h.extFee) || 0) + (Number(h.op) || 0), 0);
+  const takeHome = computedGross + (Number(transport) || 0) - (Number(dorm) || 0) - (Number(misc) || 0) - (Number(otherAmt) || 0);
 
   async function saveRecord() {
     const rec = {
@@ -2570,7 +2576,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
       extCount: totalExtCount,
       extMin: totalExtMin,
       option: totalOp,
-      gross: Number(gross) || 0,
+      gross: computedGross,
       dorm: Number(dorm) || 0,
       misc: Number(misc) || 0,
       transport: Number(transport) || 0,
@@ -2584,7 +2590,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
     localStorage.setItem(skey(storageKey), JSON.stringify(next)); // 従来通りlocalStorageに保存（店舗で名前空間化）
     setHons(Array.from({ length: 12 }, mkHon));
     if (!staffShift) { setStartTime(""); setEndTime(""); }
-    setGross(""); setDorm(""); setMisc(""); setTransport(""); setOtherAmt(""); setOtherLabel("");
+    setGross(""); setDorm(""); setMisc(""); setTransport(""); setOtherAmt(""); setOtherLabel(""); setOcrReadGross(null);
     setSlipOcrDone(false);
 
     // Supabase sync：親レコードを先にupsert → 既存sessionsをdelete → 再挿入
@@ -2898,9 +2904,12 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
       {/* 総支給・控除・手取り */}
       <div style={{ ...card }}>
         <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>給与・控除</p>
-        <Field label="総支給（円）">
-          <input type="number" min="0" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="0" style={inp} />
+        <Field label="総支給（円）※各接客の合計から自動計算">
+          <div style={{ ...inp, display: "flex", alignItems: "center", background: C.surface, color: C.text, fontWeight: "700" }}>{fmtYen(computedGross)}</div>
         </Field>
+        {ocrReadGross != null && ocrReadGross !== computedGross && (
+          <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: "6px 0 0", lineHeight: 1.5 }}>⚠️ OCRが読んだ総額 {fmtYen(ocrReadGross)} と内訳合計 {fmtYen(computedGross)} が一致しません。各接客の金額・延長料をご確認ください。</p>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginTop: "10px", marginBottom: "14px" }}>
           <Field label="寮費（円）">
             <input type="number" min="0" value={dorm} onChange={(e) => setDorm(e.target.value)} placeholder="0" style={inp} />
@@ -2923,7 +2932,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
         <div style={{ background: "linear-gradient(135deg, #fff0f8, #ffe8f5)", border: `2px solid ${C.accent}40`, borderRadius: "14px", padding: "18px", textAlign: "center", marginBottom: "14px" }}>
           <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px" }}>手取り</p>
           <p style={{ fontSize: "32px", fontWeight: "700", color: takeHome >= 0 ? C.accent : C.red, margin: 0 }}>{fmtYen(takeHome)}</p>
-          <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>総支給 {fmtYen(Number(gross)||0)} ＋ 交通費 {fmtYen(Number(transport)||0)} − 寮費 {fmtYen(Number(dorm)||0)} − 雑費 {fmtYen(Number(misc)||0)} − その他 {fmtYen(Number(otherAmt)||0)}</p>
+          <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>総支給 {fmtYen(computedGross)} ＋ 交通費 {fmtYen(Number(transport)||0)} − 寮費 {fmtYen(Number(dorm)||0)} − 雑費 {fmtYen(Number(misc)||0)} − その他 {fmtYen(Number(otherAmt)||0)}</p>
         </div>
         <Btn onClick={saveRecord} loading={false} label={saved ? "保存しました ✓" : "記録を保存"} color={saved ? C.green : C.accent} />
       </div>
