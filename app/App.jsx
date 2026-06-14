@@ -3397,9 +3397,9 @@ function StatementUpButton({ cast, done, onUploaded, onRemoved, stmt, stmtErr, o
                   const bd = breakdowns[st.date];
                   return (
                     <div key={`${st.date}_${i}`} style={{ borderTop: i === 0 ? "none" : `1px solid ${C.border}`, paddingTop: i === 0 ? 0 : "10px", display: "grid", gap: "6px" }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
                         <span style={{ fontSize: "12px", fontWeight: "700", color: C.text }}>{st.date}</span>
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", justifyContent: "flex-end" }}>
                           {isApproved ? (
                             <span style={{ fontSize: "11px", fontWeight: "700", color: C.green, background: `${C.green}15`, border: `1px solid ${C.green}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>承認済み{apprDate ? `（${apprDate}）` : ""}</span>
                           ) : isRejected ? (
@@ -3408,7 +3408,7 @@ function StatementUpButton({ cast, done, onUploaded, onRemoved, stmt, stmtErr, o
                             <span style={{ fontSize: "11px", fontWeight: "700", color: C.muted, background: `${C.muted}15`, border: `1px solid ${C.muted}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>キャスト確認待ち</span>
                           )}
                           <button onClick={() => deleteStatement(st)}
-                            style={{ fontSize: "11px", fontWeight: "700", color: C.muted, background: "transparent", border: `1.5px solid ${C.red}40`, borderRadius: "10px", padding: "3px 10px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                            style={{ fontSize: "11px", fontWeight: "700", color: C.text, background: "transparent", border: `1.5px solid ${C.red}40`, borderRadius: "10px", padding: "3px 10px", cursor: "pointer", whiteSpace: "nowrap" }}>
                             削除
                           </button>
                         </div>
