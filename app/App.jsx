@@ -3343,7 +3343,7 @@ function MiteneButton({ cast }) {
         </select>
       </div>
       {rem && (
-        <p style={{ fontSize: "9px", color: C.muted, fontWeight: "700", margin: "-2px 0 0", textAlign: "center", whiteSpace: "nowrap" }}>{miteneRemainingLabel(rem)}</p>
+        <p style={{ fontSize: "9px", color: (typeof rem.remaining === "number" && Number.isFinite(rem.remaining) && rem.remaining >= 1) ? C.muted : C.red, fontWeight: "700", margin: "-2px 0 0", textAlign: "center", whiteSpace: "nowrap" }}>{miteneRemainingLabel(rem)}</p>
       )}
       {!hasPass && (
         <p style={{ fontSize: "9px", color: C.muted, margin: "-2px 0 0", textAlign: "center" }}>要ID設定</p>
