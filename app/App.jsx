@@ -3786,6 +3786,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   // 「更新」ボタン用: refreshKey を増やすと下の取得 useEffect が再実行される（再読み込みせずDBから最新化）
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshToast, setRefreshToast] = useState(false); // 更新完了トースト（約1.5秒）
 
   // 本日の明細「送信済み」cast_id 集合（salary_statements に当日の送信レコードがあれば「済」。開き直しても保つ）
   const [statementsDone, setStatementsDone] = useState(() => new Set());
@@ -4129,6 +4130,22 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     <div style={{ display: "grid", gap: "16px" }}>
       <Header title="キャスト管理" sub="得意・苦手分析と成長サポート" color={C.green} />
 
+      {/* 更新中オーバーレイ（リロード相当の体感。最低500ms表示。ログアウトはしない） */}
+      {refreshing && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px" }}>
+          <style>{`@keyframes shamenikkiSpin { to { transform: rotate(360deg); } }`}</style>
+          <div style={{ width: "44px", height: "44px", borderRadius: "50%", border: `4px solid ${C.green}40`, borderTopColor: C.green, animation: "shamenikkiSpin 0.8s linear infinite" }} />
+          <p style={{ color: "white", fontWeight: "700", fontSize: "15px", margin: 0 }}>更新中…</p>
+        </div>
+      )}
+
+      {/* 更新完了トースト（約1.5秒） */}
+      {refreshToast && (
+        <div style={{ position: "fixed", top: "20px", left: "50%", transform: "translateX(-50%)", zIndex: 2100, background: C.green, color: "white", padding: "12px 22px", borderRadius: "999px", fontWeight: "700", fontSize: "14px", boxShadow: "0 8px 24px rgba(61,26,78,0.25)" }}>
+          ✓ 最新の情報に更新しました
+        </div>
+      )}
+
       {modal && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
           <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(255,107,157,0.2)" }}>
@@ -4381,7 +4398,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
 
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
         <button
-          onClick={async () => { if (refreshing || syncLoading !== null) return; setRefreshing(true); setRefreshKey((n) => n + 1); try { await onRefresh?.(); } finally { setRefreshing(false); } }}
+          onClick={async () => { if (refreshing || syncLoading !== null) return; setRefreshing(true); setRefreshKey((n) => n + 1); try { await Promise.all([ Promise.resolve(onRefresh?.()), new Promise((r) => setTimeout(r, 500)) ]); } finally { setRefreshing(false); setRefreshToast(true); setTimeout(() => setRefreshToast(false), 1500); } }}
           disabled={refreshing || syncLoading !== null}
           style={{ padding: "8px 16px", borderRadius: "20px", border: `1.5px solid ${C.muted}`, background: "transparent", color: C.muted, fontWeight: "700", cursor: (refreshing || syncLoading !== null) ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
           {refreshing ? "更新中…" : "🔄 更新"}
