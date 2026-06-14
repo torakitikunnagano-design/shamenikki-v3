@@ -3265,7 +3265,7 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
     const dates = rows.map((r) => r.date).filter(Boolean);
     if (dates.length === 0) { setBreakdowns({}); return; }
     const { data: recs, error: recErr } = await supabase.from("salary_records")
-      .select("id, date, gross, dorm, misc, transport, take_home")
+      .select("id, date, gross, dorm, misc, transport, other_amt, other_label, take_home")
       .eq("store_id", getActiveStoreId())
       .eq("cast_id", castId)
       .in("date", dates);
@@ -3273,7 +3273,7 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
     if (!Array.isArray(recs) || recs.length === 0) { setBreakdowns({}); return; }
     const ids = recs.map((r) => r.id);
     const { data: sess, error: sessErr } = await supabase.from("salary_sessions")
-      .select("salary_record_id, seq, course_min, shimei, fee, shimei_ryou, op")
+      .select("salary_record_id, seq, course_min, shimei, fee, shimei_ryou, ext_fee, op")
       .in("salary_record_id", ids)
       .order("seq", { ascending: true });
     if (sessErr) { console.error("給料セッション取得失敗:", sessErr); setBdError(true); return; }
@@ -3428,6 +3428,7 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
                                     {s2.shimei ? `　${s2.shimei}` : ""}
                                     {Number(s2.fee) ? `　金額${yen(s2.fee)}円` : ""}
                                     {Number(s2.shimei_ryou) ? `　指名料${yen(s2.shimei_ryou)}円` : ""}
+                                    {Number(s2.ext_fee) ? `　延長料${yen(s2.ext_fee)}円` : ""}
                                     {Number(s2.op) ? `　OP${yen(s2.op)}円` : ""}
                                   </p>
                                 ))}
@@ -3435,9 +3436,10 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
                             )}
                             <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "6px", display: "grid", gap: "3px" }}>
                               <p style={{ fontSize: "12px", color: C.text, margin: 0 }}>総支給　{yen(r.gross)}円</p>
+                              {Number(r.transport) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>交通費　+{yen(r.transport)}円</p> : null}
                               {Number(r.dorm) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>寮費　-{yen(r.dorm)}円</p> : null}
                               {Number(r.misc) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>雑費　-{yen(r.misc)}円</p> : null}
-                              {Number(r.transport) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>交通費　-{yen(r.transport)}円</p> : null}
+                              {Number(r.other_amt) ? <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>その他{r.other_label ? `（${r.other_label}）` : ""}　-{yen(r.other_amt)}円</p> : null}
                               <p style={{ fontSize: "15px", fontWeight: "700", color: C.accent, margin: "2px 0 0" }}>手取り　{yen(r.take_home)}円</p>
                             </div>
                           </div>
