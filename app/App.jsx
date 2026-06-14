@@ -2934,7 +2934,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
         </div>
         <div style={{ background: "linear-gradient(135deg, #fff0f8, #ffe8f5)", border: `2px solid ${C.accent}40`, borderRadius: "14px", padding: "18px", textAlign: "center", marginBottom: "14px" }}>
           <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px" }}>手取り</p>
-          <p style={{ fontSize: "32px", fontWeight: "700", color: takeHome >= 0 ? C.accent : C.red, margin: 0 }}>{fmtYen(takeHome)}</p>
+          <p style={{ fontSize: "32px", fontWeight: "800", color: takeHome >= 0 ? C.text : C.red, margin: 0 }}>{fmtYen(takeHome)}</p>
           <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>総支給 {fmtYen(computedGross)} ＋ 交通費 {fmtYen(Number(transport)||0)} − 寮費 {fmtYen(Number(dorm)||0)} − 雑費 {fmtYen(Number(misc)||0)} − その他 {fmtYen(Number(otherAmt)||0)}</p>
         </div>
         <Btn onClick={saveRecord} loading={false} label={saved ? "保存しました ✓" : "記録を保存"} color={saved ? C.green : C.accent} />
