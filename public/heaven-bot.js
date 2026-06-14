@@ -570,7 +570,8 @@ app.post('/mitene-creds', async (req, res) => {
 
 // ============================================================
 // 【read-only】ミテネ残数チェック（送信しない）
-//  - 1キャスト分。J1Login → ミテネ一覧ページ → 「残り回数：N/20」読み取り＋「使い切りました」判定。
+//  - 1キャスト分。J1Login → J1Main で「使い切りました」判定 → 未使い切りなら J10一覧で「残り回数：N/20」読み取り。
+//  - usedUp（J1Main に「本日分のミテネは使い切りました」）なら remaining=0 とし、J10 は開かない。
 //  - registComeon クリック等の送信系は一切呼ばない（絶対に送らない）。
 //  - 戻り値: { ok, remaining, usedUp }（remaining=数値 or null、usedUp=boolean）
 // ============================================================
@@ -616,14 +617,23 @@ app.post('/mitene-status', async (req, res) => {
     await page.type('input[name="txt_password"]', heavenPass);
     await Promise.all([page.click('input[type="submit"]'), page.waitForNavigation(WAIT)]);
 
-    // Step 2: ミテネ一覧ページへ goto して「読むだけ」（送信系は呼ばない）
-    const miteneUrl = 'https://spgirl.cityheaven.net/J10ComeonVisitorList.php?gid=' + heavenId;
-    await page.goto(miteneUrl, WAIT);
+    // Step 2: J1Main で「本日分のミテネは使い切りました」を判定（送信系は呼ばない）
+    await page.goto('https://spgirl.cityheaven.net/J1Main.php', WAIT);
     await sleep(2000);
-
-    result.remaining = await readRemaining(page);
     result.usedUp = await readUsedUp(page);
-    slog('remaining=' + result.remaining + ' usedUp=' + result.usedUp);
+
+    if (result.usedUp) {
+      // 使い切り＝本日完了。残数表記は消えているので 0 とみなし、J10 は開かない
+      result.remaining = 0;
+      slog('usedUp=true → remaining=0 (J1Main)');
+    } else {
+      // 未使い切り → J10一覧で「残り回数：N/20」を読む
+      const miteneUrl = 'https://spgirl.cityheaven.net/J10ComeonVisitorList.php?gid=' + heavenId;
+      await page.goto(miteneUrl, WAIT);
+      await sleep(2000);
+      result.remaining = await readRemaining(page);
+      slog('usedUp=false → remaining=' + result.remaining + ' (J10)');
+    }
 
     await browser.close();
     result.ok = true;
