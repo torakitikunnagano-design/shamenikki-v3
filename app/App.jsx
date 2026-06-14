@@ -2690,7 +2690,6 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
 
   // 明細表示（本人が自分の明細を閲覧）: salary_statements を取得し、非公開バケットの署名付きURLを作る
   const [statements, setStatements] = useState([]);
-  const [statementUrls, setStatementUrls] = useState({}); // image_path → 署名付きURL
   const [stmtBreakdowns, setStmtBreakdowns] = useState({}); // date → { rec: salary_records行, sessions: salary_sessions行[] }
   const [stmtLoadError, setStmtLoadError] = useState(false); // 取得失敗をUIに出す（無言の空表示と区別する）
   useEffect(() => {
@@ -3262,14 +3261,11 @@ function MiteneButton({ cast }) {
 //  - モーダル式: アップロード＋明細承認状況（stmt/stmtErr/onResolve は CastPage の stmtStatus 系を参照のみ）
 // ============================================================
 function StatementUpButton({ cast, done, onUploaded, onRemoved, stmt, stmtErr, onResolve, courses = [] }) {
-  const [uploading, setUploading] = useState(false);
-  const [err, setErr] = useState(null);
   const [open, setOpen] = useState(false);
   const [history, setHistory] = useState([]);       // 直近5件の salary_statements（履歴一覧）
   const [histError, setHistError] = useState(false);
   const [breakdowns, setBreakdowns] = useState({}); // date → { rec, sessions }
   const [bdError, setBdError] = useState(false);
-  const fileRef = useRef(null);
 
   const castId = cast?.heaven_id || cast?.name || "";
   const date = getBusinessToday(); // v1は今日の日付。日付選択を足すときはここ1か所を変える
@@ -3358,7 +3354,7 @@ function StatementUpButton({ cast, done, onUploaded, onRemoved, stmt, stmtErr, o
     <>
       <button
         onClick={() => setOpen(true)}
-        style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${color}60`, background: `${color}10`, color: uploading ? C.muted : color, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+        style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${color}60`, background: `${color}10`, color: color, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
         {label}
       </button>
       {open && (
