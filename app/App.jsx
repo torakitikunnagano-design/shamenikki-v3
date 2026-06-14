@@ -1338,8 +1338,8 @@ function useCastTypeLock(castId) {
             { store_id: getActiveStoreId(), cast_id: castId, type: next.type, retries: next.retries, updated_at: new Date().toISOString() },
             { onConflict: "store_id,cast_id" }
           ).then(({ error }) => {
-            if (error) console.error("saveLock upsert失敗:", error);
-          }).catch((e) => console.error("saveLock 例外:", e));
+            if (error) { console.error("saveLock upsert失敗:", error); alert("診断結果の保存に失敗しました"); }
+          }).catch((e) => { console.error("saveLock 例外:", e); alert("診断結果の保存に失敗しました"); });
         } catch (e) { console.error("saveLock 同期例外:", e); }
       }
       return next;
@@ -1353,8 +1353,8 @@ function useCastTypeLock(castId) {
       try {
         supabase.from("cast_types").delete().eq("store_id", getActiveStoreId()).eq("cast_id", castId)
           .then(({ error }) => {
-            if (error) console.error("resetLock delete失敗:", error);
-          }).catch((e) => console.error("resetLock 例外:", e));
+            if (error) { console.error("resetLock delete失敗:", error); alert("診断のリセットに失敗しました"); }
+          }).catch((e) => { console.error("resetLock 例外:", e); alert("診断のリセットに失敗しました"); });
       } catch (e) { console.error("resetLock 同期例外:", e); }
     }
   }
@@ -3746,8 +3746,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     try {
       supabase.from("cast_types").delete().eq("store_id", getActiveStoreId()).eq("cast_id", castId)
         .then(({ error }) => {
-          if (error) console.error("resetDiagLock delete失敗:", error);
-        }).catch((e) => console.error("resetDiagLock 例外:", e));
+          if (error) { console.error("resetDiagLock delete失敗:", error); alert("診断リセットに失敗しました"); }
+        }).catch((e) => { console.error("resetDiagLock 例外:", e); alert("診断リセットに失敗しました"); });
     } catch (e) { console.error("resetDiagLock 同期例外:", e); }
     setLockRefresh((n) => n + 1);
   }
