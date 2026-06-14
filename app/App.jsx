@@ -2681,6 +2681,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                                 {Number(s2.shimei_ryou) ? `　指名料${yen(s2.shimei_ryou)}円` : ""}
                                 {Number(s2.ext_fee) ? `　延長料${yen(s2.ext_fee)}円` : ""}
                                 {Number(s2.op) ? `　OP${yen(s2.op)}円` : ""}
+                                <span style={{ fontWeight: "700", color: C.accent }}>　小計{yen((Number(s2.fee)||0)+(Number(s2.shimei_ryou)||0)+(Number(s2.ext_fee)||0)+(Number(s2.op)||0))}円</span>
                               </p>
                             ))}
                           </div>
@@ -3430,6 +3431,7 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
                                     {Number(s2.shimei_ryou) ? `　指名料${yen(s2.shimei_ryou)}円` : ""}
                                     {Number(s2.ext_fee) ? `　延長料${yen(s2.ext_fee)}円` : ""}
                                     {Number(s2.op) ? `　OP${yen(s2.op)}円` : ""}
+                                    <span style={{ fontWeight: "700", color: C.accent }}>　小計{yen((Number(s2.fee)||0)+(Number(s2.shimei_ryou)||0)+(Number(s2.ext_fee)||0)+(Number(s2.op)||0))}円</span>
                                   </p>
                                 ))}
                               </div>
