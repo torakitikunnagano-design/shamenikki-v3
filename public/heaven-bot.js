@@ -568,5 +568,73 @@ app.post('/mitene-creds', async (req, res) => {
   }
 });
 
+// ============================================================
+// 【read-only】ミテネ残数チェック（送信しない）
+//  - 1キャスト分。J1Login → ミテネ一覧ページ → 「残り回数：N/20」読み取り＋「使い切りました」判定。
+//  - registComeon クリック等の送信系は一切呼ばない（絶対に送らない）。
+//  - 戻り値: { ok, remaining, usedUp }（remaining=数値 or null、usedUp=boolean）
+// ============================================================
+app.post('/mitene-status', async (req, res) => {
+  const { heavenId, heavenPass } = req.body || {};
+  const slog = (m) => console.log('[mitene-status] ' + m);
+  const result = { ok: false, remaining: null, usedUp: false, error: null };
+  let browser;
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  // 本文の「残り回数：N/20」から N を取得（/mitene の readRemaining と同一ロジック）
+  const readRemaining = async (page) => page.evaluate(() => {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const m = node.textContent.trim().match(/残り回数[：:]\s*(\d+)\s*[\/／]\d+/);
+      if (m) return parseInt(m[1], 10);
+    }
+    return null;
+  });
+
+  // 本文に「本日分のミテネは使い切りました」が含まれるか
+  const readUsedUp = async (page) => page.evaluate(() => {
+    const t = (document.body && document.body.innerText) || '';
+    return t.includes('本日分のミテネは使い切りました');
+  });
+
+  try {
+    if (!heavenId || !heavenPass) {
+      result.error = 'heavenId and heavenPass are required';
+      return res.json(result);
+    }
+
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const page = await browser.newPage();
+    page.setDefaultNavigationTimeout(60000);
+    await page.setUserAgent(UA);
+
+    // Step 1: ログイン（/mitene と同一手順）
+    slog('login...');
+    await page.goto('https://spgirl.cityheaven.net/J1Login.php', WAIT);
+    await page.type('input[name="txt_account"]', heavenId);
+    await page.type('input[name="txt_password"]', heavenPass);
+    await Promise.all([page.click('input[type="submit"]'), page.waitForNavigation(WAIT)]);
+
+    // Step 2: ミテネ一覧ページへ goto して「読むだけ」（送信系は呼ばない）
+    const miteneUrl = 'https://spgirl.cityheaven.net/J10ComeonVisitorList.php?gid=' + heavenId;
+    await page.goto(miteneUrl, WAIT);
+    await sleep(2000);
+
+    result.remaining = await readRemaining(page);
+    result.usedUp = await readUsedUp(page);
+    slog('remaining=' + result.remaining + ' usedUp=' + result.usedUp);
+
+    await browser.close();
+    result.ok = true;
+    res.json(result);
+  } catch (e) {
+    slog('ERROR: ' + e.message);
+    result.error = e.message;
+    if (browser) { try { await browser.close(); } catch (_) {} }
+    res.json(result);
+  }
+});
+
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.listen(3000, () => console.log('Heaven Bot :3000'));
