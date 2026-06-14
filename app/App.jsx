@@ -3261,7 +3261,7 @@ function MiteneButton({ cast }) {
 //  - 失敗時は必ず error を確認してアラート（握りつぶさない）
 //  - モーダル式: アップロード＋明細承認状況（stmt/stmtErr/onResolve は CastPage の stmtStatus 系を参照のみ）
 // ============================================================
-function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve, courses = [] }) {
+function StatementUpButton({ cast, done, onUploaded, onRemoved, stmt, stmtErr, onResolve, courses = [] }) {
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState(null);
   const [open, setOpen] = useState(false);
@@ -3315,6 +3315,40 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve, c
     loadHistory();
   }, [open, castId]);
 
+  // 送った明細を完全に削除（誤送信の取り消し）。順序: records.id取得 → statements → sessions → records。
+  async function deleteStatement(st) {
+    if (!castId) return;
+    const d = st.date;
+    if (!window.confirm((cast?.name || "") + " の " + d + " の明細を削除します。キャストの画面からも消えます。よろしいですか？")) return;
+    try {
+      const store = getActiveStoreId();
+      // 1) 親 records の id を先に取得（sessions 削除に使う）
+      const { data: recs, error: selErr } = await supabase.from("salary_records")
+        .select("id").eq("store_id", store).eq("cast_id", castId).eq("date", d);
+      if (selErr) { console.error("[明細削除 records select]", selErr.message, selErr.details, selErr.hint); alert("削除に失敗しました: " + selErr.message); return; }
+      const ids = (recs || []).map((r) => r.id);
+      // 2) statements を先に削除（キャストの「あなたの明細」と✓済から先に消す）
+      const { error: stmtDelErr } = await supabase.from("salary_statements").delete()
+        .eq("store_id", store).eq("cast_id", castId).eq("date", d);
+      if (stmtDelErr) { console.error("[明細削除 statements delete]", stmtDelErr.message, stmtDelErr.details, stmtDelErr.hint); alert("削除に失敗しました: " + stmtDelErr.message); return; }
+      // 3) sessions を削除（ids があるときだけ）
+      if (ids.length > 0) {
+        const { error: sessDelErr } = await supabase.from("salary_sessions").delete().in("salary_record_id", ids);
+        if (sessDelErr) { console.error("[明細削除 sessions delete]", sessDelErr.message, sessDelErr.details, sessDelErr.hint); alert("削除に失敗しました: " + sessDelErr.message); return; }
+      }
+      // 4) records を削除（同日複数行があっても全部）
+      const { error: recDelErr } = await supabase.from("salary_records").delete()
+        .eq("store_id", store).eq("cast_id", castId).eq("date", d);
+      if (recDelErr) { console.error("[明細削除 records delete]", recDelErr.message, recDelErr.details, recDelErr.hint); alert("削除に失敗しました: " + recDelErr.message); return; }
+      // UI即時反映: モーダル履歴を再取得し、削除日が当日ならカードの✓済を外す
+      loadHistory();
+      if (d === getBusinessToday()) onRemoved?.(castId);
+    } catch (e) {
+      console.error("[明細削除 例外]", e);
+      alert("削除でエラー: " + (e && e.message ? e.message : e));
+    }
+  }
+
   // 非承認（スタッフ未対応）はカードのボタンで気づけるように ⚠ 表示（最優先）
   const needsAttention = !!(stmt && stmt.approved !== true && stmt.rejected_at && stmt.staff_resolved !== true);
   const color = needsAttention ? C.red : done ? C.green : C.blue;
@@ -3365,13 +3399,19 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve, c
                     <div key={`${st.date}_${i}`} style={{ borderTop: i === 0 ? "none" : `1px solid ${C.border}`, paddingTop: i === 0 ? 0 : "10px", display: "grid", gap: "6px" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
                         <span style={{ fontSize: "12px", fontWeight: "700", color: C.text }}>{st.date}</span>
-                        {isApproved ? (
-                          <span style={{ fontSize: "11px", fontWeight: "700", color: C.green, background: `${C.green}15`, border: `1px solid ${C.green}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>承認済み{apprDate ? `（${apprDate}）` : ""}</span>
-                        ) : isRejected ? (
-                          <span style={{ fontSize: "11px", fontWeight: "700", color: C.red, background: `${C.red}15`, border: `1px solid ${C.red}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>非承認</span>
-                        ) : (
-                          <span style={{ fontSize: "11px", fontWeight: "700", color: C.muted, background: `${C.muted}15`, border: `1px solid ${C.muted}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>キャスト確認待ち</span>
-                        )}
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          {isApproved ? (
+                            <span style={{ fontSize: "11px", fontWeight: "700", color: C.green, background: `${C.green}15`, border: `1px solid ${C.green}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>承認済み{apprDate ? `（${apprDate}）` : ""}</span>
+                          ) : isRejected ? (
+                            <span style={{ fontSize: "11px", fontWeight: "700", color: C.red, background: `${C.red}15`, border: `1px solid ${C.red}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>非承認</span>
+                          ) : (
+                            <span style={{ fontSize: "11px", fontWeight: "700", color: C.muted, background: `${C.muted}15`, border: `1px solid ${C.muted}40`, borderRadius: "10px", padding: "3px 10px", whiteSpace: "nowrap" }}>キャスト確認待ち</span>
+                          )}
+                          <button onClick={() => deleteStatement(st)}
+                            style={{ fontSize: "11px", fontWeight: "700", color: C.muted, background: "transparent", border: `1.5px solid ${C.red}40`, borderRadius: "10px", padding: "3px 10px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                            削除
+                          </button>
+                        </div>
                       </div>
                       {isRejected && st.reject_reason && (
                         <p style={{ fontSize: "12px", color: C.red, margin: 0, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>理由：{st.reject_reason}</p>
@@ -4324,6 +4364,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                     courses={courses}
                     done={statementsDone.has(String(c.heaven_id || c.name))}
                     onUploaded={(id) => setStatementsDone((prev) => { const n = new Set(prev); n.add(String(id)); return n; })}
+                    onRemoved={(id) => setStatementsDone((prev) => { const n = new Set(prev); n.delete(String(id)); return n; })}
                     stmt={stmtStatus.get(String(c.heaven_id || c.name))}
                     stmtErr={stmtActionError[c.heaven_id || c.name]}
                     onResolve={(st, resolved) => setStaffResolved(c.heaven_id || c.name, st, resolved)}
