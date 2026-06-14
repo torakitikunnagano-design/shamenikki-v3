@@ -5155,6 +5155,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
   const [rows, setRows] = useState([]);        // { name, sendable, status, msg }
   const [progress, setProgress] = useState(null); // { current, total, name }
   const [summary, setSummary] = useState(null);
+  const [checking, setChecking] = useState(false); // 本日完了チェック（送信なし）実行中フラグ
 
   const updateRow = (name, patch) =>
     setRows((prev) => prev.map((r) => (r.name === name ? { ...r, ...patch } : r)));
@@ -5222,6 +5223,50 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
     setRunning(false);
   }
 
+  // 送信せず残数だけ読んで「本日完了」を反映（自己投稿の子も拾う）。start() と同型の直列ループ。
+  async function checkStatus() {
+    setChecking(true);
+    setSummary(null);
+
+    // ID/パスあり＝チェック対象。無い子は最初からスキップ表示
+    const init = todayCasts.map((c) => {
+      const sendable = !!(c.heaven_id && c.heaven_pass);
+      return { name: c.name, sendable, status: sendable ? "pending" : "skip", msg: sendable ? "" : "スキップ（要ID設定）" };
+    });
+    setRows(init);
+
+    const targets = todayCasts.filter((c) => c.heaven_id && c.heaven_pass);
+    for (let i = 0; i < targets.length; i++) {
+      const c = targets[i];
+      const castId = c.heaven_id || c.name; // 保存/読み出しキーは既存と完全一致
+      updateRow(c.name, { status: "sending", msg: "確認中…" });
+      try {
+        const res = await fetch("/api/mitene-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ heavenId: c.heaven_id, heavenPass: c.heaven_pass }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          updateRow(c.name, { status: "error", msg: data.error || "確認に失敗しました" });
+        } else if (data.usedUp === true) {
+          saveMiteneRemaining(castId, 0); // 使い切り＝本日完了
+          updateRow(c.name, { status: "done", msg: "本日完了（使い切り）" });
+        } else if (typeof data.remaining === "number" && Number.isFinite(data.remaining)) {
+          saveMiteneRemaining(castId, data.remaining);
+          updateRow(c.name, { status: "done", msg: data.remaining >= 1 ? `残り${data.remaining}回` : "本日完了" });
+        } else {
+          // remaining も usedUp も取れない → 触らない（空白のまま）
+          updateRow(c.name, { status: "error", msg: "状態を取得できませんでした" });
+        }
+      } catch (e) {
+        updateRow(c.name, { status: "error", msg: "サーバーに接続できませんでした: " + e.message });
+      }
+    }
+
+    setChecking(false);
+  }
+
   const badge = (txt, color) => (
     <span style={{ fontSize: "10px", fontWeight: "700", color, background: `${color}15`, padding: "2px 8px", borderRadius: "10px", whiteSpace: "nowrap" }}>{txt}</span>
   );
@@ -5268,6 +5313,13 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
           disabled={startDisabled}
           style={{ width: "100%", padding: "13px", borderRadius: "14px", border: "none", background: startDisabled ? C.muted : C.accent2, color: "white", fontWeight: "700", fontSize: "14px", cursor: startDisabled ? "not-allowed" : "pointer", opacity: startDisabled ? 0.7 : 1 }}>
           {running ? "送信中…" : "💌 一括送信スタート"}
+        </button>
+
+        <button
+          onClick={checkStatus}
+          disabled={running || checking || todayCasts.length === 0}
+          style={{ width: "100%", marginTop: "10px", padding: "11px", borderRadius: "14px", border: `1.5px solid ${C.accent2}55`, background: "transparent", color: C.accent2, fontWeight: "700", fontSize: "13px", cursor: (running || checking || todayCasts.length === 0) ? "not-allowed" : "pointer", opacity: (running || checking || todayCasts.length === 0) ? 0.6 : 1 }}>
+          {checking ? "確認中…" : "🔍 本日完了チェック（送信なし）"}
         </button>
 
         {progress && (
