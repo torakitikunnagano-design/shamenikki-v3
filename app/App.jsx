@@ -4130,12 +4130,14 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     <div style={{ display: "grid", gap: "16px" }}>
       <Header title="キャスト管理" sub="得意・苦手分析と成長サポート" color={C.green} />
 
-      {/* 更新中オーバーレイ（リロード相当の体感。最低500ms表示。ログアウトはしない） */}
-      {refreshing && (
+      {/* 更新中/同期中オーバーレイ（リロード相当の体感。ログアウトはしない） */}
+      {(refreshing || syncLoading !== null) && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px" }}>
           <style>{`@keyframes shamenikkiSpin { to { transform: rotate(360deg); } }`}</style>
           <div style={{ width: "44px", height: "44px", borderRadius: "50%", border: `4px solid ${C.green}40`, borderTopColor: C.green, animation: "shamenikkiSpin 0.8s linear infinite" }} />
-          <p style={{ color: "white", fontWeight: "700", fontSize: "15px", margin: 0 }}>更新中…</p>
+          <p style={{ color: "white", fontWeight: "700", fontSize: "15px", margin: 0 }}>
+            {syncLoading === "casts" ? "キャスト同期中…" : syncLoading === "shifts" ? "出勤同期中…" : syncLoading !== null ? "同期中…" : "更新中…"}
+          </p>
         </div>
       )}
 
