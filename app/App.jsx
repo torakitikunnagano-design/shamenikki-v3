@@ -5285,11 +5285,13 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
           {displayRows.map((r) => {
             const rc = todayCasts.find((x) => x.name === r.name);
             const rem = getMiteneRemaining(rc ? (rc.heaven_id || rc.name) : r.name);
+            // 「本日完了」表示（remaining>=1 でない＝ miteneRemainingLabel の else 分岐）だけ赤字で目立たせる
+            const remDone = rem && !(typeof rem.remaining === "number" && Number.isFinite(rem.remaining) && rem.remaining >= 1);
             return (
             <div key={r.name} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "10px", border: `1px solid ${C.border}`, background: C.surface }}>
               <span style={{ fontWeight: "700", fontSize: "13px", color: C.text, minWidth: "64px" }}>{r.name}</span>
               {r.sendable ? badge("送信可", C.green) : badge("要ID設定（スキップ）", C.muted)}
-              {rem && <span style={{ fontSize: "10px", color: C.muted, fontWeight: "700", whiteSpace: "nowrap" }}>{miteneRemainingLabel(rem)}</span>}
+              {rem && <span style={{ fontSize: "10px", color: remDone ? C.red : C.muted, fontWeight: "700", whiteSpace: "nowrap" }}>{miteneRemainingLabel(rem)}</span>}
               {r.msg && <span style={{ fontSize: "11px", color: statusColor[r.status] || C.muted, lineHeight: 1.35, flex: 1 }}>{r.msg}</span>}
             </div>
             );
