@@ -2861,18 +2861,27 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                       <div style={{ marginBottom: "10px", border: `1px solid ${C.border}`, borderRadius: "12px", padding: "12px", display: "grid", gap: "8px", background: "#fff" }}>
                         {bd.sessions.length > 0 && (
                           <div style={{ display: "grid", gap: "4px" }}>
-                            {bd.sessions.map((s2, j) => (
-                              <p key={j} style={{ fontSize: "12px", color: C.text, margin: 0, lineHeight: 1.7 }}>
-                                <span style={{ fontWeight: "700" }}>{j + 1}本目</span>
-                                {Number(s2.course_min) ? `　コース${s2.course_min}分` : ""}
-                                {s2.shimei ? `　${s2.shimei}` : ""}
-                                {Number(s2.fee) ? `　金額${yen(s2.fee)}円` : ""}
-                                {Number(s2.shimei_ryou) ? `　指名料${yen(s2.shimei_ryou)}円` : ""}
-                                {Number(s2.ext_fee) ? `　延長料${yen(s2.ext_fee)}円` : ""}
-                                {Number(s2.op) ? `　OP${yen(s2.op)}円` : ""}
-                                <span style={{ fontWeight: "800", color: C.text }}>　小計{yen((Number(s2.fee)||0)+(Number(s2.shimei_ryou)||0)+(Number(s2.ext_fee)||0)+(Number(s2.op)||0))}円</span>
-                              </p>
-                            ))}
+                            {bd.sessions.map((s2, j) => {
+                              const sub = (Number(s2.fee)||0)+(Number(s2.shimei_ryou)||0)+(Number(s2.ext_fee)||0)+(Number(s2.op)||0);
+                              return (
+                              <div key={j} style={{ display: "grid", gap: "2px" }}>
+                                {/* 1段目: 見出し */}
+                                <p style={{ fontSize: "12px", color: C.text, margin: 0, lineHeight: 1.5 }}>
+                                  <span style={{ fontWeight: "700" }}>{j + 1}本目</span>
+                                  {Number(s2.course_min) ? `　コース${s2.course_min}分` : ""}
+                                  {s2.shimei ? `　${s2.shimei}` : ""}
+                                </p>
+                                {/* 2段目: 金額内訳（スマホ幅で自然折り返し） */}
+                                <p style={{ fontSize: "12px", color: C.text, margin: 0, lineHeight: 1.6 }}>
+                                  {Number(s2.fee) ? `金額${yen(s2.fee)}円　` : ""}
+                                  {Number(s2.shimei_ryou) ? `指名料${yen(s2.shimei_ryou)}円　` : ""}
+                                  {Number(s2.ext_fee) ? `延長料${yen(s2.ext_fee)}円　` : ""}
+                                  {Number(s2.op) ? `OP${yen(s2.op)}円　` : ""}
+                                  <span style={{ fontWeight: "800" }}>小計{yen(sub)}円</span>
+                                </p>
+                              </div>
+                              );
+                            })}
                           </div>
                         )}
                         <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "8px", display: "grid", gap: "3px" }}>
@@ -3466,18 +3475,27 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve, c
                           <div style={{ display: "grid", gap: "6px" }}>
                             {bd.sessions.length > 0 && (
                               <div style={{ display: "grid", gap: "4px" }}>
-                                {bd.sessions.map((s2, j) => (
-                                  <p key={j} style={{ fontSize: "12px", color: C.text, margin: 0, lineHeight: 1.7 }}>
-                                    <span style={{ fontWeight: "700" }}>{j + 1}本目</span>
-                                    {Number(s2.course_min) ? `　コース${s2.course_min}分` : ""}
-                                    {s2.shimei ? `　${s2.shimei}` : ""}
-                                    {Number(s2.fee) ? `　金額${yen(s2.fee)}円` : ""}
-                                    {Number(s2.shimei_ryou) ? `　指名料${yen(s2.shimei_ryou)}円` : ""}
-                                    {Number(s2.ext_fee) ? `　延長料${yen(s2.ext_fee)}円` : ""}
-                                    {Number(s2.op) ? `　OP${yen(s2.op)}円` : ""}
-                                    <span style={{ fontWeight: "800", color: C.text }}>　小計{yen((Number(s2.fee)||0)+(Number(s2.shimei_ryou)||0)+(Number(s2.ext_fee)||0)+(Number(s2.op)||0))}円</span>
-                                  </p>
-                                ))}
+                                {bd.sessions.map((s2, j) => {
+                                  const sub = (Number(s2.fee)||0)+(Number(s2.shimei_ryou)||0)+(Number(s2.ext_fee)||0)+(Number(s2.op)||0);
+                                  return (
+                                  <div key={j} style={{ display: "grid", gap: "2px" }}>
+                                    {/* 1段目: 見出し */}
+                                    <p style={{ fontSize: "12px", color: C.text, margin: 0, lineHeight: 1.5 }}>
+                                      <span style={{ fontWeight: "700" }}>{j + 1}本目</span>
+                                      {Number(s2.course_min) ? `　コース${s2.course_min}分` : ""}
+                                      {s2.shimei ? `　${s2.shimei}` : ""}
+                                    </p>
+                                    {/* 2段目: 金額内訳（スマホ幅で自然折り返し） */}
+                                    <p style={{ fontSize: "12px", color: C.text, margin: 0, lineHeight: 1.6 }}>
+                                      {Number(s2.fee) ? `金額${yen(s2.fee)}円　` : ""}
+                                      {Number(s2.shimei_ryou) ? `指名料${yen(s2.shimei_ryou)}円　` : ""}
+                                      {Number(s2.ext_fee) ? `延長料${yen(s2.ext_fee)}円　` : ""}
+                                      {Number(s2.op) ? `OP${yen(s2.op)}円　` : ""}
+                                      <span style={{ fontWeight: "800" }}>小計{yen(sub)}円</span>
+                                    </p>
+                                  </div>
+                                  );
+                                })}
                               </div>
                             )}
                             <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "6px", display: "grid", gap: "3px" }}>
