@@ -2698,7 +2698,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
     let active = true;
     (async () => {
       const { data, error } = await supabase.from("salary_statements")
-        .select("date, image_path, approved, approved_at, rejected_at, reject_reason, uploaded_at")
+        .select("date, approved, approved_at, rejected_at, reject_reason, uploaded_at")
         .eq("store_id", getActiveStoreId())
         .eq("cast_id", castId)
         .order("date", { ascending: false });
@@ -2734,19 +2734,6 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
           }
         }
       } catch (e) { console.error("給料内訳取得例外:", e); }
-      // 各 image_path の署名付きURLを並列作成（statements は非公開バケット）。個別失敗はログして続行（#11）
-      const withImg = (data || []).filter((row) => row.image_path); // image_path が無い行は画像なし扱い
-      const signedResults = await Promise.all(withImg.map((row) =>
-        supabase.storage.from("statements").createSignedUrl(row.image_path, 3600)
-          .then(({ data: signed, error: signErr }) => {
-            if (signErr) { console.error("署名URL作成失敗:", signErr); return null; }
-            return signed?.signedUrl ? { path: row.image_path, url: signed.signedUrl } : null;
-          })
-          .catch((e) => { console.error("署名URL作成失敗:", e); return null; })
-      ));
-      const urls = {};
-      signedResults.filter(Boolean).forEach((r) => { urls[r.path] = r.url; });
-      if (active) setStatementUrls(urls);
     })();
     return () => { active = false; };
   }, [castId]);
@@ -2827,7 +2814,6 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
         ) : (
           <div style={{ display: "grid", gap: "16px" }}>
             {statements.map((st, i) => {
-              const url = st.image_path ? statementUrls[st.image_path] : null;
               const approvedDate = st.approved_at ? String(st.approved_at).slice(0, 10) : "";
               const isApproved = st.approved === true;
               const isRejected = !isApproved && !!st.rejected_at;
@@ -2911,12 +2897,10 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                       </div>
                     );
                   })()}
-                  {/* 内訳がある日は写真を出さない（内訳が正） */}
-                  {!bd && (url ? (
-                    <img src={url} alt={`${st.date} の明細`} style={{ width: "100%", borderRadius: "12px", border: `1px solid ${C.border}`, display: "block" }} />
-                  ) : (
-                    <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>画像なし</p>
-                  ))}
+                  {/* 内訳が無い日は明細データなし表示（写真アップは廃止） */}
+                  {!bd && (
+                    <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>明細データがありません</p>
+                  )}
 
                   {/* 非承認の理由表示 */}
                   {isRejected && st.reject_reason && (
@@ -3331,46 +3315,13 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve, c
     loadHistory();
   }, [open, castId]);
 
-  async function handleFile(e) {
-    const file = e.target.files && e.target.files[0];
-    if (fileRef.current) fileRef.current.value = ""; // 同じファイル再選択を可能に
-    if (!file) return;
-    if (!castId) { alert("このキャストにはIDが無いためアップロードできません（キャスト同期でIDを取得してください）"); return; }
-    setUploading(true); setErr(null);
-    try {
-      const store = getActiveStoreId();
-      const safeCast = String(castId).replace(/[^a-zA-Z0-9_-]/g, "_"); // パス安全化（日本語名対策）
-      const m = (file.name || "").match(/\.([a-zA-Z0-9]+)$/);
-      const ext = (m ? m[1] : (file.type.includes("pdf") ? "pdf" : file.type.includes("png") ? "png" : "jpg")).toLowerCase();
-      const path = `${store}/${safeCast}/${date}_${Date.now()}.${ext}`;
-
-      // 1) Storage へアップロード（非公開バケット statements）
-      const up = await supabase.storage.from("statements").upload(path, file, { upsert: true, contentType: file.type || undefined });
-      if (up.error) { setErr("アップロード失敗"); setUploading(false); alert("明細アップロードに失敗しました: " + up.error.message); return; }
-
-      // 2) salary_statements に upsert（主キー store_id, cast_id, date）
-      const { error: dbErr } = await supabase.from("salary_statements").upsert(
-        { store_id: store, cast_id: castId, date, image_path: path, uploaded_at: new Date().toISOString() },
-        { onConflict: "store_id,cast_id,date" }
-      );
-      if (dbErr) { setErr("保存失敗"); setUploading(false); alert("明細情報の保存に失敗しました: " + dbErr.message); return; }
-
-      if (onUploaded) onUploaded(castId);
-    } catch (e) {
-      setErr("エラー");
-      alert("明細アップロードでエラー: " + (e && e.message ? e.message : e));
-    }
-    setUploading(false);
-  }
-
   // 非承認（スタッフ未対応）はカードのボタンで気づけるように ⚠ 表示（最優先）
   const needsAttention = !!(stmt && stmt.approved !== true && stmt.rejected_at && stmt.staff_resolved !== true);
   const color = needsAttention ? C.red : done ? C.green : C.blue;
-  const label = uploading ? "アップ中…" : needsAttention ? "明細UP ⚠" : (done ? "明細UP ✓済" : "明細UP");
+  const label = needsAttention ? "明細UP ⚠" : (done ? "明細UP ✓済" : "明細UP");
 
   return (
     <>
-      <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={handleFile} style={{ display: "none" }} />
       <button
         onClick={() => setOpen(true)}
         style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${color}60`, background: `${color}10`, color: uploading ? C.muted : color, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
@@ -3384,40 +3335,14 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve, c
               <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "16px", lineHeight: 1 }}>✕</button>
             </div>
 
-            {/* a) 明細アップロード */}
-            <div style={{ border: `1.5px solid ${C.border}`, borderRadius: "12px", padding: "12px", display: "grid", gap: "8px" }}>
-              <p style={{ fontSize: "13px", fontWeight: "700", color: C.text, margin: 0 }}>明細アップロード（本日 {date}）</p>
-              {done ? (
-                <>
-                  <p style={{ fontSize: "12px", fontWeight: "700", color: C.green, margin: 0 }}>✓済（本日アップ済み）</p>
-                  <button
-                    onClick={() => { if (!uploading && fileRef.current) fileRef.current.click(); }}
-                    disabled={uploading}
-                    style={{ padding: "8px", borderRadius: "10px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: uploading ? C.muted : C.yellow, fontWeight: "700", fontSize: "12px", cursor: uploading ? "not-allowed" : "pointer" }}>
-                    {uploading ? "アップ中…" : "差し替え"}
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={() => { if (!uploading && fileRef.current) fileRef.current.click(); }}
-                  disabled={uploading}
-                  style={{ padding: "10px", borderRadius: "10px", border: `1.5px solid ${C.blue}60`, background: `${C.blue}10`, color: uploading ? C.muted : C.blue, fontWeight: "700", fontSize: "12px", cursor: uploading ? "not-allowed" : "pointer" }}>
-                  {uploading ? "アップ中…" : "画像を選択してアップ"}
-                </button>
-              )}
-              {err && (
-                <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: 0 }}>{err}</p>
-              )}
-            </div>
-
-            {/* a-2) 給料入力フォーム（スタッフがキャストの代わりに入力して送信）。出勤時間カードは出さない */}
+            {/* 給料入力フォーム（スタッフがキャストの代わりに入力して送信）。出勤時間カードは出さない */}
             <SalaryInputForm
               castId={castId}
               date={getBusinessToday()}
               courses={courses}
               startTime=""
               endTime=""
-              onSaved={loadHistory}
+              onSaved={() => { loadHistory(); onUploaded?.(castId); }}
               saveLabel="キャストに送信"
               savedLabel="送信しました ✓"
             />
@@ -3715,18 +3640,18 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const todayKey = getBusinessTodayKey();
   const todayISO = getBusinessToday();
 
-  // 本日の明細アップロード済み cast_id 集合（salary_statements を読んで「済」判定。開き直しても保つ）
+  // 本日の明細「送信済み」cast_id 集合（salary_statements に当日の送信レコードがあれば「済」。開き直しても保つ）
   const [statementsDone, setStatementsDone] = useState(() => new Set());
   useEffect(() => {
     let active = true;
     (async () => {
       try {
         const { data, error } = await supabase.from("salary_statements")
-          .select("cast_id, image_path")
+          .select("cast_id")
           .eq("store_id", getActiveStoreId())
           .eq("date", todayISO);
         if (!active || error || !Array.isArray(data)) return;
-        setStatementsDone(new Set(data.filter((r) => r.image_path).map((r) => String(r.cast_id))));
+        setStatementsDone(new Set(data.map((r) => String(r.cast_id))));
       } catch {}
     })();
     return () => { active = false; };
