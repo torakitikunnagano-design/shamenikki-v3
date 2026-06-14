@@ -314,6 +314,8 @@ function toSupabaseRecord(rec, castId) {
     dorm:       rec.dorm      || 0,
     misc:       rec.misc      || 0,
     transport:  rec.transport || 0,
+    other_amt:  rec.otherAmt   || 0,
+    other_label: rec.otherLabel || "",
     take_home:  rec.takeHome  || 0,
   };
 }
@@ -862,6 +864,8 @@ function App() {
                 dorm:      r.dorm,
                 misc:      r.misc,
                 transport: r.transport,
+                otherAmt:   r.other_amt,
+                otherLabel: r.other_label,
                 takeHome:  r.take_home,
                 hons,
               });
@@ -2352,6 +2356,8 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   const [dorm, setDorm] = useState("");
   const [misc, setMisc] = useState("");
   const [transport, setTransport] = useState("");
+  const [otherLabel, setOtherLabel] = useState(""); // その他控除の名称（自由入力・店舗ごと）
+  const [otherAmt, setOtherAmt] = useState("");     // その他控除の金額（数値・今回はtakeHomeに未反映）
   const [saved, setSaved] = useState(false);
   const [slipLoading, setSlipLoading] = useState(false);
   const [slipOcrDone, setSlipOcrDone] = useState(false);
@@ -2568,6 +2574,8 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
       dorm: Number(dorm) || 0,
       misc: Number(misc) || 0,
       transport: Number(transport) || 0,
+      otherAmt: Number(otherAmt) || 0,
+      otherLabel: otherLabel || "",
       takeHome,
       hons: activeHons,
     };
@@ -2576,7 +2584,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
     localStorage.setItem(skey(storageKey), JSON.stringify(next)); // 従来通りlocalStorageに保存（店舗で名前空間化）
     setHons(Array.from({ length: 12 }, mkHon));
     if (!staffShift) { setStartTime(""); setEndTime(""); }
-    setGross(""); setDorm(""); setMisc(""); setTransport("");
+    setGross(""); setDorm(""); setMisc(""); setTransport(""); setOtherAmt(""); setOtherLabel("");
     setSlipOcrDone(false);
 
     // Supabase sync：親レコードを先にupsert → 既存sessionsをdelete → 再挿入
@@ -2902,6 +2910,14 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
           </Field>
           <Field label="交通費（円）">
             <input type="number" min="0" value={transport} onChange={(e) => setTransport(e.target.value)} placeholder="0" style={inp} />
+          </Field>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "10px", marginBottom: "14px" }}>
+          <Field label="その他（名称）">
+            <input type="text" value={otherLabel} onChange={(e) => setOtherLabel(e.target.value)} placeholder="例：釣銭立替金" style={inp} />
+          </Field>
+          <Field label="その他（円）">
+            <input type="number" min="0" value={otherAmt} onChange={(e) => setOtherAmt(e.target.value)} placeholder="0" style={inp} />
           </Field>
         </div>
         <div style={{ background: "linear-gradient(135deg, #fff0f8, #ffe8f5)", border: `2px solid ${C.accent}40`, borderRadius: "14px", padding: "18px", textAlign: "center", marginBottom: "14px" }}>
