@@ -4398,7 +4398,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
 
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
         <button
-          onClick={async () => { if (refreshing || syncLoading !== null) return; setRefreshing(true); setRefreshKey((n) => n + 1); try { await Promise.all([ Promise.resolve(onRefresh?.()), new Promise((r) => setTimeout(r, 500)) ]); } finally { setRefreshing(false); setRefreshToast(true); setTimeout(() => setRefreshToast(false), 1500); } }}
+          onClick={async () => { if (refreshing || syncLoading !== null) return; setRefreshing(true); setRefreshKey((n) => n + 1); try { await Promise.all([ Promise.resolve(onRefresh?.()), new Promise((r) => setTimeout(r, 1500)) ]); } finally { setRefreshing(false); setRefreshToast(true); setTimeout(() => setRefreshToast(false), 1500); } }}
           disabled={refreshing || syncLoading !== null}
           style={{ padding: "8px 16px", borderRadius: "20px", border: `1.5px solid ${C.muted}`, background: "transparent", color: C.muted, fontWeight: "700", cursor: (refreshing || syncLoading !== null) ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
           {refreshing ? "更新中…" : "🔄 更新"}
