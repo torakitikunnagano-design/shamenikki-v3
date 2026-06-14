@@ -615,6 +615,85 @@ function App() {
     } catch (e) { console.error("refreshCasts 例外:", e); }
   }
 
+  // 「更新」ボタン用: scores を読み直して setScores するだけ（シード/書き込みなし）。
+  // initScores の「Supabaseにデータあり」分岐(653–664)相当。空読み/エラーは return で一覧を壊さない。
+  async function refreshScores() {
+    try {
+      const { data, error } = await supabase.from("scores").select("*").eq("store_id", getActiveStoreId()).order("posted_at", { ascending: false });
+      if (error) { console.error("refreshScores 取得失敗:", error.message, error.details, error.hint); return; }
+      if (!Array.isArray(data) || data.length === 0) return; // 空読みでは scores を壊さない
+      setScores(data.map((s) => ({
+        id:        s.id,
+        cast_name: s.cast_name,
+        diary:     s.diary,
+        result:    s.result,
+        posted_at: s.posted_at,
+        has_image: s.has_image,
+        score:     s.score,
+      })));
+    } catch (e) { console.error("refreshScores 例外:", e); }
+  }
+
+  // 「更新」ボタン用: settings を読み直して setSettings するだけ（シード/書き込みなし）。
+  // initSettings の②(517–528)相当。①の seed upsert は呼ばない。.single() は0件で error → return。
+  async function refreshSettings() {
+    try {
+      const { data, error } = await supabase.from("settings").select("*").eq("store_id", getActiveStoreId()).eq("id", 1).single();
+      if (error) { console.error("refreshSettings 取得失敗:", error.message, error.details, error.hint); return; }
+      if (!data) return;
+      setSettings({
+        daily_post_goal:  data.daily_post_goal,
+        repeat_limit_min: data.repeat_limit_min,
+        min_text_length:  data.min_text_length,
+        image_required:   data.image_required,
+        before_work_min:  data.before_work_min,
+        after_work_min:   data.after_work_min,
+        show_guarantee:   data.show_guarantee,
+      });
+    } catch (e) { console.error("refreshSettings 例外:", e); }
+  }
+
+  // 「更新」ボタン用: courses を読み直して setCourses するだけ（シード/書き込みなし）。
+  // initCourses の「Supabaseにデータあり」分岐(461–463)相当。空読み/エラーは return。
+  async function refreshCourses() {
+    try {
+      const { data, error } = await supabase.from("courses").select("*").eq("store_id", getActiveStoreId()).order("minutes");
+      if (error) { console.error("refreshCourses 取得失敗:", error.message, error.details, error.hint); return; }
+      if (!Array.isArray(data) || data.length === 0) return; // 空読みでは courses を壊さない
+      setCourses(data.map((r) => ({ id: r.id, minutes: r.minutes })));
+    } catch (e) { console.error("refreshCourses 例外:", e); }
+  }
+
+  // 「更新」ボタン用: shifts を読み直して setShifts するだけ（シード/書き込みなし）。
+  // initShifts の「Supabaseにデータあり」分岐(696–710)相当。※正規化移行の upsert/delete(714–734)は除外。
+  // マージ方向は現状維持＝prev優先（{...rebuilt, ...prev}）でローカルの最新(doSync由来)を上書きしない。
+  async function refreshShifts() {
+    try {
+      const { data, error } = await supabase.from("shifts").select("*").eq("store_id", getActiveStoreId());
+      if (error) { console.error("refreshShifts 取得失敗:", error.message, error.details, error.hint); return; }
+      if (!Array.isArray(data) || data.length === 0) return; // 空読みでは shifts を壊さない
+      const rebuilt = {};
+      data.forEach((row) => {
+        const clean = normalizeName(row.cast_name);
+        if (!clean) return;
+        rebuilt[`${clean}_${row.date}`] = { startTime: row.start_time, endTime: row.end_time };
+      });
+      setShifts((prev) => ({ ...rebuilt, ...prev }));
+    } catch (e) { console.error("refreshShifts 例外:", e); }
+  }
+
+  // 「更新」ボタン用: CastPage が表示する DB 由来データを丸ごと最新化（リロードなし）。
+  // 1本失敗しても他を反映するため allSettled。明細(statementsDone/stmtStatus)は CastPage 側の refreshKey が担当。
+  async function refreshAllForCastPage() {
+    await Promise.allSettled([
+      refreshCasts(),
+      refreshScores(),
+      refreshShifts(),
+      refreshSettings(),
+      refreshCourses(),
+    ]);
+  }
+
   // Supabase scores 初期化（起動時1回）
   useEffect(() => {
     async function initScores() {
@@ -1085,7 +1164,7 @@ function App() {
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} shifts={shifts} cutDays={cutDays} />}
-                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} settings={settings} courses={courses} onRefresh={refreshCasts} />}
+                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} settings={settings} courses={courses} onRefresh={refreshAllForCastPage} />}
                 {mode === "admin" && page === "bulkmitene" && <BulkMitenePage casts={casts} shifts={shifts} syncConfig={syncConfig} />}
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
