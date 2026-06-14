@@ -4304,7 +4304,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         <button
           onClick={async () => { if (refreshing || syncLoading !== null) return; setRefreshing(true); setRefreshKey((n) => n + 1); try { await onRefresh?.(); } finally { setRefreshing(false); } }}
           disabled={refreshing || syncLoading !== null}
-          style={{ padding: "8px 16px", borderRadius: "20px", border: `1.5px solid ${C.border}`, background: "transparent", color: C.muted, fontWeight: "700", cursor: (refreshing || syncLoading !== null) ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
+          style={{ padding: "8px 16px", borderRadius: "20px", border: `1.5px solid ${C.muted}`, background: "transparent", color: C.muted, fontWeight: "700", cursor: (refreshing || syncLoading !== null) ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
           {refreshing ? "更新中…" : "🔄 更新"}
         </button>
         <button onClick={() => doSync("casts")} disabled={syncLoading !== null} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.blue}`, background: syncLoading !== null ? `${C.blue}08` : `${C.blue}15`, color: C.blue, fontWeight: "700", cursor: syncLoading !== null ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
