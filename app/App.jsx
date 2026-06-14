@@ -2950,37 +2950,27 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
         )}
       </div>
 
-      {/* 給料入力フォーム（共通部品）。出勤時間カードは shiftSlot で OCRカードと接客行の間に差し込む */}
-      <SalaryInputForm
-        castId={castId}
-        date={today}
-        courses={courses}
-        startTime={startTime}
-        endTime={endTime}
-        onSaved={handleSaved}
-        shiftSlot={
-          <div style={{ ...card }}>
-            <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>TODAY {today}</p>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-              <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700" }}>出勤時間</label>
-              {staffShift && (
-                <span style={{ fontSize: "10px", color: C.blue, fontWeight: "700", background: `${C.blue}15`, padding: "2px 8px", borderRadius: "10px" }}>スタッフ設定済み</span>
-              )}
-            </div>
-            {staffShift ? (
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px 14px", borderRadius: "12px", border: `1.5px solid ${C.blue}40`, background: `${C.blue}08` }}>
-                <span style={{ flex: 1, fontSize: "15px", fontWeight: "700", color: C.text, textAlign: "center" }}>{startTime || "—"}</span>
-                <span style={{ color: C.muted, fontSize: "13px" }}>〜</span>
-                <span style={{ flex: 1, fontSize: "15px", fontWeight: "700", color: C.text, textAlign: "center" }}>{endTime || "—"}</span>
-              </div>
-            ) : (
-              <div style={{ padding: "12px 14px", borderRadius: "12px", border: `1.5px dashed ${C.border}`, background: `${C.muted}08`, textAlign: "center" }}>
-                <p style={{ color: C.muted, fontSize: "12px", margin: 0 }}>スタッフが出勤時間を設定するまでお待ちください</p>
-              </div>
-            )}
+      {/* 出勤時間（スタッフ設定済みの読み取り専用表示。入力フォームはスタッフ側モーダルへ移行） */}
+      <div style={{ ...card }}>
+        <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>TODAY {today}</p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+          <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700" }}>出勤時間</label>
+          {staffShift && (
+            <span style={{ fontSize: "10px", color: C.blue, fontWeight: "700", background: `${C.blue}15`, padding: "2px 8px", borderRadius: "10px" }}>スタッフ設定済み</span>
+          )}
+        </div>
+        {staffShift ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px 14px", borderRadius: "12px", border: `1.5px solid ${C.blue}40`, background: `${C.blue}08` }}>
+            <span style={{ flex: 1, fontSize: "15px", fontWeight: "700", color: C.text, textAlign: "center" }}>{startTime || "—"}</span>
+            <span style={{ color: C.muted, fontSize: "13px" }}>〜</span>
+            <span style={{ flex: 1, fontSize: "15px", fontWeight: "700", color: C.text, textAlign: "center" }}>{endTime || "—"}</span>
           </div>
-        }
-      />
+        ) : (
+          <div style={{ padding: "12px 14px", borderRadius: "12px", border: `1.5px dashed ${C.border}`, background: `${C.muted}08`, textAlign: "center" }}>
+            <p style={{ color: C.muted, fontSize: "12px", margin: 0 }}>スタッフが出勤時間を設定するまでお待ちください</p>
+          </div>
+        )}
+      </div>
 
       {/* 履歴 */}
       {records.length > 0 && (
