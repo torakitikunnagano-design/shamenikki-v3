@@ -331,6 +331,7 @@ function toSupabaseSessions(rec) {
     op:          Number(h.op)          || 0,
     ext_count:   Number(h.extCount)   || 0,
     ext_min:     Number(h.extMin)     || 0,
+    ext_fee:     Number(h.extFee)     || 0,
   }));
 }
 
@@ -842,6 +843,7 @@ function App() {
                   op:         String(s.op),
                   extCount:   String(s.ext_count),
                   extMin:     String(s.ext_min),
+                  extFee:     String(s.ext_fee ?? ""),
                 }));
               castMap[r.cast_id].push({
                 id:        r.id,
@@ -2333,7 +2335,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
     try { return JSON.parse(localStorage.getItem(skey(storageKey))) || []; } catch { return []; }
   }
 
-  const mkHon = () => ({ courseMin: "", shimei: "", fee: "", shimeiRyou: "", op: "", extCount: "", extMin: "" });
+  const mkHon = () => ({ courseMin: "", shimei: "", fee: "", shimeiRyou: "", op: "", extCount: "", extMin: "", extFee: "" });
   const today = getBusinessToday();
   const [records, setRecords] = useState(loadRecords);
   const [startTime, setStartTime] = useState("");
@@ -2522,6 +2524,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
           op: String(Math.abs(s.op || 0) || ""),
           extCount: String(s.extCount || ""),
           extMin: String(s.extMin || ""),
+          extFee: "",
         };
       });
       setHons(newHons);
@@ -2850,7 +2853,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                 <input type="number" min="0" value={h.shimeiRyou} onChange={(e) => updateHon(i, "shimeiRyou", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
               </Field>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
               <Field label="OP（円）">
                 <input type="number" min="0" value={h.op} onChange={(e) => updateHon(i, "op", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
               </Field>
@@ -2859,6 +2862,9 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
               </Field>
               <Field label="延長（分）">
                 <input type="number" min="0" value={h.extMin} onChange={(e) => updateHon(i, "extMin", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              </Field>
+              <Field label="延長料（円）">
+                <input type="number" min="0" value={h.extFee} onChange={(e) => updateHon(i, "extFee", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
               </Field>
             </div>
           </div>
