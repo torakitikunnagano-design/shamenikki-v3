@@ -1057,7 +1057,7 @@ function App() {
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} shifts={shifts} cutDays={cutDays} />}
-                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} settings={settings} />}
+                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} settings={settings} courses={courses} />}
                 {mode === "admin" && page === "bulkmitene" && <BulkMitenePage casts={casts} shifts={shifts} syncConfig={syncConfig} />}
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
@@ -2334,7 +2334,7 @@ function TitlePage({ casts }) {
 //  - 保存後は onSaved(rec) で親へ通知（履歴更新・出勤時間リセット等は親が担当）
 //  - shiftSlot: 出勤時間カード等を「OCRカードと接客入力行の間」に差し込む任意スロット
 // ============================================================
-function SalaryInputForm({ castId, date, courses = [], startTime = "", endTime = "", onSaved, shiftSlot = null }) {
+function SalaryInputForm({ castId, date, courses = [], startTime = "", endTime = "", onSaved, shiftSlot = null, saveLabel = "記録を保存", savedLabel = "保存しました ✓" }) {
   const mkHon = () => ({ courseMin: "", shimei: "", fee: "", shimeiRyou: "", op: "", extCount: "", extMin: "", extFee: "" });
   const [hons, setHons] = useState(() => Array.from({ length: 12 }, mkHon));
   const [gross, setGross] = useState("");
@@ -2650,7 +2650,7 @@ function SalaryInputForm({ castId, date, courses = [], startTime = "", endTime =
           <p style={{ fontSize: "32px", fontWeight: "800", color: takeHome >= 0 ? C.text : C.red, margin: 0 }}>{fmtYen(takeHome)}</p>
           <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>総支給 {fmtYen(computedGross)} ＋ 交通費 {fmtYen(Number(transport)||0)} − 寮費 {fmtYen(Number(dorm)||0)} − 雑費 {fmtYen(Number(misc)||0)} − その他 {fmtYen(Number(otherAmt)||0)}</p>
         </div>
-        <Btn onClick={saveRecord} loading={false} label={saved ? "保存しました ✓" : "記録を保存"} color={saved ? C.green : C.accent} />
+        <Btn onClick={saveRecord} loading={false} label={saved ? savedLabel : saveLabel} color={saved ? C.green : C.accent} />
       </div>
     </>
   );
@@ -3278,7 +3278,7 @@ function MiteneButton({ cast }) {
 //  - 失敗時は必ず error を確認してアラート（握りつぶさない）
 //  - モーダル式: アップロード＋明細承認状況（stmt/stmtErr/onResolve は CastPage の stmtStatus 系を参照のみ）
 // ============================================================
-function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve }) {
+function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve, courses = [] }) {
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState(null);
   const [open, setOpen] = useState(false);
@@ -3410,6 +3410,18 @@ function StatementUpButton({ cast, done, onUploaded, stmt, stmtErr, onResolve })
                 <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: 0 }}>{err}</p>
               )}
             </div>
+
+            {/* a-2) 給料入力フォーム（スタッフがキャストの代わりに入力して送信）。出勤時間カードは出さない */}
+            <SalaryInputForm
+              castId={castId}
+              date={getBusinessToday()}
+              courses={courses}
+              startTime=""
+              endTime=""
+              onSaved={loadHistory}
+              saveLabel="キャストに送信"
+              savedLabel="送信しました ✓"
+            />
 
             {/* b) 明細承認状況（直近5件の履歴一覧。取得はモーダルを開いたときのみ） */}
             <div style={{ border: `1.5px solid ${C.border}`, borderRadius: "12px", padding: "12px", display: "grid", gap: "10px" }}>
@@ -3674,7 +3686,7 @@ function IdentityDocsButton({ cast }) {
 // ============================================================
 // キャスト管理
 // ============================================================
-function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, settings }) {
+function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, settings, courses = [] }) {
   const [modal, setModal] = useState(null);
   const [modalId, setModalId] = useState("");
   const [modalPass, setModalPass] = useState("");
@@ -4376,6 +4388,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   <MiteneButton cast={c} />
                   <StatementUpButton
                     cast={c}
+                    courses={courses}
                     done={statementsDone.has(String(c.heaven_id || c.name))}
                     onUploaded={(id) => setStatementsDone((prev) => { const n = new Set(prev); n.add(String(id)); return n; })}
                     stmt={stmtStatus.get(String(c.heaven_id || c.name))}
