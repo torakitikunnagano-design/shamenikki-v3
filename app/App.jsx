@@ -2499,9 +2499,9 @@ function SalaryInputForm({ castId, date, courses = [], startTime = "", endTime =
         }
       }
       // 承認待ちの明細レコード(salary_statements)も作る（写真UPなしでも「あなたの明細」に承認待ちで出す）。
-      // 再保存時は approved=null に戻して再び承認待ちにする。image_path は含めず既存写真を消さない。
+      // 再保存時は approved=false に戻して再び承認待ちにする。image_path は含めず既存写真を消さない。
       const { error: stmtErr } = await supabase.from("salary_statements").upsert(
-        { store_id: getActiveStoreId(), cast_id: castId, date, approved: null, approved_at: null, reject_reason: null, rejected_at: null, staff_resolved: false, staff_resolved_at: null, uploaded_at: new Date().toISOString() },
+        { store_id: getActiveStoreId(), cast_id: castId, date, approved: false, approved_at: null, reject_reason: null, rejected_at: null, staff_resolved: false, staff_resolved_at: null, uploaded_at: new Date().toISOString() },
         { onConflict: "store_id,cast_id,date" }
       );
       if (stmtErr) console.error("[salary save salary_statements upsert]", stmtErr.message, stmtErr.details, stmtErr.hint);
