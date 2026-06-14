@@ -2328,29 +2328,14 @@ function TitlePage({ casts }) {
 }
 
 // ============================================================
-// 給料記録
+// 給料入力フォーム（共通部品）: キャスト画面・スタッフ画面の両方から使える
+//  - castId / date を props で受け取り、loggedInCast や today を直接参照しない
+//  - 保存は salary_records / salary_sessions / salary_statements（承認待ち作成含む）一式
+//  - 保存後は onSaved(rec) で親へ通知（履歴更新・出勤時間リセット等は親が担当）
+//  - shiftSlot: 出勤時間カード等を「OCRカードと接客入力行の間」に差し込む任意スロット
 // ============================================================
-function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
-  const cast = casts.find((c) => c.name === loggedInCast);
-  const castId = cast?.heaven_id || loggedInCast || "";
-  const storageKey = `shamenikki_salary_${castId}`;
-
-  function loadRecords() {
-    try { return JSON.parse(localStorage.getItem(skey(storageKey))) || []; } catch { return []; }
-  }
-
+function SalaryInputForm({ castId, date, courses = [], startTime = "", endTime = "", onSaved, shiftSlot = null }) {
   const mkHon = () => ({ courseMin: "", shimei: "", fee: "", shimeiRyou: "", op: "", extCount: "", extMin: "", extFee: "" });
-  const today = getBusinessToday();
-  const [records, setRecords] = useState(loadRecords);
-  const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
-
-  const staffShift = shifts[`${loggedInCast}_${today}`] || null;
-
-  useEffect(() => {
-    if (staffShift?.startTime) setStartTime(staffShift.startTime);
-    if (staffShift?.endTime) setEndTime(staffShift.endTime);
-  }, [staffShift?.startTime, staffShift?.endTime]);
   const [hons, setHons] = useState(() => Array.from({ length: 12 }, mkHon));
   const [gross, setGross] = useState("");
   const [dorm, setDorm] = useState("");
@@ -2362,107 +2347,6 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   const [saved, setSaved] = useState(false);
   const [slipLoading, setSlipLoading] = useState(false);
   const [slipOcrDone, setSlipOcrDone] = useState(false);
-
-  // 明細表示（本人が自分の明細を閲覧）: salary_statements を取得し、非公開バケットの署名付きURLを作る
-  const [statements, setStatements] = useState([]);
-  const [statementUrls, setStatementUrls] = useState({}); // image_path → 署名付きURL
-  const [stmtBreakdowns, setStmtBreakdowns] = useState({}); // date → { rec: salary_records行, sessions: salary_sessions行[] }
-  const [stmtLoadError, setStmtLoadError] = useState(false); // 取得失敗をUIに出す（無言の空表示と区別する）
-  useEffect(() => {
-    if (!castId) return;
-    let active = true;
-    (async () => {
-      const { data, error } = await supabase.from("salary_statements")
-        .select("date, image_path, approved, approved_at, rejected_at, reject_reason, uploaded_at")
-        .eq("store_id", getActiveStoreId())
-        .eq("cast_id", castId)
-        .order("date", { ascending: false });
-      if (error) { console.error("明細取得失敗:", error); if (active) setStmtLoadError(true); return; }
-      if (!active) return;
-      setStmtLoadError(false);
-      setStatements(Array.isArray(data) ? data : []);
-      // 給料内訳（salary_records＋salary_sessions）を明細の日付でまとめて取得（in検索）
-      try {
-        const dates = (data || []).map((r) => r.date).filter(Boolean);
-        if (dates.length > 0) {
-          const { data: recs, error: recErr } = await supabase.from("salary_records")
-            .select("id, date, gross, dorm, misc, transport, other_amt, other_label, take_home")
-            .eq("store_id", getActiveStoreId())
-            .eq("cast_id", castId)
-            .in("date", dates);
-          if (recErr) {
-            console.error("給料内訳取得失敗:", recErr);
-          } else if (Array.isArray(recs) && recs.length > 0) {
-            const ids = recs.map((r) => r.id);
-            const { data: sess, error: sessErr } = await supabase.from("salary_sessions")
-              .select("salary_record_id, seq, course_min, shimei, fee, shimei_ryou, ext_fee, op")
-              .in("salary_record_id", ids)
-              .order("seq", { ascending: true });
-            if (sessErr) console.error("給料セッション取得失敗:", sessErr);
-            const byRec = {};
-            (sess || []).forEach((s2) => { (byRec[s2.salary_record_id] = byRec[s2.salary_record_id] || []).push(s2); });
-            // 同一日付に複数レコードがある場合は新しいid（保存時刻由来）を優先
-            const sorted = [...recs].sort((a, b) => Number(b.id) - Number(a.id));
-            const byDate = {};
-            sorted.forEach((r) => { if (!byDate[r.date]) byDate[r.date] = { rec: r, sessions: byRec[r.id] || [] }; });
-            if (active) setStmtBreakdowns(byDate);
-          }
-        }
-      } catch (e) { console.error("給料内訳取得例外:", e); }
-      // 各 image_path の署名付きURLを並列作成（statements は非公開バケット）。個別失敗はログして続行（#11）
-      const withImg = (data || []).filter((row) => row.image_path); // image_path が無い行は画像なし扱い
-      const signedResults = await Promise.all(withImg.map((row) =>
-        supabase.storage.from("statements").createSignedUrl(row.image_path, 3600)
-          .then(({ data: signed, error: signErr }) => {
-            if (signErr) { console.error("署名URL作成失敗:", signErr); return null; }
-            return signed?.signedUrl ? { path: row.image_path, url: signed.signedUrl } : null;
-          })
-          .catch((e) => { console.error("署名URL作成失敗:", e); return null; })
-      ));
-      const urls = {};
-      signedResults.filter(Boolean).forEach((r) => { urls[r.path] = r.url; });
-      if (active) setStatementUrls(urls);
-    })();
-    return () => { active = false; };
-  }, [castId]);
-
-  // 明細の承認/非承認（本人操作）。キーは store_id, cast_id, date。
-  const [rejectingDate, setRejectingDate] = useState(null); // 理由入力中の明細date（1件のみ開く）
-  const [rejectReason, setRejectReason] = useState("");
-  const [actionError, setActionError] = useState({}); // date → 保存エラーメッセージ
-  function patchStatement(date, patch) {
-    setStatements((prev) => prev.map((s) => (s.date === date ? { ...s, ...patch } : s)));
-  }
-  async function approveStatement(st) {
-    setActionError((e) => ({ ...e, [st.date]: "" }));
-    const nowIso = new Date().toISOString();
-    const { error } = await supabase.from("salary_statements")
-      .update({ approved: true, approved_at: nowIso, rejected_at: null, reject_reason: null })
-      .eq("store_id", getActiveStoreId()).eq("cast_id", castId).eq("date", st.date);
-    if (error) {
-      console.error("承認の保存失敗:", error);
-      setActionError((e) => ({ ...e, [st.date]: "保存に失敗しました。もう一度お試しください" }));
-      return;
-    }
-    patchStatement(st.date, { approved: true, approved_at: nowIso, rejected_at: null, reject_reason: null });
-  }
-  async function rejectStatement(st) {
-    const text = rejectReason.trim();
-    if (!text) return; // 理由が空なら送信しない
-    setActionError((e) => ({ ...e, [st.date]: "" }));
-    const nowIso = new Date().toISOString();
-    const { error } = await supabase.from("salary_statements")
-      .update({ approved: false, rejected_at: nowIso, reject_reason: text })
-      .eq("store_id", getActiveStoreId()).eq("cast_id", castId).eq("date", st.date);
-    if (error) {
-      console.error("非承認の保存失敗:", error);
-      setActionError((e) => ({ ...e, [st.date]: "保存に失敗しました。もう一度お試しください" }));
-      return;
-    }
-    patchStatement(st.date, { approved: false, rejected_at: nowIso, reject_reason: text });
-    setRejectingDate(null);
-    setRejectReason("");
-  }
 
   function updateHon(i, key, val) {
     setHons((prev) => prev.map((h, idx) => idx === i ? { ...h, [key]: val } : h));
@@ -2568,7 +2452,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   async function saveRecord() {
     const rec = {
       id: Date.now(),
-      date: today,
+      date,
       startTime, endTime,
       honShimei, pShimei, free,
       totalHon,
@@ -2585,13 +2469,11 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
       takeHome,
       hons: activeHons,
     };
-    const next = [rec, ...records].slice(0, 30);
-    setRecords(next);
-    localStorage.setItem(skey(storageKey), JSON.stringify(next)); // 従来通りlocalStorageに保存（店舗で名前空間化）
+    // 入力フォームのリセット（履歴更新・出勤時間リセットは親が onSaved で担当）
     setHons(Array.from({ length: 12 }, mkHon));
-    if (!staffShift) { setStartTime(""); setEndTime(""); }
     setGross(""); setDorm(""); setMisc(""); setTransport(""); setOtherAmt(""); setOtherLabel(""); setOcrReadGross(null);
     setSlipOcrDone(false);
+    if (onSaved) onSaved(rec);
 
     // Supabase sync：親レコードを先にupsert → 既存sessionsをdelete → 再挿入
     try {
@@ -2619,7 +2501,7 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
       // 承認待ちの明細レコード(salary_statements)も作る（写真UPなしでも「あなたの明細」に承認待ちで出す）。
       // 再保存時は approved=null に戻して再び承認待ちにする。image_path は含めず既存写真を消さない。
       const { error: stmtErr } = await supabase.from("salary_statements").upsert(
-        { store_id: getActiveStoreId(), cast_id: castId, date: today, approved: null, approved_at: null, reject_reason: null, rejected_at: null, staff_resolved: false, staff_resolved_at: null, uploaded_at: new Date().toISOString() },
+        { store_id: getActiveStoreId(), cast_id: castId, date, approved: null, approved_at: null, reject_reason: null, rejected_at: null, staff_resolved: false, staff_resolved_at: null, uploaded_at: new Date().toISOString() },
         { onConflict: "store_id,cast_id,date" }
       );
       if (stmtErr) console.error("[salary save salary_statements upsert]", stmtErr.message, stmtErr.details, stmtErr.hint);
@@ -2630,6 +2512,284 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
 
   const fmtYen = (n) => n.toLocaleString("ja-JP") + "円";
   const shimeiOpts = ["本指名", "P指名", "フリー"];
+
+  return (
+    <>
+      {/* 給料明細から自動入力 */}
+      <div style={{ ...card, border: `2px dashed ${C.accent}60` }}>
+        <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "8px" }}>給料明細から自動入力（任意）</p>
+        <p style={{ fontSize: "11px", color: C.muted, marginBottom: "12px", lineHeight: 1.6 }}>明細の写真をアップすると自動で読み取ります。必ず内容を確認してから保存してください。</p>
+        <label style={{ display: "block", cursor: slipLoading ? "not-allowed" : "pointer" }}>
+          <input
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            disabled={slipLoading}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) readSlip(f); e.target.value = ""; }}
+          />
+          <div style={{ background: slipLoading ? `${C.muted}15` : `${C.accent}15`, border: `1.5px solid ${slipLoading ? C.muted : C.accent}40`, borderRadius: "12px", padding: "14px", textAlign: "center", color: slipLoading ? C.muted : C.accent, fontSize: "13px", fontWeight: "700" }}>
+            {slipLoading ? "読み取り中..." : "明細画像をアップ"}
+          </div>
+        </label>
+        {slipOcrDone && (
+          <div style={{ marginTop: "10px", background: `${C.green}15`, border: `1.5px solid ${C.green}40`, borderRadius: "10px", padding: "10px", fontSize: "12px", color: C.green, fontWeight: "700", textAlign: "center" }}>
+            読み取り完了。内容を確認・修正してから保存してください
+          </div>
+        )}
+      </div>
+
+      {/* 出勤時間（親から渡されたスロットをこの位置に差し込む） */}
+      {shiftSlot}
+
+      {/* 1本ごと入力 */}
+      {Array.from({ length: visibleCount }, (_, i) => {
+        const h = hons[i];
+        const active = isActive(h);
+        return (
+          <div key={i} style={{ ...card, borderColor: active ? C.accent + "80" : C.border }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+              <span style={{ fontSize: "13px", fontWeight: "700", color: active ? C.accent : C.muted }}>{i + 1}本目</span>
+              {active && (
+                <span style={{ fontSize: "11px", color: C.green, fontWeight: "700" }}>
+                  {h.shimei || "未選択"}{h.courseMin ? `・${h.courseMin}分` : ""}
+                </span>
+              )}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "10px" }}>
+              <Field label="コース">
+                {courses.length > 0 ? (
+                  <select value={h.courseMin} onChange={(e) => updateHon(i, "courseMin", e.target.value)} style={inp}>
+                    <option value="">選択</option>
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.minutes}>{c.minutes}分</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input type="number" min="0" value={h.courseMin} onChange={(e) => updateHon(i, "courseMin", e.target.value)} placeholder="分" style={inp} />
+                )}
+              </Field>
+              <Field label="指名">
+                <select value={h.shimei} onChange={(e) => updateHon(i, "shimei", e.target.value)} style={inp}>
+                  <option value="">選択</option>
+                  {shimeiOpts.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </Field>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "10px" }}>
+              <Field label="金額（円）">
+                <input type="number" min="0" value={h.fee} onChange={(e) => updateHon(i, "fee", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              </Field>
+              <Field label="指名料（円）">
+                <input type="number" min="0" value={h.shimeiRyou} onChange={(e) => updateHon(i, "shimeiRyou", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              </Field>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <Field label="OP（円）">
+                <input type="number" min="0" value={h.op} onChange={(e) => updateHon(i, "op", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              </Field>
+              <Field label="延長（回）">
+                <input type="number" min="0" value={h.extCount} onChange={(e) => updateHon(i, "extCount", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              </Field>
+              <Field label="延長（分）">
+                <input type="number" min="0" value={h.extMin} onChange={(e) => updateHon(i, "extMin", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              </Field>
+              <Field label="延長料（円）">
+                <input type="number" min="0" value={h.extFee} onChange={(e) => updateHon(i, "extFee", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
+              </Field>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* 集計サマリー */}
+      {totalHon > 0 && (
+        <div style={{ ...card, background: "linear-gradient(135deg, #fff8fc, #fff0f8)" }}>
+          <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "10px" }}>集計</p>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            <Tag label={`合計 ${totalHon}本`} color={C.accent} />
+            {honShimei > 0 && <Tag label={`本指名 ${honShimei}`} color={C.pink} />}
+            {pShimei > 0 && <Tag label={`P指名 ${pShimei}`} color={C.blue} />}
+            {free > 0 && <Tag label={`フリー ${free}`} color={C.muted} />}
+            {totalCourseMin > 0 && <Tag label={`コース ${totalCourseMin}分`} color={C.green} />}
+            {totalExtCount > 0 && <Tag label={`延長 ${totalExtCount}回/${totalExtMin}分`} color={C.yellow} />}
+            {totalOp > 0 && <Tag label={`OP ${fmtYen(totalOp)}`} color={C.accent2} />}
+          </div>
+        </div>
+      )}
+
+      {/* 総支給・控除・手取り */}
+      <div style={{ ...card }}>
+        <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>給与・控除</p>
+        <Field label="総支給（円）※各接客の合計から自動計算">
+          <div style={{ ...inp, display: "flex", alignItems: "center", background: C.surface, color: C.text, fontWeight: "700" }}>{fmtYen(computedGross)}</div>
+        </Field>
+        {ocrReadGross != null && ocrReadGross !== computedGross && (
+          <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: "6px 0 0", lineHeight: 1.5 }}>⚠️ OCRが読んだ総額 {fmtYen(ocrReadGross)} と内訳合計 {fmtYen(computedGross)} が一致しません。各接客の金額・延長料をご確認ください。</p>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginTop: "10px", marginBottom: "14px" }}>
+          <Field label="寮費（円）">
+            <input type="number" min="0" value={dorm} onChange={(e) => setDorm(e.target.value)} placeholder="0" style={inp} />
+          </Field>
+          <Field label="雑費（円）">
+            <input type="number" min="0" value={misc} onChange={(e) => setMisc(e.target.value)} placeholder="0" style={inp} />
+          </Field>
+          <Field label="交通費（円）">
+            <input type="number" min="0" value={transport} onChange={(e) => setTransport(e.target.value)} placeholder="0" style={inp} />
+          </Field>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "10px", marginBottom: "14px" }}>
+          <Field label="その他（名称）">
+            <input type="text" value={otherLabel} onChange={(e) => setOtherLabel(e.target.value)} placeholder="例：釣銭立替金" style={inp} />
+          </Field>
+          <Field label="その他（円）">
+            <input type="number" min="0" value={otherAmt} onChange={(e) => setOtherAmt(e.target.value)} placeholder="0" style={inp} />
+          </Field>
+        </div>
+        <div style={{ background: "linear-gradient(135deg, #fff0f8, #ffe8f5)", border: `2px solid ${C.accent}40`, borderRadius: "14px", padding: "18px", textAlign: "center", marginBottom: "14px" }}>
+          <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px" }}>手取り</p>
+          <p style={{ fontSize: "32px", fontWeight: "800", color: takeHome >= 0 ? C.text : C.red, margin: 0 }}>{fmtYen(takeHome)}</p>
+          <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>総支給 {fmtYen(computedGross)} ＋ 交通費 {fmtYen(Number(transport)||0)} − 寮費 {fmtYen(Number(dorm)||0)} − 雑費 {fmtYen(Number(misc)||0)} − その他 {fmtYen(Number(otherAmt)||0)}</p>
+        </div>
+        <Btn onClick={saveRecord} loading={false} label={saved ? "保存しました ✓" : "記録を保存"} color={saved ? C.green : C.accent} />
+      </div>
+    </>
+  );
+}
+
+// ============================================================
+// 給料記録
+// ============================================================
+function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
+  const cast = casts.find((c) => c.name === loggedInCast);
+  const castId = cast?.heaven_id || loggedInCast || "";
+  const storageKey = `shamenikki_salary_${castId}`;
+
+  function loadRecords() {
+    try { return JSON.parse(localStorage.getItem(skey(storageKey))) || []; } catch { return []; }
+  }
+
+  const today = getBusinessToday();
+  const [records, setRecords] = useState(loadRecords);
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+
+  const staffShift = shifts[`${loggedInCast}_${today}`] || null;
+
+  useEffect(() => {
+    if (staffShift?.startTime) setStartTime(staffShift.startTime);
+    if (staffShift?.endTime) setEndTime(staffShift.endTime);
+  }, [staffShift?.startTime, staffShift?.endTime]);
+
+  // 保存完了時: 履歴をローカルに反映（楽観更新）し、staffShift が無ければ出勤時間をリセット。
+  function handleSaved(rec) {
+    const next = [rec, ...records].slice(0, 30);
+    setRecords(next);
+    localStorage.setItem(skey(storageKey), JSON.stringify(next)); // 従来通りlocalStorageに保存（店舗で名前空間化）
+    if (!staffShift) { setStartTime(""); setEndTime(""); }
+  }
+
+  // 明細表示（本人が自分の明細を閲覧）: salary_statements を取得し、非公開バケットの署名付きURLを作る
+  const [statements, setStatements] = useState([]);
+  const [statementUrls, setStatementUrls] = useState({}); // image_path → 署名付きURL
+  const [stmtBreakdowns, setStmtBreakdowns] = useState({}); // date → { rec: salary_records行, sessions: salary_sessions行[] }
+  const [stmtLoadError, setStmtLoadError] = useState(false); // 取得失敗をUIに出す（無言の空表示と区別する）
+  useEffect(() => {
+    if (!castId) return;
+    let active = true;
+    (async () => {
+      const { data, error } = await supabase.from("salary_statements")
+        .select("date, image_path, approved, approved_at, rejected_at, reject_reason, uploaded_at")
+        .eq("store_id", getActiveStoreId())
+        .eq("cast_id", castId)
+        .order("date", { ascending: false });
+      if (error) { console.error("明細取得失敗:", error); if (active) setStmtLoadError(true); return; }
+      if (!active) return;
+      setStmtLoadError(false);
+      setStatements(Array.isArray(data) ? data : []);
+      // 給料内訳（salary_records＋salary_sessions）を明細の日付でまとめて取得（in検索）
+      try {
+        const dates = (data || []).map((r) => r.date).filter(Boolean);
+        if (dates.length > 0) {
+          const { data: recs, error: recErr } = await supabase.from("salary_records")
+            .select("id, date, gross, dorm, misc, transport, other_amt, other_label, take_home")
+            .eq("store_id", getActiveStoreId())
+            .eq("cast_id", castId)
+            .in("date", dates);
+          if (recErr) {
+            console.error("給料内訳取得失敗:", recErr);
+          } else if (Array.isArray(recs) && recs.length > 0) {
+            const ids = recs.map((r) => r.id);
+            const { data: sess, error: sessErr } = await supabase.from("salary_sessions")
+              .select("salary_record_id, seq, course_min, shimei, fee, shimei_ryou, ext_fee, op")
+              .in("salary_record_id", ids)
+              .order("seq", { ascending: true });
+            if (sessErr) console.error("給料セッション取得失敗:", sessErr);
+            const byRec = {};
+            (sess || []).forEach((s2) => { (byRec[s2.salary_record_id] = byRec[s2.salary_record_id] || []).push(s2); });
+            // 同一日付に複数レコードがある場合は新しいid（保存時刻由来）を優先
+            const sorted = [...recs].sort((a, b) => Number(b.id) - Number(a.id));
+            const byDate = {};
+            sorted.forEach((r) => { if (!byDate[r.date]) byDate[r.date] = { rec: r, sessions: byRec[r.id] || [] }; });
+            if (active) setStmtBreakdowns(byDate);
+          }
+        }
+      } catch (e) { console.error("給料内訳取得例外:", e); }
+      // 各 image_path の署名付きURLを並列作成（statements は非公開バケット）。個別失敗はログして続行（#11）
+      const withImg = (data || []).filter((row) => row.image_path); // image_path が無い行は画像なし扱い
+      const signedResults = await Promise.all(withImg.map((row) =>
+        supabase.storage.from("statements").createSignedUrl(row.image_path, 3600)
+          .then(({ data: signed, error: signErr }) => {
+            if (signErr) { console.error("署名URL作成失敗:", signErr); return null; }
+            return signed?.signedUrl ? { path: row.image_path, url: signed.signedUrl } : null;
+          })
+          .catch((e) => { console.error("署名URL作成失敗:", e); return null; })
+      ));
+      const urls = {};
+      signedResults.filter(Boolean).forEach((r) => { urls[r.path] = r.url; });
+      if (active) setStatementUrls(urls);
+    })();
+    return () => { active = false; };
+  }, [castId]);
+
+  // 明細の承認/非承認（本人操作）。キーは store_id, cast_id, date。
+  const [rejectingDate, setRejectingDate] = useState(null); // 理由入力中の明細date（1件のみ開く）
+  const [rejectReason, setRejectReason] = useState("");
+  const [actionError, setActionError] = useState({}); // date → 保存エラーメッセージ
+  function patchStatement(date, patch) {
+    setStatements((prev) => prev.map((s) => (s.date === date ? { ...s, ...patch } : s)));
+  }
+  async function approveStatement(st) {
+    setActionError((e) => ({ ...e, [st.date]: "" }));
+    const nowIso = new Date().toISOString();
+    const { error } = await supabase.from("salary_statements")
+      .update({ approved: true, approved_at: nowIso, rejected_at: null, reject_reason: null })
+      .eq("store_id", getActiveStoreId()).eq("cast_id", castId).eq("date", st.date);
+    if (error) {
+      console.error("承認の保存失敗:", error);
+      setActionError((e) => ({ ...e, [st.date]: "保存に失敗しました。もう一度お試しください" }));
+      return;
+    }
+    patchStatement(st.date, { approved: true, approved_at: nowIso, rejected_at: null, reject_reason: null });
+  }
+  async function rejectStatement(st) {
+    const text = rejectReason.trim();
+    if (!text) return; // 理由が空なら送信しない
+    setActionError((e) => ({ ...e, [st.date]: "" }));
+    const nowIso = new Date().toISOString();
+    const { error } = await supabase.from("salary_statements")
+      .update({ approved: false, rejected_at: nowIso, reject_reason: text })
+      .eq("store_id", getActiveStoreId()).eq("cast_id", castId).eq("date", st.date);
+    if (error) {
+      console.error("非承認の保存失敗:", error);
+      setActionError((e) => ({ ...e, [st.date]: "保存に失敗しました。もう一度お試しください" }));
+      return;
+    }
+    patchStatement(st.date, { approved: false, rejected_at: nowIso, reject_reason: text });
+    setRejectingDate(null);
+    setRejectReason("");
+  }
+
+  const fmtYen = (n) => n.toLocaleString("ja-JP") + "円";
 
   return (
     <div style={{ display: "grid", gap: "16px" }}>
@@ -2790,162 +2950,37 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
         )}
       </div>
 
-      {/* 給料明細から自動入力 */}
-      <div style={{ ...card, border: `2px dashed ${C.accent}60` }}>
-        <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "8px" }}>給料明細から自動入力（任意）</p>
-        <p style={{ fontSize: "11px", color: C.muted, marginBottom: "12px", lineHeight: 1.6 }}>明細の写真をアップすると自動で読み取ります。必ず内容を確認してから保存してください。</p>
-        <label style={{ display: "block", cursor: slipLoading ? "not-allowed" : "pointer" }}>
-          <input
-            type="file"
-            accept="image/*"
-            style={{ display: "none" }}
-            disabled={slipLoading}
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) readSlip(f); e.target.value = ""; }}
-          />
-          <div style={{ background: slipLoading ? `${C.muted}15` : `${C.accent}15`, border: `1.5px solid ${slipLoading ? C.muted : C.accent}40`, borderRadius: "12px", padding: "14px", textAlign: "center", color: slipLoading ? C.muted : C.accent, fontSize: "13px", fontWeight: "700" }}>
-            {slipLoading ? "読み取り中..." : "明細画像をアップ"}
-          </div>
-        </label>
-        {slipOcrDone && (
-          <div style={{ marginTop: "10px", background: `${C.green}15`, border: `1.5px solid ${C.green}40`, borderRadius: "10px", padding: "10px", fontSize: "12px", color: C.green, fontWeight: "700", textAlign: "center" }}>
-            読み取り完了。内容を確認・修正してから保存してください
-          </div>
-        )}
-      </div>
-
-      {/* 出勤時間 */}
-      <div style={{ ...card }}>
-        <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>TODAY {today}</p>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-          <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700" }}>出勤時間</label>
-          {staffShift && (
-            <span style={{ fontSize: "10px", color: C.blue, fontWeight: "700", background: `${C.blue}15`, padding: "2px 8px", borderRadius: "10px" }}>スタッフ設定済み</span>
-          )}
-        </div>
-        {staffShift ? (
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px 14px", borderRadius: "12px", border: `1.5px solid ${C.blue}40`, background: `${C.blue}08` }}>
-            <span style={{ flex: 1, fontSize: "15px", fontWeight: "700", color: C.text, textAlign: "center" }}>{startTime || "—"}</span>
-            <span style={{ color: C.muted, fontSize: "13px" }}>〜</span>
-            <span style={{ flex: 1, fontSize: "15px", fontWeight: "700", color: C.text, textAlign: "center" }}>{endTime || "—"}</span>
-          </div>
-        ) : (
-          <div style={{ padding: "12px 14px", borderRadius: "12px", border: `1.5px dashed ${C.border}`, background: `${C.muted}08`, textAlign: "center" }}>
-            <p style={{ color: C.muted, fontSize: "12px", margin: 0 }}>スタッフが出勤時間を設定するまでお待ちください</p>
-          </div>
-        )}
-      </div>
-
-      {/* 1本ごと入力 */}
-      {Array.from({ length: visibleCount }, (_, i) => {
-        const h = hons[i];
-        const active = isActive(h);
-        return (
-          <div key={i} style={{ ...card, borderColor: active ? C.accent + "80" : C.border }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
-              <span style={{ fontSize: "13px", fontWeight: "700", color: active ? C.accent : C.muted }}>{i + 1}本目</span>
-              {active && (
-                <span style={{ fontSize: "11px", color: C.green, fontWeight: "700" }}>
-                  {h.shimei || "未選択"}{h.courseMin ? `・${h.courseMin}分` : ""}
-                </span>
+      {/* 給料入力フォーム（共通部品）。出勤時間カードは shiftSlot で OCRカードと接客行の間に差し込む */}
+      <SalaryInputForm
+        castId={castId}
+        date={today}
+        courses={courses}
+        startTime={startTime}
+        endTime={endTime}
+        onSaved={handleSaved}
+        shiftSlot={
+          <div style={{ ...card }}>
+            <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>TODAY {today}</p>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+              <label style={{ fontSize: "12px", color: C.muted, fontWeight: "700" }}>出勤時間</label>
+              {staffShift && (
+                <span style={{ fontSize: "10px", color: C.blue, fontWeight: "700", background: `${C.blue}15`, padding: "2px 8px", borderRadius: "10px" }}>スタッフ設定済み</span>
               )}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "10px" }}>
-              <Field label="コース">
-                {courses.length > 0 ? (
-                  <select value={h.courseMin} onChange={(e) => updateHon(i, "courseMin", e.target.value)} style={inp}>
-                    <option value="">選択</option>
-                    {courses.map((c) => (
-                      <option key={c.id} value={c.minutes}>{c.minutes}分</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input type="number" min="0" value={h.courseMin} onChange={(e) => updateHon(i, "courseMin", e.target.value)} placeholder="分" style={inp} />
-                )}
-              </Field>
-              <Field label="指名">
-                <select value={h.shimei} onChange={(e) => updateHon(i, "shimei", e.target.value)} style={inp}>
-                  <option value="">選択</option>
-                  {shimeiOpts.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </Field>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "10px" }}>
-              <Field label="金額（円）">
-                <input type="number" min="0" value={h.fee} onChange={(e) => updateHon(i, "fee", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
-              </Field>
-              <Field label="指名料（円）">
-                <input type="number" min="0" value={h.shimeiRyou} onChange={(e) => updateHon(i, "shimeiRyou", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
-              </Field>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-              <Field label="OP（円）">
-                <input type="number" min="0" value={h.op} onChange={(e) => updateHon(i, "op", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
-              </Field>
-              <Field label="延長（回）">
-                <input type="number" min="0" value={h.extCount} onChange={(e) => updateHon(i, "extCount", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
-              </Field>
-              <Field label="延長（分）">
-                <input type="number" min="0" value={h.extMin} onChange={(e) => updateHon(i, "extMin", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
-              </Field>
-              <Field label="延長料（円）">
-                <input type="number" min="0" value={h.extFee} onChange={(e) => updateHon(i, "extFee", e.target.value)} placeholder="0" style={{ ...inp, textAlign: "center" }} />
-              </Field>
-            </div>
+            {staffShift ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px 14px", borderRadius: "12px", border: `1.5px solid ${C.blue}40`, background: `${C.blue}08` }}>
+                <span style={{ flex: 1, fontSize: "15px", fontWeight: "700", color: C.text, textAlign: "center" }}>{startTime || "—"}</span>
+                <span style={{ color: C.muted, fontSize: "13px" }}>〜</span>
+                <span style={{ flex: 1, fontSize: "15px", fontWeight: "700", color: C.text, textAlign: "center" }}>{endTime || "—"}</span>
+              </div>
+            ) : (
+              <div style={{ padding: "12px 14px", borderRadius: "12px", border: `1.5px dashed ${C.border}`, background: `${C.muted}08`, textAlign: "center" }}>
+                <p style={{ color: C.muted, fontSize: "12px", margin: 0 }}>スタッフが出勤時間を設定するまでお待ちください</p>
+              </div>
+            )}
           </div>
-        );
-      })}
-
-      {/* 集計サマリー */}
-      {totalHon > 0 && (
-        <div style={{ ...card, background: "linear-gradient(135deg, #fff8fc, #fff0f8)" }}>
-          <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "10px" }}>集計</p>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <Tag label={`合計 ${totalHon}本`} color={C.accent} />
-            {honShimei > 0 && <Tag label={`本指名 ${honShimei}`} color={C.pink} />}
-            {pShimei > 0 && <Tag label={`P指名 ${pShimei}`} color={C.blue} />}
-            {free > 0 && <Tag label={`フリー ${free}`} color={C.muted} />}
-            {totalCourseMin > 0 && <Tag label={`コース ${totalCourseMin}分`} color={C.green} />}
-            {totalExtCount > 0 && <Tag label={`延長 ${totalExtCount}回/${totalExtMin}分`} color={C.yellow} />}
-            {totalOp > 0 && <Tag label={`OP ${fmtYen(totalOp)}`} color={C.accent2} />}
-          </div>
-        </div>
-      )}
-
-      {/* 総支給・控除・手取り */}
-      <div style={{ ...card }}>
-        <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "14px" }}>給与・控除</p>
-        <Field label="総支給（円）※各接客の合計から自動計算">
-          <div style={{ ...inp, display: "flex", alignItems: "center", background: C.surface, color: C.text, fontWeight: "700" }}>{fmtYen(computedGross)}</div>
-        </Field>
-        {ocrReadGross != null && ocrReadGross !== computedGross && (
-          <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: "6px 0 0", lineHeight: 1.5 }}>⚠️ OCRが読んだ総額 {fmtYen(ocrReadGross)} と内訳合計 {fmtYen(computedGross)} が一致しません。各接客の金額・延長料をご確認ください。</p>
-        )}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginTop: "10px", marginBottom: "14px" }}>
-          <Field label="寮費（円）">
-            <input type="number" min="0" value={dorm} onChange={(e) => setDorm(e.target.value)} placeholder="0" style={inp} />
-          </Field>
-          <Field label="雑費（円）">
-            <input type="number" min="0" value={misc} onChange={(e) => setMisc(e.target.value)} placeholder="0" style={inp} />
-          </Field>
-          <Field label="交通費（円）">
-            <input type="number" min="0" value={transport} onChange={(e) => setTransport(e.target.value)} placeholder="0" style={inp} />
-          </Field>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "10px", marginBottom: "14px" }}>
-          <Field label="その他（名称）">
-            <input type="text" value={otherLabel} onChange={(e) => setOtherLabel(e.target.value)} placeholder="例：釣銭立替金" style={inp} />
-          </Field>
-          <Field label="その他（円）">
-            <input type="number" min="0" value={otherAmt} onChange={(e) => setOtherAmt(e.target.value)} placeholder="0" style={inp} />
-          </Field>
-        </div>
-        <div style={{ background: "linear-gradient(135deg, #fff0f8, #ffe8f5)", border: `2px solid ${C.accent}40`, borderRadius: "14px", padding: "18px", textAlign: "center", marginBottom: "14px" }}>
-          <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px" }}>手取り</p>
-          <p style={{ fontSize: "32px", fontWeight: "800", color: takeHome >= 0 ? C.text : C.red, margin: 0 }}>{fmtYen(takeHome)}</p>
-          <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>総支給 {fmtYen(computedGross)} ＋ 交通費 {fmtYen(Number(transport)||0)} − 寮費 {fmtYen(Number(dorm)||0)} − 雑費 {fmtYen(Number(misc)||0)} − その他 {fmtYen(Number(otherAmt)||0)}</p>
-        </div>
-        <Btn onClick={saveRecord} loading={false} label={saved ? "保存しました ✓" : "記録を保存"} color={saved ? C.green : C.accent} />
-      </div>
+        }
+      />
 
       {/* 履歴 */}
       {records.length > 0 && (
