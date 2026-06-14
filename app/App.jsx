@@ -4872,6 +4872,7 @@ function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDay
   const [local, setLocal] = useState({ ...settings, show_guarantee: settings.show_guarantee ?? true });
   const [localSync, setLocalSync] = useState({ shopdir: syncConfig?.shopdir || "", adminId: syncConfig?.adminId || "", adminPass: syncConfig?.adminPass || "" });
   const [localCut, setLocalCut] = useState({ diary: cutDays?.diary ?? 1, late: cutDays?.late ?? 1, early: cutDays?.early ?? 1, absent: cutDays?.absent ?? 2, complaint: cutDays?.complaint ?? 1 });
+  const [syncUnlocked, setSyncUnlocked] = useState(false); // Chromeの自動入力対策: 初期 readOnly、focusで解除
   async function save() {
     setSettings(local); // localStorageに書き込み（useLocalStorage経由）
     setSyncConfig(localSync);
@@ -4971,13 +4972,13 @@ function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDay
           </p>
           <div style={{ display: "grid", gap: "12px" }}>
             <Field label="管理者ID">
-              <input value={localSync.adminId} onChange={(e) => setLocalSync({ ...localSync, adminId: e.target.value })} placeholder="管理者IDを入力" style={inp} />
+              <input value={localSync.adminId} onChange={(e) => setLocalSync({ ...localSync, adminId: e.target.value })} placeholder="管理者IDを入力" style={inp} autoComplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other" readOnly={!syncUnlocked} onFocus={() => setSyncUnlocked(true)} />
             </Field>
             <Field label="管理者パスワード">
-              <input type="password" value={localSync.adminPass} onChange={(e) => setLocalSync({ ...localSync, adminPass: e.target.value })} placeholder="パスワードを入力" style={inp} />
+              <input type="text" value={localSync.adminPass} onChange={(e) => setLocalSync({ ...localSync, adminPass: e.target.value })} placeholder="パスワードを入力" style={{ ...inp, WebkitTextSecurity: "disc" }} autoComplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other" readOnly={!syncUnlocked} onFocus={() => setSyncUnlocked(true)} />
             </Field>
             <Field label="店舗ディレクトリ (shopdir)">
-              <input value={localSync.shopdir} onChange={(e) => setLocalSync({ ...localSync, shopdir: e.target.value })} placeholder="例：tokyo-xxx" style={inp} />
+              <input value={localSync.shopdir} onChange={(e) => setLocalSync({ ...localSync, shopdir: e.target.value })} placeholder="例：tokyo-xxx" style={inp} data-lpignore="true" data-1p-ignore="true" data-form-type="other" />
             </Field>
           </div>
         </div>
