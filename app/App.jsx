@@ -3871,25 +3871,37 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const [stmtStatus, setStmtStatus] = useState(() => new Map()); // cast_id → { date, approved, approved_at, rejected_at, reject_reason, staff_resolved, staff_resolved_at }
   const [stmtActionError, setStmtActionError] = useState({});    // cast_id → 保存エラーメッセージ
   const [stmtStatusError, setStmtStatusError] = useState(false); // 取得失敗をUIに出す（無言と区別する）
+  // 承認状況の取得（初回 / 🔄更新(refreshKey) / 20秒ポーリング で共用）。salary_statements だけの軽量取得。
+  // shouldApply() が false（アンマウント後）なら setState しない。
+  async function fetchStmtStatus(shouldApply = () => true) {
+    const { data, error } = await supabase.from("salary_statements")
+      .select("cast_id, date, approved, approved_at, rejected_at, reject_reason, staff_resolved, staff_resolved_at")
+      .eq("store_id", getActiveStoreId())
+      .order("date", { ascending: false });
+    if (error) { console.error("承認状況取得失敗:", error); if (shouldApply()) setStmtStatusError(true); return; }
+    if (!shouldApply() || !Array.isArray(data)) return;
+    setStmtStatusError(false);
+    const m = new Map();
+    for (const r of data) {
+      const key = String(r.cast_id);
+      if (!m.has(key)) m.set(key, r); // date降順なので各castで最初に来た行＝最新
+    }
+    setStmtStatus(m);
+  }
+  // 初回 + 手動更新(refreshKey)時に取得（既存挙動を維持）
   useEffect(() => {
     let active = true;
-    (async () => {
-      const { data, error } = await supabase.from("salary_statements")
-        .select("cast_id, date, approved, approved_at, rejected_at, reject_reason, staff_resolved, staff_resolved_at")
-        .eq("store_id", getActiveStoreId())
-        .order("date", { ascending: false });
-      if (error) { console.error("承認状況取得失敗:", error); if (active) setStmtStatusError(true); return; }
-      if (!active || !Array.isArray(data)) return;
-      setStmtStatusError(false);
-      const m = new Map();
-      for (const r of data) {
-        const key = String(r.cast_id);
-        if (!m.has(key)) m.set(key, r); // date降順なので各castで最初に来た行＝最新
-      }
-      setStmtStatus(m);
-    })();
+    fetchStmtStatus(() => active);
     return () => { active = false; };
   }, [todayISO, refreshKey]);
+  // 自動ポーリング: マウント中20秒ごとに承認状況だけ再取得（refreshKey の重い全体更新は使わない）。
+  // store_id が有効なときだけ動かし、アンマウント時に clearInterval で必ず停止。
+  useEffect(() => {
+    if (!getActiveStoreId()) return;
+    let active = true;
+    const id = setInterval(() => { fetchStmtStatus(() => active); }, 20000);
+    return () => { active = false; clearInterval(id); };
+  }, []);
   function patchStmtStatus(castId, patch) {
     setStmtStatus((prev) => {
       const m = new Map(prev);
