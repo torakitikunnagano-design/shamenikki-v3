@@ -3016,14 +3016,15 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
                                   {Number(s2.course_min) ? `　コース${s2.course_min}分` : ""}
                                   {s2.shimei ? `　${s2.shimei}` : ""}
                                 </p>
-                                {/* 2段目: 金額内訳（スマホ幅で自然折り返し） */}
+                                {/* 2段目: 金額内訳（各項目0は省略・スマホ幅で自然折り返し） */}
                                 <p style={{ fontSize: "12px", color: C.text, margin: 0, lineHeight: 1.6 }}>
                                   {Number(s2.fee) ? `金額${yen(s2.fee)}円　` : ""}
                                   {Number(s2.shimei_ryou) ? `指名料${yen(s2.shimei_ryou)}円　` : ""}
                                   {Number(s2.ext_fee) ? `延長料${yen(s2.ext_fee)}円　` : ""}
-                                  {Number(s2.op) ? `OP${yen(s2.op)}円　` : ""}
-                                  <span style={{ fontWeight: "800" }}>小計{yen(sub)}円</span>
+                                  {Number(s2.op) ? `OP${yen(s2.op)}円` : ""}
                                 </p>
+                                {/* 3段目: 小計（独立行・太字。改行で割れないように nowrap） */}
+                                <p style={{ fontSize: "12px", fontWeight: "800", color: C.text, margin: 0, lineHeight: 1.5, whiteSpace: "nowrap" }}>小計{yen(sub)}円</p>
                               </div>
                               );
                             })}
