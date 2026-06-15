@@ -3505,10 +3505,17 @@ function StatementUpButton({ cast, done, onUploaded, onRemoved, stmt, stmtErr, o
     }
   }
 
-  // 非承認（スタッフ未対応）はカードのボタンで気づけるように ⚠ 表示（最優先）
-  const needsAttention = !!(stmt && stmt.approved !== true && stmt.rejected_at && stmt.staff_resolved !== true);
-  const color = needsAttention ? C.red : done ? C.green : C.blue;
-  const label = needsAttention ? "明細UP ⚠" : (done ? "明細UP ✓済" : "明細UP");
+  // ラベル/色は「最新明細(stmt)の承認状態」で判定（done=本日UP有無は使わない）。全状態でクリック可。
+  let label, color;
+  if (!stmt) {
+    label = "明細UP";   color = C.muted; // 明細まだ
+  } else if (stmt.rejected_at && stmt.staff_resolved !== true) {
+    label = "非承認";   color = C.red;   // 非承認・スタッフ未対応
+  } else if (stmt.approved === true) {
+    label = "承認済";   color = C.blue;  // キャスト承認済
+  } else {
+    label = "承認待ち"; color = C.yellow; // UP済み未承認 / 非承認だがスタッフ対応済みで再度待ち
+  }
 
   return (
     <>
