@@ -3508,7 +3508,7 @@ function StatementUpButton({ cast, done, onUploaded, onRemoved, stmt, stmtErr, o
   // ラベル/色は「最新明細(stmt)の承認状態」で判定（done=本日UP有無は使わない）。全状態でクリック可。
   let label, color;
   if (!stmt) {
-    label = "明細UP";   color = C.muted; // 明細まだ
+    label = "明細UP";   color = "#222222"; // 明細まだ（黒文字＋薄い背景。color は枠線/背景/文字に共用。6桁HEXでalpha付加可）
   } else if (stmt.rejected_at && stmt.staff_resolved !== true) {
     label = "非承認";   color = C.red;   // 非承認・スタッフ未対応
   } else if (stmt.approved === true) {
