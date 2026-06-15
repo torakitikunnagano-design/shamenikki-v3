@@ -9,12 +9,11 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 
+const BOT_SHARED_SECRET=process.env.BOT_SHARED_SECRET;
+app.use((req,res,next)=>{if(!BOT_SHARED_SECRET)return res.status(500).json({ok:false});const z=req.headers.authorization||'';if(z!=='Bearer '+BOT_SHARED_SECRET)return res.status(401).json({ok:false,error:'unauthorized'});next();});
+
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const WAIT = { waitUntil: 'domcontentloaded', timeout: 60000 };
-
-// キャスト同期で取り込む上位N名（ヘブンのキャスト一覧の掲載順・先頭から）。退店者が大量に残る店舗対策。
-// NADESHIKO は名簿70名で上限未満なので影響なし。あとで変えたいときはこの数値だけ変更する。
-const CAST_SYNC_LIMIT = 300;
 
 async function findBtn(page, matchFn) {
   const hs = await page.$$('a, button, input[type=button], input[type=submit]');
@@ -174,11 +173,13 @@ app.post('/store-sync', async (req, res) => {
     // a[href*="member_id="] を全取得 → heavenId ごとに名前が取れる方を採用して重複排除
     const casts = await page.$$eval(
       'a[href*="C8GirlMyPageRegist.php?member_id="]',
-      (anchors, limit) => {
-        // ヘブン表示は「名前」の後に必ず半角/全角スペース＋装飾(「新人🔰」「No2 本指名」等)。
-        // 最初の半角/全角スペースより前だけを名前として採用する。
+      (anchors) => {
         const cleanName = (raw) => {
-          return (raw || '').trim().split(/[\s　]/)[0] || '';
+          return (raw || '').replace(/\u65B0\u4EBA|\u4F53\u9A13\u5272|\u4F53\u9A13/g,' ')
+            .replace(/新人/g, '')
+            .replace(/\s+/g, ' ')
+            .replace(/[…\.]{1,3}$/, '')
+            .trim();
         };
         // heavenId → 最良の name を保持する Map
         const map = new Map();
@@ -198,13 +199,11 @@ app.post('/store-sync', async (req, res) => {
             map.set(heavenId, { name, heavenId });
           }
         }
-        // 掲載順（Map の挿入順）の先頭から limit 名だけ返す
-        return Array.from(map.values()).slice(0, limit);
-      },
-      CAST_SYNC_LIMIT
+        return Array.from(map.values());
+      }
     );
 
-    console.log('[store-sync] casts=' + casts.length + ' (limit ' + CAST_SYNC_LIMIT + ')');
+    console.log('[store-sync] casts=' + casts.length);
     // ※ ミテネ用パスワード取得は重い(最大数分)ためここでは行わない。
     //   ロスター(名前/heaven_id)を素早く返して Supabase 保存を最優先にする。
     //   パスワードは別エンドポイント /mitene-creds で非ブロッキングに取得する。
@@ -309,7 +308,7 @@ const TAB_PRIORITY = ['マッチ率', '口コミ', 'マイガール'];
 app.post('/mitene', async (req, res) => {
   const { heavenId, heavenPass, max } = req.body || {};
   const mlog = (m) => console.log('[mitene] ' + m);
-  const result = { ok: false, sent: 0, sentUids: [], remainingBefore: null, remainingAfter: null, byTab: {}, error: null, reachedStep: 0 };
+  const result = { ok: false, sent: 0, sentUids: [], remainingBefore: null, remainingAfter: null, byTab: {}, error: null, reachedStep: 0, sendableTotal: 0 };
   let browser;
 
   // 1500〜3500ms のランダム待機
@@ -472,6 +471,7 @@ app.post('/mitene', async (req, res) => {
 
       const sc = await countSendable(page);
       mlog('  url=' + page.url() + ' sendableCount=' + sc);
+      result.sendableTotal += sc;
       if (sc === 0) { mlog('  no send buttons → skip ' + tab); continue; }
 
       const n = await sendOnCurrentPage(page, target - result.sent); // 残り枠ぶんだけ
@@ -570,8 +570,6 @@ app.post('/mitene-creds', async (req, res) => {
 
 // ============================================================
 // 【read-only】ミテネ残数チェック（送信しない）
-//  - 1キャスト分。J1Login → J1Main で「使い切りました」判定 → 未使い切りなら J10一覧で「残り回数：N/20」読み取り。
-//  - usedUp（J1Main に「本日分のミテネは使い切りました」）なら remaining=0 とし、J10 は開かない。
 //  - registComeon クリック等の送信系は一切呼ばない（絶対に送らない）。
 //  - 戻り値: { ok, remaining, usedUp }（remaining=数値 or null、usedUp=boolean）
 // ============================================================
@@ -582,7 +580,6 @@ app.post('/mitene-status', async (req, res) => {
   let browser;
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // 本文の「残り回数：N/20」から N を取得（/mitene の readRemaining と同一ロジック）
   const readRemaining = async (page) => page.evaluate(() => {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node;
@@ -593,7 +590,6 @@ app.post('/mitene-status', async (req, res) => {
     return null;
   });
 
-  // 本文に「本日分のミテネは使い切りました」が含まれるか
   const readUsedUp = async (page) => page.evaluate(() => {
     const t = (document.body && document.body.innerText) || '';
     return t.includes('本日分のミテネは使い切りました');
@@ -610,30 +606,28 @@ app.post('/mitene-status', async (req, res) => {
     page.setDefaultNavigationTimeout(60000);
     await page.setUserAgent(UA);
 
-    // Step 1: ログイン（/mitene と同一手順）
     slog('login...');
     await page.goto('https://spgirl.cityheaven.net/J1Login.php', WAIT);
     await page.type('input[name="txt_account"]', heavenId);
     await page.type('input[name="txt_password"]', heavenPass);
     await Promise.all([page.click('input[type="submit"]'), page.waitForNavigation(WAIT)]);
 
-    // Step 2: J1Main で「本日分のミテネは使い切りました」を判定（送信系は呼ばない）
+    // Step A: 管理トップ(J1Main)で「本日分のミテネは使い切りました」を判定
     await page.goto('https://spgirl.cityheaven.net/J1Main.php', WAIT);
-    await sleep(2000);
+    await sleep(1500);
     result.usedUp = await readUsedUp(page);
 
     if (result.usedUp) {
-      // 使い切り＝本日完了。残数表記は消えているので 0 とみなし、J10 は開かない
+      // 使い切り＝本日完了。残数は0扱い。
       result.remaining = 0;
-      slog('usedUp=true → remaining=0 (J1Main)');
     } else {
-      // 未使い切り → J10一覧で「残り回数：N/20」を読む
+      // まだ残ってる→ミテネ一覧ページで残り回数を読む
       const miteneUrl = 'https://spgirl.cityheaven.net/J10ComeonVisitorList.php?gid=' + heavenId;
       await page.goto(miteneUrl, WAIT);
       await sleep(2000);
       result.remaining = await readRemaining(page);
-      slog('usedUp=false → remaining=' + result.remaining + ' (J10)');
     }
+    slog('remaining=' + result.remaining + ' usedUp=' + result.usedUp);
 
     await browser.close();
     result.ok = true;
@@ -645,6 +639,5 @@ app.post('/mitene-status', async (req, res) => {
     res.json(result);
   }
 });
-
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.listen(3000, () => console.log('Heaven Bot :3000'));
