@@ -3894,6 +3894,31 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     return () => { active = false; };
   }, [todayISO, refreshKey]);
 
+  // 【出勤期間①Step2】Supabase shifts（日付別・過去も永続）を store 一括取得し、cast_name を正規化して
+  //  「正規化名 → 出勤日(YYYY-MM-DD)配列」に集約する。メモリA(最新同期ウィンドウのみ)の制約を解消し過去も正確に割れる。
+  //  - カードごとの個別 fetch はしない（store 一括取得 → クライアントでグルーピング）。stmtStatus と同じ集約パターン。
+  //  - 取得失敗は console.error のみ（出勤データ無しのキャストは期間表示なし＝従来挙動）。
+  const [shiftDatesByName, setShiftDatesByName] = useState(() => new Map()); // normalizeName(cast_name) → date[]（YYYY-MM-DD）
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data, error } = await supabase.from("shifts")
+        .select("cast_name, date")
+        .eq("store_id", getActiveStoreId());
+      if (error) { console.error("出勤日(shifts)取得失敗:", error); return; }
+      if (!active || !Array.isArray(data)) return;
+      const m = new Map();
+      for (const r of data) {
+        const key = normalizeName(r.cast_name);
+        if (!key || !r.date) continue;
+        if (!m.has(key)) m.set(key, []);
+        m.get(key).push(r.date); // date は YYYY-MM-DD（そのまま computeAttendancePeriods に渡せる＝mdToYMD不要）
+      }
+      setShiftDatesByName(m);
+    })();
+    return () => { active = false; };
+  }, [todayISO, refreshKey]);
+
   // 明細の承認状況（cast_idごとに「最新dateの1件」）。statementsDone とは別管理（既存判定は壊さない）。
   const [stmtStatus, setStmtStatus] = useState(() => new Map()); // cast_id → { date, approved, approved_at, rejected_at, reject_reason, staff_resolved, staff_resolved_at }
   const [stmtActionError, setStmtActionError] = useState({});    // cast_id → 保存エラーメッセージ
@@ -4600,11 +4625,11 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   {todayShift && (
                     <p style={{ fontSize: "11px", color: C.blue, fontWeight: "700", margin: "6px 0 0" }}>本日 {todayShift.start}〜{todayShift.end}</p>
                   )}
-                  {/* 【検証用・仮表示】メモリ上の出勤(A:M/D配列)から連続出勤期間を計算して表示。後で Step2(Supabase) に差し替え予定 */}
+                  {/* 【出勤期間①Step2・検証用】Supabase shifts(過去も永続)由来の出勤日から連続出勤期間を計算。検証のため全期間ぶん表示。 */}
                   {(() => {
-                    if (!Array.isArray(_days) || _days.length === 0) return null;
-                    const ymds = _days.map((s) => mdToYMD(s.date)).filter(Boolean);
-                    const periods = computeAttendancePeriods(ymds);
+                    const dates = shiftDatesByName.get(normalizeName(c.name));
+                    if (!Array.isArray(dates) || dates.length === 0) return null;
+                    const periods = computeAttendancePeriods(dates); // date は YYYY-MM-DD なので mdToYMD 不要
                     if (periods.length === 0) return null;
                     const md = (ymd) => { const [, m, d] = ymd.split("-"); return `${Number(m)}/${Number(d)}`; };
                     return (
