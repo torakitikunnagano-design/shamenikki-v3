@@ -15,6 +15,15 @@ app.use((req,res,next)=>{if(!BOT_SHARED_SECRET)return res.status(500).json({ok:f
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const WAIT = { waitUntil: 'domcontentloaded', timeout: 60000 };
 
+// ============================================================
+// 店舗単位の同時実行ロック（二重送信・アカウント競合の防止）
+//  - 同じ店舗(=同じヘブン垢/管理shopdir)への送信処理が同時に2つ走らないようにする。
+//  - 別店舗は別アカウントなのでキーが違えばブロックしない（並走OK）。
+//  - 対象: /post, /store-sync, /mitene, /mitene-creds（読み取り専用の /mitene-status, /health は対象外）。
+//  - キー: ヘブン垢操作は 'heaven:'+heavenId、店舗管理操作は 'shop:'+shopdir（識別子の名前空間を分けて誤衝突を防ぐ）。
+// ============================================================
+const storeLocks = new Map(); // lockKey(string) → true（処理中）
+
 async function findBtn(page, matchFn) {
   const hs = await page.$$('a, button, input[type=button], input[type=submit]');
   for (const h of hs) {
@@ -43,6 +52,11 @@ async function findVisible(page, selector) {
 
 app.post('/post', async (req, res) => {
   const { heavenId, heavenPass, title, body, imageBase64, imageType, limitedKind } = req.body || {};
+  const lockKey = heavenId ? 'heaven:' + heavenId : null; // 店舗キー=ヘブン垢
+  if (lockKey) {
+    if (storeLocks.has(lockKey)) return res.status(409).json({ ok: false, error: 'busy', message: 'この店舗は現在ほかの処理を実行中です。少し待ってからもう一度お試しください。' });
+    storeLocks.set(lockKey, true);
+  }
   let browser, tmp, posted = false;
   const log = (m) => console.log('[heaven-bot] ' + m);
   try {
@@ -125,6 +139,8 @@ app.post('/post', async (req, res) => {
     if (browser) { try { await browser.close(); } catch (_) {} }
     if (tmp && fs.existsSync(tmp)) { try { fs.unlinkSync(tmp); } catch (_) {} }
     res.json({ success: false, message: e.message });
+  } finally {
+    if (lockKey) storeLocks.delete(lockKey);
   }
 });
 
@@ -133,6 +149,11 @@ app.post('/post', async (req, res) => {
 // ============================================================
 app.post('/store-sync', async (req, res) => {
   const { adminId, adminPass, shopdir, mode } = req.body || {};
+  const lockKey = shopdir ? 'shop:' + shopdir : null; // 店舗キー=管理shopdir
+  if (lockKey) {
+    if (storeLocks.has(lockKey)) return res.status(409).json({ ok: false, error: 'busy', message: 'この店舗は現在ほかの処理を実行中です。少し待ってからもう一度お試しください。' });
+    storeLocks.set(lockKey, true);
+  }
   let browser;
   try {
     if (!adminId || !adminPass || !shopdir) {
@@ -295,6 +316,7 @@ app.post('/store-sync', async (req, res) => {
     res.json({ ok: false, error: e.message });
   } finally {
     if (browser) { try { await browser.close(); } catch (_) {} }
+    if (lockKey) storeLocks.delete(lockKey);
   }
 });
 
@@ -307,6 +329,11 @@ const TAB_PRIORITY = ['マッチ率', '口コミ', 'マイガール'];
 
 app.post('/mitene', async (req, res) => {
   const { heavenId, heavenPass, max } = req.body || {};
+  const lockKey = heavenId ? 'heaven:' + heavenId : null; // 店舗キー=ヘブン垢
+  if (lockKey) {
+    if (storeLocks.has(lockKey)) return res.status(409).json({ ok: false, error: 'busy', message: 'この店舗は現在ほかの処理を実行中です。少し待ってからもう一度お試しください。' });
+    storeLocks.set(lockKey, true);
+  }
   const mlog = (m) => console.log('[mitene] ' + m);
   const result = { ok: false, sent: 0, sentUids: [], remainingBefore: null, remainingAfter: null, byTab: {}, error: null, reachedStep: 0, sendableTotal: 0 };
   let browser;
@@ -495,6 +522,8 @@ app.post('/mitene', async (req, res) => {
     result.error = e.message;
     if (browser) { try { await browser.close(); } catch (_) {} }
     res.json(result);
+  } finally {
+    if (lockKey) storeLocks.delete(lockKey);
   }
 });
 
@@ -505,6 +534,11 @@ app.post('/mitene', async (req, res) => {
 // ============================================================
 app.post('/mitene-creds', async (req, res) => {
   const { adminId, adminPass, shopdir, memberIds } = req.body || {};
+  const lockKey = shopdir ? 'shop:' + shopdir : null; // 店舗キー=管理shopdir
+  if (lockKey) {
+    if (storeLocks.has(lockKey)) return res.status(409).json({ ok: false, error: 'busy', message: 'この店舗は現在ほかの処理を実行中です。少し待ってからもう一度お試しください。' });
+    storeLocks.set(lockKey, true);
+  }
   let browser;
   try {
     if (!adminId || !adminPass || !shopdir || !Array.isArray(memberIds)) {
@@ -565,6 +599,8 @@ app.post('/mitene-creds', async (req, res) => {
     console.log('[mitene-creds] ERROR: ' + e.message);
     if (browser) { try { await browser.close(); } catch (_) {} }
     res.json({ ok: false, error: e.message });
+  } finally {
+    if (lockKey) storeLocks.delete(lockKey);
   }
 });
 
