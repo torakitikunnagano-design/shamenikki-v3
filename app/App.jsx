@@ -4625,20 +4625,19 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   {todayShift && (
                     <p style={{ fontSize: "11px", color: C.blue, fontWeight: "700", margin: "6px 0 0" }}>本日 {todayShift.start}〜{todayShift.end}</p>
                   )}
-                  {/* 【出勤期間①Step2・検証用】Supabase shifts(過去も永続)由来の出勤日から連続出勤期間を計算。検証のため全期間ぶん表示。 */}
+                  {/* 【出勤期間①Step2】Supabase shifts(過去も永続)由来の出勤日から連続出勤期間を計算し、現在進行中の期間＝最新1つだけ表示。 */}
                   {(() => {
                     const dates = shiftDatesByName.get(normalizeName(c.name));
                     if (!Array.isArray(dates) || dates.length === 0) return null;
                     const periods = computeAttendancePeriods(dates); // date は YYYY-MM-DD なので mdToYMD 不要
                     if (periods.length === 0) return null;
+                    const p = periods[periods.length - 1]; // 返り値は昇順 → 末尾が最新（現在進行中）の期間
                     const md = (ymd) => { const [, m, d] = ymd.split("-"); return `${Number(m)}/${Number(d)}`; };
                     return (
                       <div style={{ marginTop: "6px" }}>
-                        {periods.map((p, i) => (
-                          <p key={i} style={{ fontSize: "10px", color: C.muted, fontWeight: "700", margin: 0, lineHeight: 1.4 }}>
-                            期間：{md(p.start)}〜{md(p.end)}（{p.workdays}日）
-                          </p>
-                        ))}
+                        <p style={{ fontSize: "10px", color: C.muted, fontWeight: "700", margin: 0, lineHeight: 1.4 }}>
+                          期間：{md(p.start)}〜{md(p.end)}（{p.workdays}日）
+                        </p>
                       </div>
                     );
                   })()}
