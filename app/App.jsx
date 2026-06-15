@@ -2771,12 +2771,8 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
   const castId = cast?.heaven_id || loggedInCast || "";
   const storageKey = `shamenikki_salary_${castId}`;
 
-  function loadRecords() {
-    try { return JSON.parse(localStorage.getItem(skey(storageKey))) || []; } catch { return []; }
-  }
-
   const today = getBusinessToday();
-  const [records, setRecords] = useState(loadRecords);
+  const [records, setRecords] = useState([]);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
 
@@ -2794,6 +2790,63 @@ function SalaryPage({ loggedInCast, casts, courses = [], shifts = {} }) {
     localStorage.setItem(skey(storageKey), JSON.stringify(next)); // 従来通りlocalStorageに保存（店舗で名前空間化）
     if (!staffShift) { setStartTime(""); setEndTime(""); }
   }
+
+  // 過去の記録: Supabase の salary_records＋salary_sessions から取得（localStorage 非依存）。
+  //  - store_id / cast_id は保存・削除と同じキー規約（cast?.heaven_id || loggedInCast）。
+  //  - 同一日付は最新id（保存時刻由来）の1件だけ採用（合算しない）。
+  //  - 採用条件: gross>0 / take_home>0 / sessions>=1 のいずれか（0円の途中保存ゴミを除外）。
+  //  - 本数・指名種別・OP合計は salary_sessions から集計。
+  useEffect(() => {
+    if (!castId) return;
+    let active = true;
+    (async () => {
+      const { data: recs, error: recErr } = await supabase.from("salary_records")
+        .select("id, date, start_time, end_time, ext_count, ext_min, transport, gross, take_home")
+        .eq("store_id", getActiveStoreId())
+        .eq("cast_id", castId)
+        .order("date", { ascending: false });
+      if (recErr) { console.error("過去の記録取得失敗:", recErr); return; }
+      if (!active) return;
+      if (!Array.isArray(recs) || recs.length === 0) { setRecords([]); return; }
+      // 同一日付は最新id の1件だけ採用
+      const sorted = [...recs].sort((a, b) => Number(b.id) - Number(a.id));
+      const byDate = {};
+      sorted.forEach((r) => { if (!byDate[r.date]) byDate[r.date] = r; });
+      const chosen = Object.values(byDate);
+      const ids = chosen.map((r) => r.id);
+      // 本数・指名種別・OP合計を集計するため sessions を取得
+      const { data: sess, error: sessErr } = await supabase.from("salary_sessions")
+        .select("salary_record_id, shimei, op")
+        .in("salary_record_id", ids);
+      if (sessErr) console.error("過去の記録セッション取得失敗:", sessErr);
+      const byRec = {};
+      (sess || []).forEach((s2) => { (byRec[s2.salary_record_id] = byRec[s2.salary_record_id] || []).push(s2); });
+      const rows = chosen.map((r) => {
+        const ss = byRec[r.id] || [];
+        return {
+          id:        r.id,
+          date:      r.date,
+          startTime: r.start_time || "",
+          endTime:   r.end_time   || "",
+          takeHome:  Number(r.take_home) || 0,
+          totalHon:  ss.length,
+          honShimei: ss.filter((s2) => s2.shimei === "本指名").length,
+          pShimei:   ss.filter((s2) => s2.shimei === "P指名").length,
+          free:      ss.filter((s2) => s2.shimei === "フリー").length,
+          extCount:  Number(r.ext_count) || 0,
+          extMin:    Number(r.ext_min)   || 0,
+          option:    ss.reduce((sum, s2) => sum + (Number(s2.op) || 0), 0),
+          transport: Number(r.transport) || 0,
+          _gross:    Number(r.gross) || 0,
+          _sessCount: ss.length,
+        };
+      })
+      .filter((r) => r._gross > 0 || r.takeHome > 0 || r._sessCount >= 1)
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+      if (active) setRecords(rows);
+    })();
+    return () => { active = false; };
+  }, [castId]);
 
   // 明細表示（本人が自分の明細を閲覧）: salary_statements を取得し、非公開バケットの署名付きURLを作る
   const [statements, setStatements] = useState([]);
