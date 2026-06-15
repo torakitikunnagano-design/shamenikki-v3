@@ -3505,10 +3505,12 @@ function StatementUpButton({ cast, done, onUploaded, onRemoved, stmt, stmtErr, o
     }
   }
 
-  // ラベル/色は「最新明細(stmt)の承認状態」で判定（done=本日UP有無は使わない）。全状態でクリック可。
+  // ラベル/色は「本日(営業日)の明細(stmt)の承認状態」で判定。全状態でクリック可。
+  // stmt は最新明細なので date 一致で「本日分か」を確認（昨日の承認済を今日に引きずらない／朝6時の営業日切替で自動リセット）。
+  const isToday = !!(stmt && stmt.date === date);
   let label, color;
-  if (!stmt) {
-    label = "明細UP";   color = "#222222"; // 明細まだ（黒文字＋薄い背景。color は枠線/背景/文字に共用。6桁HEXでalpha付加可）
+  if (!isToday) {
+    label = "明細UP";   color = "#222222"; // 本日分まだ（黒文字＋薄い背景。color は枠線/背景/文字に共用。6桁HEXでalpha付加可）
   } else if (stmt.rejected_at && stmt.staff_resolved !== true) {
     label = "非承認";   color = C.red;   // 非承認・スタッフ未対応
   } else if (stmt.approved === true) {
