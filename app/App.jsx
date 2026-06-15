@@ -4290,7 +4290,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         <div
           onClick={() => setBusyOverlay(false)}
           style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px", cursor: "pointer" }}>
-          <p style={{ color: "white", fontWeight: "700", fontSize: "15px", margin: 0, textAlign: "center" }}>
+          <p style={{ color: "white", fontWeight: "700", fontSize: "24px", lineHeight: 1.5, margin: 0, padding: "0 24px", textAlign: "center" }}>
             他のスタッフが更新してるよ！少しまってね
           </p>
         </div>
