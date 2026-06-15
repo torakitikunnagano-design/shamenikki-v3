@@ -3867,6 +3867,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const [lockRefresh, setLockRefresh] = useState(0);
   const [syncLoading, setSyncLoading] = useState(null); // null | "casts" | "shifts"
   const [syncResult, setSyncResult] = useState(null);
+  const [busyOverlay, setBusyOverlay] = useState(false); // 他スタッフが同期中(409 busy)の中央オーバーレイ
   const [showTodayOnly, setShowTodayOnly] = useState(true);
   const [openCalCell, setOpenCalCell] = useState(null); // { castName, date } | null
   const todayKey = getBusinessTodayKey();
@@ -4132,6 +4133,12 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir, mode }),
       });
       const data = await res.json();
+      // 他のスタッフが同期中（サーバ側ロック）: 専用の中央オーバーレイを出して通常エラー表示はしない
+      if (res.status === 409 && data.error === "busy") {
+        setBusyOverlay(true);
+        setTimeout(() => setBusyOverlay(false), 3000); // 3秒で自動的に消える
+        return;
+      }
       if (!res.ok || !data.casts) throw new Error(data.message || "同期に失敗しました");
 
       if (mode === "casts") {
@@ -4274,6 +4281,17 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
           <div style={{ width: "44px", height: "44px", borderRadius: "50%", border: `4px solid ${C.green}40`, borderTopColor: C.green, animation: "shamenikkiSpin 0.8s linear infinite" }} />
           <p style={{ color: "white", fontWeight: "700", fontSize: "15px", margin: 0 }}>
             {syncLoading === "casts" ? "キャスト同期中…" : syncLoading === "shifts" ? "出勤同期中…" : syncLoading !== null ? "同期中…" : "更新中…"}
+          </p>
+        </div>
+      )}
+
+      {/* 他スタッフが同期中(409 busy)の中央オーバーレイ。3秒で自動的に消える＋タップでも消える */}
+      {busyOverlay && (
+        <div
+          onClick={() => setBusyOverlay(false)}
+          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px", cursor: "pointer" }}>
+          <p style={{ color: "white", fontWeight: "700", fontSize: "15px", margin: 0, textAlign: "center" }}>
+            他のスタッフが更新してるよ！少しまってね
           </p>
         </div>
       )}
