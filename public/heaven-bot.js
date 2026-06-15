@@ -52,7 +52,7 @@ app.post('/post', async (req, res) => {
       fs.writeFileSync(tmp, Buffer.from(String(imageBase64).replace(/^data:image\/\w+;base64,/, ''), 'base64'));
     }
 
-    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'] });
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(60000);
     await page.setUserAgent(UA);
@@ -139,7 +139,7 @@ app.post('/store-sync', async (req, res) => {
       return res.json({ ok: false, error: 'adminId, adminPass, shopdir are required' });
     }
 
-    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'] });
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(60000);
     await page.setUserAgent(UA);
@@ -418,7 +418,7 @@ app.post('/mitene', async (req, res) => {
       if (!Number.isFinite(maxN) || maxN < 0) maxN = 0;
     }
 
-    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'] });
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(60000);
     await page.setUserAgent(UA);
@@ -512,7 +512,7 @@ app.post('/mitene-creds', async (req, res) => {
     }
     const ids = memberIds.slice(0, 60); // 1回の上限（タイムアウト対策）
 
-    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'] });
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(60000);
     await page.setUserAgent(UA);
@@ -601,7 +601,7 @@ app.post('/mitene-status', async (req, res) => {
       return res.json(result);
     }
 
-    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'] });
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(60000);
     await page.setUserAgent(UA);
