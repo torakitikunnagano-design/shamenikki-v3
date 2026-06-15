@@ -3894,13 +3894,24 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     fetchStmtStatus(() => active);
     return () => { active = false; };
   }, [todayISO, refreshKey]);
-  // 自動ポーリング: マウント中20秒ごとに承認状況だけ再取得（refreshKey の重い全体更新は使わない）。
-  // store_id が有効なときだけ動かし、アンマウント時に clearInterval で必ず停止。
+  // 自動更新: 承認状況だけ軽量再取得（refreshKey の重い全体更新は使わない）。
+  //  - 20秒ごとの interval（フォアグラウンド中の定期更新）。document.hidden のときは無駄打ちしないのでスキップ。
+  //  - visibilitychange(visible) / window focus で即時取得。スマホは背景で interval がスロットリング/停止
+  //    されるため、画面に戻った瞬間に最新化するこの2イベントが本命。
+  //  - getActiveStoreId は常に truthy（空でも DEFAULT_STORE_ID）なので store_id ガードは不要＝置かない。
   useEffect(() => {
-    if (!getActiveStoreId()) return;
     let active = true;
-    const id = setInterval(() => { fetchStmtStatus(() => active); }, 20000);
-    return () => { active = false; clearInterval(id); };
+    const id = setInterval(() => { if (!document.hidden) fetchStmtStatus(() => active); }, 20000);
+    const onVisible = () => { if (document.visibilityState === "visible") fetchStmtStatus(() => active); };
+    const onFocus = () => fetchStmtStatus(() => active);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      active = false;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
   }, []);
   function patchStmtStatus(castId, patch) {
     setStmtStatus((prev) => {
