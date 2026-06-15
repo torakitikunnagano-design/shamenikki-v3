@@ -134,6 +134,32 @@ function shiftDaysFor(shifts, castName) {
   return null;
 }
 
+// 出勤日の配列(YYYY-MM-DD)から「連続出勤期間」を割り出す純粋関数。
+//  - 区切りルール: 隣り合う出勤日の日番号差が GAP_SPLIT(=4) 以上（＝間の空きが3日以上）なら別期間。
+//  - 入力は YYYY-MM-DD 前提（年跨ぎ補正は呼び出し側で mdToYMD 済みにする）。本関数は年跨ぎ責務を持たない。
+//  - 返り値: [{ start, end, workdays }]（start=初日, end=最終出勤日, workdays=その期間の実出勤日数）。
+const GAP_SPLIT = 4; // この日番号差以上で期間を区切る（休み2日までは同一・後で調整可能）
+function computeAttendancePeriods(dates) {
+  // 重複除去 → 妥当な YYYY-MM-DD のみ → 昇順ソート（文字列ソートで日付順になる）
+  const valid = [...new Set((dates || []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))].sort();
+  if (valid.length === 0) return [];
+  const dayNo = (d) => { const [y, m, dd] = d.split("-").map(Number); return Math.round(Date.UTC(y, m - 1, dd) / 86400000); }; // TZ非依存の日番号
+  const periods = [];
+  let start = valid[0], prev = valid[0], count = 1;
+  for (let i = 1; i < valid.length; i++) {
+    const cur = valid[i];
+    if (dayNo(cur) - dayNo(prev) >= GAP_SPLIT) {
+      periods.push({ start, end: prev, workdays: count }); // 期間確定
+      start = cur; count = 1;                               // 新期間開始
+    } else {
+      count++;
+    }
+    prev = cur;
+  }
+  periods.push({ start, end: prev, workdays: count }); // 末尾期間
+  return periods;
+}
+
 const initCourses = [
   { id: 1, minutes: 60 },
   { id: 2, minutes: 90 },
@@ -4574,6 +4600,23 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   {todayShift && (
                     <p style={{ fontSize: "11px", color: C.blue, fontWeight: "700", margin: "6px 0 0" }}>本日 {todayShift.start}〜{todayShift.end}</p>
                   )}
+                  {/* 【検証用・仮表示】メモリ上の出勤(A:M/D配列)から連続出勤期間を計算して表示。後で Step2(Supabase) に差し替え予定 */}
+                  {(() => {
+                    if (!Array.isArray(_days) || _days.length === 0) return null;
+                    const ymds = _days.map((s) => mdToYMD(s.date)).filter(Boolean);
+                    const periods = computeAttendancePeriods(ymds);
+                    if (periods.length === 0) return null;
+                    const md = (ymd) => { const [, m, d] = ymd.split("-"); return `${Number(m)}/${Number(d)}`; };
+                    return (
+                      <div style={{ marginTop: "6px" }}>
+                        {periods.map((p, i) => (
+                          <p key={i} style={{ fontSize: "10px", color: C.muted, fontWeight: "700", margin: 0, lineHeight: 1.4 }}>
+                            期間：{md(p.start)}〜{md(p.end)}（{p.workdays}日）
+                          </p>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
                   <MiteneButton cast={c} />
