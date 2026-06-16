@@ -586,7 +586,7 @@ function App() {
             if (!Array.isArray(localArr) || localArr.length === 0) setCasts([]);
           }
         } else {
-          // Supabaseにデータあり → localStorageのheaven_passをname照合でマージ
+          // Supabaseにデータあり → heaven_pass は Supabase優先・空ならlocalStorageをname照合でフォールバック
           try {
             const stored = localStorage.getItem(skey("shamenikki_casts"));
             const localCasts = stored ? JSON.parse(stored) : [];
@@ -599,7 +599,8 @@ function App() {
                 strong:       sc.strong       || "未分析",
                 weak:         sc.weak         || "未分析",
                 heaven_id:    sc.heaven_id    || "",
-                heaven_pass:  lc?.heaven_pass || "",
+                // Supabaseに値があればそれを優先。空のときだけローカルの値を温存（空で上書きしない）。
+                heaven_pass:  sc.heaven_pass || lc?.heaven_pass || "",
                 type:         sc.type         ?? undefined,
                 disclose:     sc.disclose     ?? undefined,
                 shindan_note: sc.shindan_note ?? undefined,
@@ -614,7 +615,7 @@ function App() {
   }, []);
 
   // 「更新」ボタン用: Supabase から casts を読み直して setCasts するだけの軽量再取得（シード/書き込みはしない）。
-  // データ形は initCasts の「Supabaseにデータあり」分岐と同じ（heaven_pass は localStorage から name 照合でマージ）。
+  // データ形は initCasts の「Supabaseにデータあり」分岐と同じ（heaven_pass は Supabase優先・空ならlocalStorageでフォールバック）。
   async function refreshCasts() {
     try {
       const { data, error } = await supabase.from("casts").select("*").eq("store_id", getActiveStoreId());
@@ -631,7 +632,8 @@ function App() {
           strong:       sc.strong       || "未分析",
           weak:         sc.weak         || "未分析",
           heaven_id:    sc.heaven_id    || "",
-          heaven_pass:  lc?.heaven_pass || "",
+          // Supabaseに値があればそれを優先。空のときだけローカルの値を温存（空で上書きしない）。
+          heaven_pass:  sc.heaven_pass || lc?.heaven_pass || "",
           type:         sc.type         ?? undefined,
           disclose:     sc.disclose     ?? undefined,
           shindan_note: sc.shindan_note ?? undefined,
@@ -4112,7 +4114,29 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         const pw = pwById.get(String(c.heaven_id));
         return pw ? { ...c, heaven_pass: pw } : c; // ローカルのみ更新（毎回上書き）
       }));
-      setSyncResult((p) => ({ ...(p || {}), credStatus: `✅ 今日出勤 ${pwById.size}人にミテネ用パスワードを設定（この端末のみ）` }));
+
+      // Supabase の casts.heaven_pass にも保存して端末間で共有する（heaven_pass 専用の小さな upsert。
+      // toSupabaseCast は heaven_pass を除外する設計のままにし、他カラムの保存挙動には触れない）。
+      // onConflict(store_id,name) で既存行の heaven_pass だけを更新する（payload に無いカラムは変更しない）。
+      const store = getActiveStoreId();
+      const passRows = (castList || [])
+        .map((c) => {
+          const pw = pwById.get(String(c.heaven_id));
+          return pw ? { store_id: store, name: c.name, heaven_pass: pw } : null;
+        })
+        .filter(Boolean);
+      if (passRows.length > 0) {
+        try {
+          supabase.from("casts").upsert(passRows, { onConflict: "store_id,name" })
+            .then(({ error }) => {
+              if (error) console.error("[fillMitenePasswords pass upsert] error:", error.message || error, error.details || "", error.hint || "");
+              else console.log("[fillMitenePasswords pass upsert] saved rows=" + passRows.length);
+            })
+            .catch((e) => console.error("[fillMitenePasswords pass upsert] exception:", e?.message || e));
+        } catch (e) { console.error("[fillMitenePasswords pass upsert] threw:", e?.message || e); }
+      }
+
+      setSyncResult((p) => ({ ...(p || {}), credStatus: `✅ 今日出勤 ${pwById.size}人にミテネ用パスワードを設定（クラウド共有）` }));
     } catch (e) {
       console.error("[fillMitenePasswords] exception:", e && e.message);
       setSyncResult((p) => ({ ...(p || {}), credStatus: "⚠️ パスワード取得に失敗しました（ロスターは保存済み）" }));
