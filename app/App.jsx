@@ -3867,7 +3867,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const [lockRefresh, setLockRefresh] = useState(0);
   const [syncLoading, setSyncLoading] = useState(null); // null | "casts" | "shifts"
   const [syncResult, setSyncResult] = useState(null);
-  const [busyOverlay, setBusyOverlay] = useState(false); // 他スタッフが同期中(409 busy)の中央オーバーレイ
+  const [busyOverlay, setBusyOverlay] = useState(null); // 他スタッフ処理中(409 busy)の中央オーバーレイ文言（null=非表示）
   const [showTodayOnly, setShowTodayOnly] = useState(true);
   const [openCalCell, setOpenCalCell] = useState(null); // { castName, date } | null
   const todayKey = getBusinessTodayKey();
@@ -4135,8 +4135,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       const data = await res.json();
       // 他のスタッフが同期中（サーバ側ロック）: 専用の中央オーバーレイを出して通常エラー表示はしない
       if (res.status === 409 && data.error === "busy") {
-        setBusyOverlay(true);
-        setTimeout(() => setBusyOverlay(false), 3000); // 3秒で自動的に消える
+        setBusyOverlay("他のスタッフが更新してるよ！少しまってね");
+        setTimeout(() => setBusyOverlay(null), 6000); // 6秒で自動的に消える
         return;
       }
       if (!res.ok || !data.casts) throw new Error(data.message || "同期に失敗しました");
@@ -4285,13 +4285,13 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         </div>
       )}
 
-      {/* 他スタッフが同期中(409 busy)の中央オーバーレイ。3秒で自動的に消える＋タップでも消える */}
+      {/* 他スタッフ処理中(409 busy)の中央オーバーレイ。文言は busyOverlay の文字列。6秒で自動的に消える＋タップでも消える */}
       {busyOverlay && (
         <div
-          onClick={() => setBusyOverlay(false)}
+          onClick={() => setBusyOverlay(null)}
           style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px", cursor: "pointer" }}>
           <p style={{ color: "white", fontWeight: "700", fontSize: "24px", lineHeight: 1.5, margin: 0, padding: "0 24px", textAlign: "center" }}>
-            他のスタッフが更新してるよ！少しまってね
+            {busyOverlay}
           </p>
         </div>
       )}
@@ -5327,6 +5327,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
   const [progress, setProgress] = useState(null); // { current, total, name }
   const [summary, setSummary] = useState(null);
   const [checking, setChecking] = useState(false); // 本日完了チェック（送信なし）実行中フラグ
+  const [busyOverlay, setBusyOverlay] = useState(null); // 他スタッフ処理中(409 busy)の中央オーバーレイ文言（null=非表示）
 
   const updateRow = (name, patch) =>
     setRows((prev) => prev.map((r) => (r.name === name ? { ...r, ...patch } : r)));
@@ -5335,20 +5336,53 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
     setRunning(true);
     setSummary(null);
 
-    // 全行を初期化（送信不可は最初からスキップ表示）
-    const init = todayCasts.map((c) => {
-      const sendable = !!(c.heaven_id && c.heaven_pass);
-      return { name: c.name, sendable, status: sendable ? "pending" : "skip", msg: sendable ? "" : "スキップ（要ID設定）" };
-    });
-    setRows(init);
+    // 店舗まるごとロックを取得（2台目を開始時点で弾く）。安全優先: 200 OK で確実に取れたときだけ送信に進む。
+    const shopdir = syncConfig?.shopdir;
+    try {
+      const acq = await fetch("/api/bulk-mitene-acquire", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopdir }),
+      });
+      if (acq.status === 409) {
+        // 他端末が送信中（ロック保持中）
+        setBusyOverlay("他のスタッフが送信中だよ！少しまってね");
+        setTimeout(() => setBusyOverlay(null), 6000); // 6秒で自動的に消える
+        setRunning(false);
+        return;
+      }
+      if (!acq.ok) {
+        // 409以外のエラー（VPSエラー等）: ロックを取れていないので送信しない
+        console.error("[bulk-mitene] acquire failed: status=" + acq.status);
+        setBusyOverlay("送信の準備に失敗したよ。少し待ってもう一度試してね");
+        setTimeout(() => setBusyOverlay(null), 6000); // 6秒で自動的に消える
+        setRunning(false);
+        return;
+      }
+    } catch (e) {
+      // acquire自体に接続できない: ロックを取れていないので送信しない（安全優先）
+      console.error("[bulk-mitene] acquire error:", e && e.message);
+      setBusyOverlay("送信の準備に失敗したよ。少し待ってもう一度試してね");
+      setTimeout(() => setBusyOverlay(null), 6000); // 6秒で自動的に消える
+      setRunning(false);
+      return;
+    }
 
-    // 「送信可」だけを上から順に1人ずつ直列で呼ぶ
-    const sendable = todayCasts.filter((c) => c.heaven_id && c.heaven_pass);
-    let totalSent = 0;
-    let successCount = 0;
-    const errors = [];
+    try {
+      // 全行を初期化（送信不可は最初からスキップ表示）
+      const init = todayCasts.map((c) => {
+        const sendable = !!(c.heaven_id && c.heaven_pass);
+        return { name: c.name, sendable, status: sendable ? "pending" : "skip", msg: sendable ? "" : "スキップ（要ID設定）" };
+      });
+      setRows(init);
 
-    for (let i = 0; i < sendable.length; i++) {
+      // 「送信可」だけを上から順に1人ずつ直列で呼ぶ
+      const sendable = todayCasts.filter((c) => c.heaven_id && c.heaven_pass);
+      let totalSent = 0;
+      let successCount = 0;
+      const errors = [];
+
+      for (let i = 0; i < sendable.length; i++) {
       const c = sendable[i];
       setProgress({ current: i + 1, total: sendable.length, name: c.name });
       updateRow(c.name, { status: "sending", msg: "送信中…" });
@@ -5386,12 +5420,24 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
         errors.push(`${c.name}：${em}`);
         updateRow(c.name, { status: "error", msg: em });
       }
-    }
+      }
 
-    const skipCount = todayCasts.length - sendable.length;
-    setProgress(null);
-    setSummary({ totalSent, successCount, targetCount: sendable.length, skipCount, errors });
-    setRunning(false);
+      const skipCount = todayCasts.length - sendable.length;
+      setProgress(null);
+      setSummary({ totalSent, successCount, targetCount: sendable.length, skipCount, errors });
+      setRunning(false);
+    } finally {
+      // 成功・失敗・中断のいずれでも必ず店舗ロックを解放（接続不可でも握りつぶす）
+      try {
+        await fetch("/api/bulk-mitene-release", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ shopdir }),
+        });
+      } catch (e) {
+        console.error("[bulk-mitene] release error:", e && e.message);
+      }
+    }
   }
 
   // 送信せず残数だけ読んで「本日完了」を反映（自己投稿の子も拾う）。start() と同型の直列ループ。
@@ -5456,6 +5502,17 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
   return (
     <div style={{ display: "grid", gap: "14px" }}>
       <Header title="一括ミテネ" sub="今日出勤キャストへ1人ずつ自動送信" color={C.accent2} />
+
+      {/* 他スタッフが送信中(409 busy)の中央オーバーレイ。文言は busyOverlay の文字列。6秒で自動的に消える＋タップでも消える */}
+      {busyOverlay && (
+        <div
+          onClick={() => setBusyOverlay(null)}
+          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px", cursor: "pointer" }}>
+          <p style={{ color: "white", fontWeight: "700", fontSize: "24px", lineHeight: 1.5, margin: 0, padding: "0 24px", textAlign: "center" }}>
+            {busyOverlay}
+          </p>
+        </div>
+      )}
 
       <div style={{ ...card, background: `${C.yellow}10`, borderColor: `${C.yellow}45` }}>
         <p style={{ fontSize: "12px", color: C.sub, fontWeight: "700", margin: 0, lineHeight: 1.5 }}>

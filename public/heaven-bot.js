@@ -675,5 +675,36 @@ app.post('/mitene-status', async (req, res) => {
     res.json(result);
   }
 });
+// ============================================================
+// 一括ミテネの店舗まるごとロック（2台目を開始時点で弾く）
+//  - キー: 'bulkmitene:'+shopdir（既存の 'shop:'/'heaven:' とは別の接頭辞で誤衝突を防ぐ）。
+//  - 値には取得時刻(ms)を入れ、TTL(30分)を過ぎた古いロックは失効扱いにして上書き取得を許す（異常終了でロックが残り続けるのを防ぐ）。
+//  - 既存の storeLocks Map を流用。他エンドポイントは 'bulkmitene:' を使わないのでぶつからない。
+// ============================================================
+const BULK_MITENE_TTL_MS = 30 * 60 * 1000; // 30分
+
+app.post('/bulk-mitene/acquire', (req, res) => {
+  const { shopdir } = req.body || {};
+  if (!shopdir) return res.status(400).json({ ok: false, error: 'shopdir required' });
+  const lockKey = 'bulkmitene:' + shopdir;
+  const acquiredAt = storeLocks.get(lockKey);
+  // 有効期限内の生きたロックがあれば busy。期限切れ(古い)なら上書き取得できる。
+  if (typeof acquiredAt === 'number' && (Date.now() - acquiredAt) < BULK_MITENE_TTL_MS) {
+    return res.status(409).json({ ok: false, error: 'busy', message: 'この店舗は現在ほかのスタッフが一括ミテネ送信中です。少し待ってからもう一度お試しください。' });
+  }
+  storeLocks.set(lockKey, Date.now()); // 取得時刻を記録
+  console.log('[bulk-mitene] acquire ' + lockKey);
+  return res.json({ ok: true });
+});
+
+app.post('/bulk-mitene/release', (req, res) => {
+  const { shopdir } = req.body || {};
+  if (!shopdir) return res.status(400).json({ ok: false, error: 'shopdir required' });
+  const lockKey = 'bulkmitene:' + shopdir;
+  storeLocks.delete(lockKey);
+  console.log('[bulk-mitene] release ' + lockKey);
+  return res.json({ ok: true });
+});
+
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.listen(3000, () => console.log('Heaven Bot :3000'));
