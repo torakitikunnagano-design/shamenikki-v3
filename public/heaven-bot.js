@@ -616,19 +616,15 @@ app.post('/mitene-status', async (req, res) => {
   let browser;
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  const readRemaining = async (page) => page.evaluate(() => {
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-      const m = node.textContent.trim().match(/残り回数[：:]\s*(\d+)\s*[\/／]\d+/);
-      if (m) return parseInt(m[1], 10);
-    }
-    return null;
-  });
-
-  const readUsedUp = async (page) => page.evaluate(() => {
+  // J10ComeonVisitorList ページ1枚から「使い切り」と「残り回数」を同時に判定する。
+  //  - 使い切り: 本文に「本日はミテネを使い切りました」
+  //  - 残数: 「ミテネ残り回数：◯回」（◯は数字）。コロンは全角「：」半角「:」どちらも可。
+  const readJ10Status = async (page) => page.evaluate(() => {
     const t = (document.body && document.body.innerText) || '';
-    return t.includes('本日分のミテネは使い切りました');
+    const usedUp = t.includes('本日はミテネを使い切りました');
+    const m = t.match(/ミテネ残り回数\s*[：:]\s*(\d+)\s*回/);
+    const remaining = m ? parseInt(m[1], 10) : null;
+    return { usedUp, remaining };
   });
 
   try {
@@ -648,54 +644,18 @@ app.post('/mitene-status', async (req, res) => {
     await page.type('input[name="txt_password"]', heavenPass);
     await Promise.all([page.click('input[type="submit"]'), page.waitForNavigation(WAIT)]);
 
-    // Step A: 管理トップ(J1Main)で「本日分のミテネは使い切りました」を判定
-    await page.goto('https://spgirl.cityheaven.net/J1Main.php', WAIT);
-    await sleep(1500);
-    result.usedUp = await readUsedUp(page);
-
-    if (result.usedUp) {
+    // J10ComeonVisitorList 1ページで「使い切り」と「残り回数」の両方を判定する（J1Mainは見ない）。
+    const miteneUrl = 'https://spgirl.cityheaven.net/J10ComeonVisitorList.php?gid=' + heavenId;
+    await page.goto(miteneUrl, WAIT);
+    await sleep(2000);
+    const st = await readJ10Status(page);
+    if (st.usedUp) {
       // 使い切り＝本日完了。残数は0扱い。
+      result.usedUp = true;
       result.remaining = 0;
     } else {
-      // まだ残ってる→ミテネ一覧ページで残り回数を読む
-      const miteneUrl = 'https://spgirl.cityheaven.net/J10ComeonVisitorList.php?gid=' + heavenId;
-      await page.goto(miteneUrl, WAIT);
-      await sleep(2000);
-      result.remaining = await readRemaining(page);
-
-      // 【一時デバッグ】残数が読めなかった(null)ときだけ、実際のページ状態をログに出す。
-      //  - 目的: gid=heavenId が本当に残数ページか／別ページにリダイレクトされていないか／
-      //    「残り回数：N/M」の表記ゆれ（全角コロン等）がないか、を確認する。調査後に削除する。
-      if (result.remaining === null) {
-        try {
-          const dbg = await page.evaluate(() => {
-            const text = (document.body && document.body.innerText) || '';
-            const findAround = (kw) => {
-              const i = text.indexOf(kw);
-              if (i < 0) return null;
-              return text.slice(Math.max(0, i - 30), i + 60).replace(/\s+/g, ' ').trim();
-            };
-            return {
-              url: location.href,
-              head500: text.slice(0, 500),
-              has残り回数: text.includes('残り回数'),
-              has回数: text.includes('回数'),
-              has残り: text.includes('残り'),
-              around残り回数: findAround('残り回数'),
-              around回数: findAround('回数'),
-              around残り: findAround('残り'),
-            };
-          });
-          slog('DEBUG remaining=null pageUrl=' + dbg.url);
-          slog('DEBUG keywords: 残り回数=' + dbg.has残り回数 + ' 回数=' + dbg.has回数 + ' 残り=' + dbg.has残り);
-          if (dbg.around残り回数) slog('DEBUG around[残り回数]: ' + dbg.around残り回数);
-          if (dbg.around回数)   slog('DEBUG around[回数]: ' + dbg.around回数);
-          if (dbg.around残り)   slog('DEBUG around[残り]: ' + dbg.around残り);
-          slog('DEBUG head500: ' + encodeURIComponent(dbg.head500));
-        } catch (de) {
-          slog('DEBUG dump failed: ' + de.message);
-        }
-      }
+      // 「ミテネ残り回数：◯回」が読めれば数値、読めなければ null（従来どおり）。
+      result.remaining = st.remaining;
     }
     slog('remaining=' + result.remaining + ' usedUp=' + result.usedUp);
 
