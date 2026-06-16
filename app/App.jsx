@@ -4234,9 +4234,14 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         } catch (e) { console.error("[doSync casts upsert] threw:", e?.message || e); }
         setSyncResult({ mode: "casts", addedCount, updatedCount, total: dedupedNext.length });
         setShowTodayOnly(false);
-        // ロスター保存が完了した後、パスワードを非ブロッキングで埋める（失敗してもロスターは保存済み）。
+        // ロスター保存が完了した後、パスワードを埋める。await して「パス取得完了までオーバーレイを出し続ける」。
         // 今回の同期で取れた最新シフト(data.shifts)を渡して今日出勤を正確に判定。
-        fillMitenePasswords(dedupedNext, data.shifts);
+        // ロスターは保存済みなので、パス取得が失敗しても同期全体は失敗扱いにしない（自前で catch）。
+        try {
+          await fillMitenePasswords(dedupedNext, data.shifts);
+        } catch (e) {
+          console.warn("mitene password fill failed (roster already saved):", e);
+        }
       } else {
         if (!Array.isArray(data.shifts)) throw new Error("出勤データが取得できませんでした");
         // 同期データの date は "M/D" 形式 → 給料ページ参照用に "YYYY-MM-DD" キーも書く（年跨ぎは mdToYMD が補正）
