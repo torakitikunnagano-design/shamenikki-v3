@@ -662,6 +662,40 @@ app.post('/mitene-status', async (req, res) => {
       await page.goto(miteneUrl, WAIT);
       await sleep(2000);
       result.remaining = await readRemaining(page);
+
+      // 【一時デバッグ】残数が読めなかった(null)ときだけ、実際のページ状態をログに出す。
+      //  - 目的: gid=heavenId が本当に残数ページか／別ページにリダイレクトされていないか／
+      //    「残り回数：N/M」の表記ゆれ（全角コロン等）がないか、を確認する。調査後に削除する。
+      if (result.remaining === null) {
+        try {
+          const dbg = await page.evaluate(() => {
+            const text = (document.body && document.body.innerText) || '';
+            const findAround = (kw) => {
+              const i = text.indexOf(kw);
+              if (i < 0) return null;
+              return text.slice(Math.max(0, i - 30), i + 60).replace(/\s+/g, ' ').trim();
+            };
+            return {
+              url: location.href,
+              head500: text.slice(0, 500),
+              has残り回数: text.includes('残り回数'),
+              has回数: text.includes('回数'),
+              has残り: text.includes('残り'),
+              around残り回数: findAround('残り回数'),
+              around回数: findAround('回数'),
+              around残り: findAround('残り'),
+            };
+          });
+          slog('DEBUG remaining=null pageUrl=' + dbg.url);
+          slog('DEBUG keywords: 残り回数=' + dbg.has残り回数 + ' 回数=' + dbg.has回数 + ' 残り=' + dbg.has残り);
+          if (dbg.around残り回数) slog('DEBUG around[残り回数]: ' + dbg.around残り回数);
+          if (dbg.around回数)   slog('DEBUG around[回数]: ' + dbg.around回数);
+          if (dbg.around残り)   slog('DEBUG around[残り]: ' + dbg.around残り);
+          slog('DEBUG head500: ' + encodeURIComponent(dbg.head500));
+        } catch (de) {
+          slog('DEBUG dump failed: ' + de.message);
+        }
+      }
     }
     slog('remaining=' + result.remaining + ' usedUp=' + result.usedUp);
 
