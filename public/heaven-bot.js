@@ -656,6 +656,39 @@ app.post('/mitene-status', async (req, res) => {
     } else {
       // 「ミテネ残り回数：◯回」が読めれば数値、読めなければ null（従来どおり）。
       result.remaining = st.remaining;
+
+      // 【一時デバッグ】まだ送れるはず(usedUp=false)なのに残数が読めなかった(null)ときだけ実態を出す。
+      //  - 目的: 「文言が遅延描画でまだ出ていない」「数字が全角」「文言が微妙に違う」を切り分ける。調査後に削除する。
+      if (st.remaining === null) {
+        try {
+          const dbg = await page.evaluate(() => {
+            const text = (document.body && document.body.innerText) || '';
+            const around = (kw) => {
+              const i = text.indexOf(kw);
+              if (i < 0) return null;
+              return text.slice(Math.max(0, i - 30), i + kw.length + 40); // 空白は圧縮しない（全角数字を見たい）
+            };
+            return {
+              url: location.href,
+              hasミテネ残り回数: text.includes('ミテネ残り回数'),
+              has残り回数: text.includes('残り回数'),
+              has回数: text.includes('回数'),
+              aroundミテネ残り回数: around('ミテネ残り回数'),
+              around残り回数: around('残り回数'),
+              around回数: around('回数'),
+              head800: text.slice(0, 800),
+            };
+          });
+          slog('DEBUG status-null pageUrl=' + dbg.url);
+          slog('DEBUG keywords: ミテネ残り回数=' + dbg.hasミテネ残り回数 + ' 残り回数=' + dbg.has残り回数 + ' 回数=' + dbg.has回数);
+          if (dbg.aroundミテネ残り回数 != null) slog('DEBUG around[ミテネ残り回数] raw=' + dbg.aroundミテネ残り回数 + ' / enc=' + encodeURIComponent(dbg.aroundミテネ残り回数));
+          if (dbg.around残り回数 != null)       slog('DEBUG around[残り回数] raw=' + dbg.around残り回数 + ' / enc=' + encodeURIComponent(dbg.around残り回数));
+          if (dbg.around回数 != null)           slog('DEBUG around[回数] raw=' + dbg.around回数 + ' / enc=' + encodeURIComponent(dbg.around回数));
+          slog('DEBUG head800: ' + encodeURIComponent(dbg.head800));
+        } catch (de) {
+          slog('DEBUG dump failed: ' + de.message);
+        }
+      }
     }
     slog('remaining=' + result.remaining + ' usedUp=' + result.usedUp);
 
