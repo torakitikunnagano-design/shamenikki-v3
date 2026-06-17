@@ -3861,6 +3861,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const [guarantee, setGuarantee] = useLocalStorage("shamenikki_guarantee", {});
   const [violations, setViolations] = useLocalStorage("shamenikki_violations", {});
   const [extraWorkdays, setExtraWorkdays] = useLocalStorage("shamenikki_extra_workdays", {});
+  // 【出勤期間②】帰宅マーカー: name → 帰宅した営業日(YYYY-MM-DD)。マーカー日より後の出勤が無い子を一覧から隠す。
+  const [homeReturns, setHomeReturns] = useLocalStorage("shamenikki_home_returns", {});
   const [gModal, setGModal] = useState(null); // cast name | null
   const [calModal, setCalModal] = useState(null); // 違反カレンダーを開いているキャスト名 | null
   const [gForm, setGForm] = useState({ type: "total", dailyAmount: "", startDate: "", endDate: "" });
@@ -4004,11 +4006,49 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     setLockRefresh((n) => n + 1);
   }
 
+  // 【出勤期間③】1人ぶんの「保証期間スナップショット」を salary_period_archives に upsert する（消す前に保存）。
+  //  - 戻り値: true=保存できた / false=対象外（保証や開始終了日が無く財務スナップショットを作れない）。
+  //  - Supabase エラー時は throw（呼び出し側＝帰宅ハンドラが「保存できないのに消さない」を守って中断できるように）。
+  //  - 計算は既存の calcGuaranteeResult（保証ページと同じ guaranteeCtx）を再利用。records は localStorage の給料記録から期間で filter。
+  async function archiveCastPeriod(cast) {
+    const name = cast?.name;
+    if (!name) return false;
+    const g = guarantee[name];
+    if (!g?.startDate || !g?.endDate) return false; // 期間が無い → スナップショット不可（対象外）
+    const gr = calcGuaranteeResult(name, guaranteeCtx);
+    if (!gr) return false; // type/dailyAmount 等が欠けて計算不可（対象外）
+    const startDate = g.startDate, endDate = g.endDate;
+    const castId = cast.heaven_id || name; // 既存の給料記録キーと完全一致（heaven_id||name）
+    const basis = settings?.salaryBasis ?? "gross"; // calcGuaranteeResult と同じ基準（gross/net）
+    let salaryRecs = [];
+    try { salaryRecs = JSON.parse(localStorage.getItem(skey(`shamenikki_salary_${castId}`))) || []; } catch {}
+    const records = salaryRecs.filter((r) => r.date >= startDate && r.date <= endDate); // 期間内のレコードだけ
+    const { error } = await supabase.from("salary_period_archives").upsert({
+      store_id:           getActiveStoreId(),
+      cast_id:            castId,
+      cast_name:          name,
+      period_start:       startDate,
+      period_end:         endDate,
+      basis,
+      daily:              gr.daily,
+      work_days:          gr.workDays,
+      guarantee_base:     gr.guaranteeBase,
+      earned_gross:       gr.earnedGross,
+      cut_amount:         gr.cutAmount,
+      adjusted_guarantee: gr.adjustedGuarantee,
+      supplement:         gr.supplement,
+      balance:            gr.balance,
+      records,
+    }, { onConflict: "store_id,cast_id,period_start,period_end" });
+    if (error) throw new Error(error.message || "アーカイブ保存に失敗しました");
+    return true;
+  }
+
   // 【出勤期間②】1人のキャストを「新しい出勤期間」用にリセットする（1人ぶんのみ。トリガーはまだ付けない）。
-  //  - クリアする: 違反記録(violations) と 追加出勤日(extraWorkdays) の、そのキャストぶんだけ。
-  //  - 触らない（残す）: 診断系(strong/weak/type/disclose/shindan_note/cast_type)・保証(guarantee)・
+  //  - クリアする: 違反記録(violations)・追加出勤日(extraWorkdays)・保証(guarantee) の、そのキャストぶんだけ。
+  //  - 触らない（残す）: 診断系(strong/weak/type/disclose/shindan_note/cast_type)・
   //    name・heaven_id/heaven_pass・is_active。給料の蓄積もここでは触らない（③で別途）。
-  //  - 永続化: violations/extraWorkdays は useLocalStorage 管理なので setXxx すれば localStorage へ自動反映される
+  //  - 永続化: violations/extraWorkdays/guarantee は useLocalStorage 管理なので setXxx すれば localStorage へ自動反映される
   //    （対応する Supabase テーブルは無いため同期不要）。resetDiagLock と同じ「state更新＝永続」方針に揃える。
   function resetCastForNewPeriod(cast) {
     const name = cast?.name;
@@ -4020,6 +4060,12 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       return next;
     });
     setExtraWorkdays((prev) => {
+      if (!(name in prev)) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+    setGuarantee((prev) => {
       if (!(name in prev)) return prev;
       const next = { ...prev };
       delete next[name];
@@ -4647,7 +4693,20 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
           <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: "0 0 8px" }}>明細の承認状況の読み込みに失敗しました。再読み込みしてください</p>
         )}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: "10px", alignItems: "start" }}>
-          {casts.filter((c) => { if (!showTodayOnly) return true; const d = shiftDaysFor(shifts, c.name); return Array.isArray(d) && d.some((s) => s.date === todayKey); }).map((c) => {
+          {casts.filter((c) => {
+            // 【出勤期間②】帰宅で隠す（両タブ共通）: 帰宅マーカーがあり、マーカー日より後の出勤日が無い子は一覧から外す。
+            //  出勤日は shiftDatesByName（normalizeName→YYYY-MM-DD配列）。最新出勤日 > マーカー日 なら表示、そうでなければ非表示。
+            //  ＝また出勤して新しいシフトが入れば自動で表示に戻る（明示的な復活コード不要。マーカーは残置＝次の帰宅で上書き）。
+            const homeDate = homeReturns[c.name];
+            if (homeDate) {
+              const ds = shiftDatesByName.get(normalizeName(c.name));
+              const latest = Array.isArray(ds) && ds.length ? ds.reduce((a, b) => (a > b ? a : b)) : null;
+              if (!(latest && latest > homeDate)) return false; // 帰宅後の新しい出勤が無い → 隠す
+            }
+            if (!showTodayOnly) return true;
+            const d = shiftDaysFor(shifts, c.name);
+            return Array.isArray(d) && d.some((s) => s.date === todayKey);
+          }).map((c) => {
             let diagData = null;
             try { const s = localStorage.getItem(skey(`cast_type_${c.heaven_id || c.name}`)); if (s) diagData = JSON.parse(s); } catch {}
             const isLocked = (diagData?.retries ?? 0) >= 2;
@@ -4730,7 +4789,19 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   </button>
                   {/* 【出勤期間②】停止ボタンを「帰宅」に置換（is_active/toggle() は残置。UIから停止だけ外す）。
                       確認OKのときだけ resetCastForNewPeriod(c)＝違反記録・追加出勤日のクリア（給料アーカイブ=③は後で同じ場所に足す）。 */}
-                  <button onClick={() => { if (window.confirm(c.name + " さんを帰宅（カードをリセット）します。よろしいですか？")) resetCastForNewPeriod(c); }} style={{ padding: "7px 13px", borderRadius: "12px", border: "1.5px solid #8b5e3c55", background: "#8b5e3c12", color: "#8b5e3c", fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                  <button onClick={async () => {
+                    if (!window.confirm(c.name + " さんを帰宅（カードをリセット）します。よろしいですか？")) return;
+                    try {
+                      // 「消す前に保存」が鉄則: まずアーカイブ（保存できた or 対象外）を確かめてから、クリア→隠す。
+                      await archiveCastPeriod(c);
+                    } catch (e) {
+                      // 保存に失敗したらクリア・隠すに進まず中断（給料スナップショットを失わない）。
+                      alert("給料アーカイブの保存に失敗しました。帰宅処理を中止します。\n" + (e?.message || e));
+                      return;
+                    }
+                    resetCastForNewPeriod(c);
+                    setHomeReturns((prev) => ({ ...prev, [c.name]: getBusinessToday() }));
+                  }} style={{ padding: "7px 13px", borderRadius: "12px", border: "1.5px solid #8b5e3c55", background: "#8b5e3c12", color: "#8b5e3c", fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     🏠 帰宅
                   </button>
                   {diagData?.type && (
