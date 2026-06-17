@@ -4800,7 +4800,12 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                       return;
                     }
                     resetCastForNewPeriod(c);
-                    setHomeReturns((prev) => ({ ...prev, [c.name]: getBusinessToday() }));
+                    // マーカーは「今日」ではなく、そのキャストの現在の最新シフト日（未来予定を含む最大日）にする。
+                    // 表示フィルタと同じ shiftDatesByName / normalizeName から取得。シフトが無ければ今日(営業日)をフォールバック。
+                    const ds = shiftDatesByName.get(normalizeName(c.name));
+                    const latest = Array.isArray(ds) && ds.length ? ds.reduce((a, b) => (a > b ? a : b)) : null;
+                    const marker = latest || getBusinessToday();
+                    setHomeReturns((prev) => ({ ...prev, [c.name]: marker }));
                   }} style={{ padding: "7px 13px", borderRadius: "12px", border: "1.5px solid #8b5e3c55", background: "#8b5e3c12", color: "#8b5e3c", fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     🏠 帰宅
                   </button>
