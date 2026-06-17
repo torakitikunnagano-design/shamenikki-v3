@@ -3866,6 +3866,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   // 【出勤期間②】帰宅マーカー: name → 帰宅した営業日(YYYY-MM-DD)。マーカー日より後の出勤が無い子を一覧から隠す。
   const [homeReturns, setHomeReturns] = useLocalStorage("shamenikki_home_returns", {});
   const [gModal, setGModal] = useState(null); // cast name | null
+  const [archiveModal, setArchiveModal] = useState(null); // cast オブジェクト | null（過去の給料モーダル）
   const [calModal, setCalModal] = useState(null); // 違反カレンダーを開いているキャスト名 | null
   const [gForm, setGForm] = useState({ type: "total", dailyAmount: "", startDate: "", endDate: "" });
   const [gSaved, setGSaved] = useState(false);
@@ -4435,6 +4436,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         </div>
       )}
 
+      {archiveModal && <ArchiveModal cast={archiveModal} onClose={() => setArchiveModal(null)} />}
+
       {gModal && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
           <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(255,107,157,0.2)" }}>
@@ -4703,7 +4706,6 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
             if (homeDate) {
               const ds = shiftDatesByName.get(normalizeName(c.name));
               const latest = Array.isArray(ds) && ds.length ? ds.reduce((a, b) => (a > b ? a : b)) : null;
-              if (c.name === "あきは") console.log("[DEBUG帰宅]", "name=", c.name, "homeDate=", homeDate, "key=", normalizeName(c.name), "ds=", JSON.stringify(ds), "latest=", latest, "hideするか=", !(latest && latest > homeDate));
               if (!(latest && latest > homeDate)) return false; // 帰宅後の新しい出勤が無い → 隠す
             }
             if (!showTodayOnly) return true;
@@ -4789,6 +4791,10 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   <IdentityDocsButton cast={c} />
                   <button onClick={() => openGuaranteeModal(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     保証設定
+                  </button>
+                  {/* 【出勤期間】過去の給料: そのキャストの salary_period_archives をモーダル表示（保証設定モーダルと同型）。 */}
+                  <button onClick={() => setArchiveModal(c)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                    📦 過去の給料
                   </button>
                   {/* 【出勤期間②】停止ボタンを「帰宅」に置換（is_active/toggle() は残置。UIから停止だけ外す）。
                       確認OKのときだけ resetCastForNewPeriod(c)＝違反記録・追加出勤日のクリア（給料アーカイブ=③は後で同じ場所に足す）。 */}
@@ -5084,6 +5090,68 @@ function RankingPage({ scores }) {
 // ============================================================
 // コース時間設定
 // ============================================================
+// ============================================================
+// 過去の給料モーダル: 1キャストの salary_period_archives を一覧表示（保証設定モーダル gModal と同型）
+// ============================================================
+function ArchiveModal({ cast, onClose }) {
+  const [rows, setRows] = useState([]);
+  const castId = cast?.heaven_id || cast?.name; // archiveCastPeriod の保存キーと一致
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase.from("salary_period_archives").select("*").eq("store_id", getActiveStoreId()).eq("cast_id", castId);
+        if (error) { console.error("過去の給料 取得失敗:", error); return; }
+        if (!active || !Array.isArray(data)) return;
+        const sorted = [...data].sort((a, b) => (a.period_start < b.period_start ? 1 : a.period_start > b.period_start ? -1 : 0)); // period_start 降順
+        setRows(sorted);
+      } catch (e) { console.error("過去の給料 取得例外:", e); }
+    })();
+    return () => { active = false; };
+  }, [castId]);
+
+  const yen = (v) => "¥" + Number(v || 0).toLocaleString();
+  const toMD = (ymd) => { if (!ymd) return ""; const [, m, d] = String(ymd).split("-"); return `${Number(m)}/${Number(d)}`; };
+
+  return (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+      <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(255,107,157,0.2)", maxHeight: "80vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+          <div>
+            <p style={{ fontWeight: "700", fontSize: "18px", color: C.text, margin: "0 0 4px" }}>{cast?.name}</p>
+            <p style={{ color: C.yellow, fontSize: "12px", margin: 0 }}>過去の給料</p>
+          </div>
+          <button onClick={onClose} style={{ background: `${C.accent}15`, border: "none", width: "32px", height: "32px", borderRadius: "50%", fontSize: "18px", cursor: "pointer", color: C.accent, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+        </div>
+        {rows.length === 0 ? (
+          <p style={{ fontSize: "13px", color: C.muted, fontWeight: "700", margin: 0 }}>保存された期間はまだありません</p>
+        ) : (
+          <div style={{ display: "grid", gap: "10px" }}>
+            {rows.map((r) => (
+              <div key={`${r.period_start}_${r.period_end}`} style={{ ...card }}>
+                <p style={{ fontSize: "12px", color: C.sub, fontWeight: "700", margin: "0 0 8px" }}>{toMD(r.period_start)}〜{toMD(r.period_end)}</p>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: "8px" }}>
+                  {[
+                    ["出勤日数", `${Number(r.work_days || 0)}日`],
+                    ["実収入", yen(r.earned_gross)],
+                    ["保証", yen(r.adjusted_guarantee)],
+                    ["補填", yen(r.supplement)],
+                  ].map(([label, val]) => (
+                    <div key={label} style={{ background: C.surface, borderRadius: "10px", padding: "8px 10px" }}>
+                      <p style={{ fontSize: "10px", color: C.muted, fontWeight: "700", margin: "0 0 2px" }}>{label}</p>
+                      <p style={{ fontSize: "14px", color: C.text, fontWeight: "700", margin: 0 }}>{val}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ============================================================
 // アーカイブ（管理者）: 帰宅時に salary_period_archives へ保存した保証期間スナップショットの一覧
 // ============================================================
