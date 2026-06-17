@@ -1055,6 +1055,7 @@ function App() {
     // { id: "ranking", label: "ランキング", icon: "🌟" }, // 作り直し予定のため一時非表示
     // { id: "title",   label: "タイトル",  icon: "✏️" }, // 作り直し予定のため一時非表示
     { id: "courses",   label: "コース設定", icon: "⏱️" },
+    { id: "archives",  label: "アーカイブ", icon: "📦" },
     { id: "settings",  label: "設定",    icon: "⚙️" },
   ];
 
@@ -1197,6 +1198,7 @@ function App() {
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
                 {mode === "admin" && page === "courses"   && <CoursesPage courses={courses} setCourses={setCourses} />}
+                {mode === "admin" && page === "archives"  && <ArchivesPage />}
                 {mode === "admin" && page === "settings"  && <SettingsPage settings={settings} setSettings={setSettings} syncConfig={syncConfig} setSyncConfig={setSyncConfig} cutDays={cutDays} setCutDays={setCutDays} />}
               </div>
             </>
@@ -5081,6 +5083,66 @@ function RankingPage({ scores }) {
 // ============================================================
 // コース時間設定
 // ============================================================
+// ============================================================
+// アーカイブ（管理者）: 帰宅時に salary_period_archives へ保存した保証期間スナップショットの一覧
+// ============================================================
+function ArchivesPage() {
+  const [rows, setRows] = useState([]);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase.from("salary_period_archives").select("*").eq("store_id", getActiveStoreId());
+        if (error) { console.error("アーカイブ取得失敗:", error); return; }
+        if (!active || !Array.isArray(data)) return;
+        // period_start の降順（新しい期間が一番上）
+        const sorted = [...data].sort((a, b) => (a.period_start < b.period_start ? 1 : a.period_start > b.period_start ? -1 : 0));
+        setRows(sorted);
+      } catch (e) { console.error("アーカイブ取得例外:", e); }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  const yen = (v) => "¥" + Number(v || 0).toLocaleString();
+  const toMD = (ymd) => { if (!ymd) return ""; const [, m, d] = String(ymd).split("-"); return `${Number(m)}/${Number(d)}`; };
+
+  return (
+    <div style={{ display: "grid", gap: "16px" }}>
+      <Header title="アーカイブ" sub="帰宅時に保存した保証期間の記録" color={C.yellow} />
+
+      {rows.length === 0 ? (
+        <div style={{ ...card }}>
+          <p style={{ fontSize: "13px", color: C.muted, fontWeight: "700", margin: 0 }}>まだ保存された期間はありません</p>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: "10px" }}>
+          {rows.map((r) => (
+            <div key={`${r.cast_id}_${r.period_start}_${r.period_end}`} style={{ ...card }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "10px" }}>
+                <p style={{ fontWeight: "700", fontSize: "15px", color: C.text, margin: 0 }}>{r.cast_name}</p>
+                <p style={{ fontSize: "12px", color: C.sub, fontWeight: "700", margin: 0 }}>{toMD(r.period_start)}〜{toMD(r.period_end)}</p>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "8px" }}>
+                {[
+                  ["出勤日数", `${Number(r.work_days || 0)}日`],
+                  ["実収入", yen(r.earned_gross)],
+                  ["保証", yen(r.adjusted_guarantee)],
+                  ["補填", yen(r.supplement)],
+                ].map(([label, val]) => (
+                  <div key={label} style={{ background: C.surface, borderRadius: "10px", padding: "8px 10px" }}>
+                    <p style={{ fontSize: "10px", color: C.muted, fontWeight: "700", margin: "0 0 2px" }}>{label}</p>
+                    <p style={{ fontSize: "14px", color: C.text, fontWeight: "700", margin: 0 }}>{val}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CoursesPage({ courses, setCourses }) {
   const [newMin, setNewMin] = useState("");
   const [editId, setEditId] = useState(null);
