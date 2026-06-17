@@ -4703,6 +4703,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
             if (homeDate) {
               const ds = shiftDatesByName.get(normalizeName(c.name));
               const latest = Array.isArray(ds) && ds.length ? ds.reduce((a, b) => (a > b ? a : b)) : null;
+              if (c.name === "あきは") console.log("[DEBUG帰宅]", "name=", c.name, "homeDate=", homeDate, "key=", normalizeName(c.name), "ds=", JSON.stringify(ds), "latest=", latest, "hideするか=", !(latest && latest > homeDate));
               if (!(latest && latest > homeDate)) return false; // 帰宅後の新しい出勤が無い → 隠す
             }
             if (!showTodayOnly) return true;
