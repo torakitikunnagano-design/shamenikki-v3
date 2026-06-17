@@ -4004,6 +4004,29 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     setLockRefresh((n) => n + 1);
   }
 
+  // 【出勤期間②】1人のキャストを「新しい出勤期間」用にリセットする（1人ぶんのみ。トリガーはまだ付けない）。
+  //  - クリアする: 違反記録(violations) と 追加出勤日(extraWorkdays) の、そのキャストぶんだけ。
+  //  - 触らない（残す）: 診断系(strong/weak/type/disclose/shindan_note/cast_type)・保証(guarantee)・
+  //    name・heaven_id/heaven_pass・is_active。給料の蓄積もここでは触らない（③で別途）。
+  //  - 永続化: violations/extraWorkdays は useLocalStorage 管理なので setXxx すれば localStorage へ自動反映される
+  //    （対応する Supabase テーブルは無いため同期不要）。resetDiagLock と同じ「state更新＝永続」方針に揃える。
+  function resetCastForNewPeriod(cast) {
+    const name = cast?.name;
+    if (!name) return; // 名前が無ければ何もしない（キーが特定できない）
+    setViolations((prev) => {
+      if (!(name in prev)) return prev; // 既に無ければ無駄な再レンダ/再書き込みを避ける
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+    setExtraWorkdays((prev) => {
+      if (!(name in prev)) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+  }
+
   function toggle(name) {
     const updated = casts.map((c) => c.name === name ? { ...c, is_active: !c.is_active } : c);
     setCasts(updated);
@@ -4705,8 +4728,10 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   <button onClick={() => openGuaranteeModal(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
                     保証設定
                   </button>
-                  <button onClick={() => toggle(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${c.is_active ? C.red : C.green}45`, background: `${c.is_active ? C.red : C.green}10`, color: c.is_active ? C.red : C.green, fontWeight: "700", cursor: "pointer", fontSize: "11px" }}>
-                    {c.is_active ? "停止" : "再開"}
+                  {/* 【出勤期間②】停止ボタンを「帰宅」に置換（is_active/toggle() は残置。UIから停止だけ外す）。
+                      確認OKのときだけ resetCastForNewPeriod(c)＝違反記録・追加出勤日のクリア（給料アーカイブ=③は後で同じ場所に足す）。 */}
+                  <button onClick={() => { if (window.confirm(c.name + " さんを帰宅（カードをリセット）します。よろしいですか？")) resetCastForNewPeriod(c); }} style={{ padding: "7px 13px", borderRadius: "12px", border: "1.5px solid #8b5e3c55", background: "#8b5e3c12", color: "#8b5e3c", fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
+                    🏠 帰宅
                   </button>
                   {diagData?.type && (
                     <button onClick={() => resetDiagLock(c)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.yellow}60`, background: `${C.yellow}10`, color: C.yellow, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
