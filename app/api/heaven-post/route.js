@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const VPS_URL = "http://160.251.166.73:3000/post";
+const VPS_URL = "http://163.44.98.98:3000/post";
 const BASE64_LIMIT_BYTES = 3 * 1024 * 1024; // base64後 約3MB を上限
 
 export async function POST(request) {

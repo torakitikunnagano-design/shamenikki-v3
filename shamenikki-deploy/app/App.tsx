@@ -814,7 +814,7 @@ function HeavenPostButton({ castName, diary, result, casts, postedTime }) {
   const hasCredentials = cast?.heaven_id && cast?.heaven_pass;
 
   // VPSサーバーのURL
-  const VPS_URL = "http://160.251.166.73:3000";
+  const VPS_URL = "http://163.44.98.98:3000";
 
   function extractTitle(text) {
     const match = text.match(/改善タイトル案[\s\S]*?・(.+)/);

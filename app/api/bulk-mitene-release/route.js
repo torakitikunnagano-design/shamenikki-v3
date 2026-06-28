@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const VPS_URL = "http://160.251.166.73:3000/bulk-mitene/release";
+const VPS_URL = "http://163.44.98.98:3000/bulk-mitene/release";
 
 export async function POST(request) {
   try {
