@@ -4412,8 +4412,11 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         if (!Array.isArray(data.shifts)) throw new Error("出勤データが取得できませんでした");
         // 同期データの date は "M/D" 形式 → 給料ページ参照用に "YYYY-MM-DD" キーも書く（年跨ぎは mdToYMD が補正）
         const store = getActiveStoreId();
+        const todayYmd = getBusinessToday();  // 営業日基準の今日（削除は今日以降のみ＝過去実績は消さない）
         const shiftRows = [];           // Supabase 保存用
         const seenRow = new Set();      // (store_id,cast_name,date) 重複排除
+        const syncedNames = new Set();  // 今回同期に登場したキャスト名（cleanName済み）
+        const syncedKeys = new Set();   // 今回同期の "cast_name|YYYY-MM-DD" 組
         setShifts((prev) => {
           // 名前→M/D配列は「総入れ替え」: 前回同期の残骸（ヘブン側で消えた出勤）が今日出勤に紛れるのを防ぐ。
           // "名前_YYYY-MM-DD" キー（オブジェクト値）は給料・時間表示用にそのまま保持する。
@@ -4430,6 +4433,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
               const ymd = mdToYMD(date);
               if (!ymd) return;
               updated[`${cleanName}_${ymd}`] = { startTime: start || "", endTime: end || "" };
+              syncedNames.add(cleanName);            // 今回同期に登場したキャスト
+              syncedKeys.add(`${cleanName}|${ymd}`); // 今回同期の (cast_name,date) 組
               const rk = `${store}::${cleanName}::${ymd}`;
               if (!seenRow.has(rk)) {
                 seenRow.add(rk);
@@ -4444,12 +4449,49 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         if (shiftRows.length > 0) {
           try {
             supabase.from("shifts").upsert(shiftRows, { onConflict: "store_id,cast_name,date" })
-              .then(({ error }) => {
+              .then(async ({ error }) => {
                 if (error) {
                   console.error("[doSync shifts upsert] error:", error.message || error, error.details || "", error.hint || "");
                   setSyncResult((p) => ({ ...(p || {}), upsertError: (error.message || String(error)) }));
-                } else {
-                  console.log("[doSync shifts upsert] saved rows=" + shiftRows.length);
+                  return; // upsert 失敗時は削除しない（データ保全のため先に消さない）
+                }
+                console.log("[doSync shifts upsert] saved rows=" + shiftRows.length);
+
+                // 順序厳守: upsert 成功後にのみ、取消されたシフトを削除する。
+                // 条件: store_id 一致 / date >= 今日 / 今回同期に登場したキャスト / 今回同期に無い (cast_name,date)。
+                try {
+                  const { data: existing, error: selErr } = await supabase.from("shifts")
+                    .select("cast_name, date")
+                    .eq("store_id", store)
+                    .gte("date", todayYmd);
+                  if (selErr) { console.error("[doSync shifts stale select] error:", selErr.message || selErr); return; }
+                  const staleShifts = (existing || []).filter(
+                    (r) => syncedNames.has(r.cast_name) && !syncedKeys.has(`${r.cast_name}|${r.date}`)
+                  );
+                  if (staleShifts.length === 0) return;
+
+                  // 日付ごとにまとめて削除（(cast_name,date) の組だけを確実に消す）。
+                  const byDate = new Map(); // date -> [cast_name]
+                  staleShifts.forEach((r) => { if (!byDate.has(r.date)) byDate.set(r.date, []); byDate.get(r.date).push(r.cast_name); });
+                  const deletedKeys = new Set(); // 実際に消えた "cast_name_date"
+                  for (const [d, names] of byDate) {
+                    const { error: delErr } = await supabase.from("shifts").delete()
+                      .eq("store_id", store).eq("date", d).in("cast_name", names);
+                    if (delErr) { console.error("[doSync shifts stale delete] error:", delErr.message || delErr, delErr.details || "", delErr.hint || ""); continue; }
+                    names.forEach((n) => deletedKeys.add(`${n}_${d}`));
+                  }
+                  if (deletedKeys.size > 0) {
+                    console.log("[doSync shifts stale delete] removed rows=" + deletedKeys.size);
+                    setSyncResult((p) => ({ ...(p || {}), deletedShiftCount: deletedKeys.size }));
+                    // ローカル state の日別時間キー("名前_YYYY-MM-DD")も、実際に削除した組だけ落とす。
+                    setShifts((prev) => {
+                      const nextS = {};
+                      for (const k in prev) { if (!deletedKeys.has(k)) nextS[k] = prev[k]; }
+                      return nextS;
+                    });
+                  }
+                } catch (e) {
+                  console.error("[doSync shifts stale cleanup] exception:", e?.message || e);
                 }
               })
               .catch((e) => { console.error("[doSync shifts upsert] exception:", e?.message || e); setSyncResult((p) => ({ ...(p || {}), upsertError: String(e?.message || e) })); });
@@ -4770,7 +4812,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
             ? `⚠️ ${syncResult.error}`
             : syncResult.mode === "casts"
               ? `✅ キャスト${syncResult.total}人を同期（新規${syncResult.addedCount}人 / 更新${syncResult.updatedCount}人${syncResult.deletedCount ? ` / 残骸削除${syncResult.deletedCount}件` : ""}）`
-              : `✅ 出勤${syncResult.total}人を同期`}
+              : `✅ 出勤${syncResult.total}人を同期${syncResult.deletedShiftCount ? `（取消${syncResult.deletedShiftCount}件を削除）` : ""}`}
           {syncResult.upsertError && (
             <span style={{ display: "block", marginTop: "6px", color: C.red, fontWeight: "700" }}>⚠️ クラウド保存エラー: {syncResult.upsertError}</span>
           )}
