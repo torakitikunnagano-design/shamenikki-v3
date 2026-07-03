@@ -614,7 +614,7 @@ function App() {
             if (!Array.isArray(localArr) || localArr.length === 0) setCasts([]);
           }
         } else {
-          // Supabaseにデータあり → heaven_pass は Supabase優先・空ならlocalStorageをname照合でフォールバック
+          // Supabaseにデータあり。heaven_pass はクライアントに保持しない（サーバーが service_role で直接扱う）。
           try {
             const stored = localStorage.getItem(skey("shamenikki_casts"));
             const localCasts = stored ? JSON.parse(stored) : [];
@@ -627,8 +627,8 @@ function App() {
                 strong:       sc.strong       || "未分析",
                 weak:         sc.weak         || "未分析",
                 heaven_id:    sc.heaven_id    || "",
-                // Supabaseに値があればそれを優先。空のときだけローカルの値を温存（空で上書きしない）。
-                heaven_pass:  sc.heaven_pass || lc?.heaven_pass || "",
+                // heaven_pass はクライアントに保持しない（サーバーが service_role で直接扱う）。
+                heaven_pass:  "",
                 type:         sc.type         ?? undefined,
                 disclose:     sc.disclose     ?? undefined,
                 shindan_note: sc.shindan_note ?? undefined,
@@ -643,7 +643,7 @@ function App() {
   }, []);
 
   // 「更新」ボタン用: Supabase から casts を読み直して setCasts するだけの軽量再取得（シード/書き込みはしない）。
-  // データ形は initCasts の「Supabaseにデータあり」分岐と同じ（heaven_pass は Supabase優先・空ならlocalStorageでフォールバック）。
+  // データ形は initCasts の「Supabaseにデータあり」分岐と同じ（heaven_pass はクライアントに保持しない）。
   async function refreshCasts() {
     try {
       const { data, error } = await supabase.from("casts").select("id, name, is_active, work_start, strong, weak, heaven_id, type, disclose, shindan_note, created_at, store_id").eq("store_id", getActiveStoreId());
@@ -660,8 +660,8 @@ function App() {
           strong:       sc.strong       || "未分析",
           weak:         sc.weak         || "未分析",
           heaven_id:    sc.heaven_id    || "",
-          // Supabaseに値があればそれを優先。空のときだけローカルの値を温存（空で上書きしない）。
-          heaven_pass:  sc.heaven_pass || lc?.heaven_pass || "",
+          // heaven_pass はクライアントに保持しない（サーバーが service_role で直接扱う）。
+          heaven_pass:  "",
           type:         sc.type         ?? undefined,
           disclose:     sc.disclose     ?? undefined,
           shindan_note: sc.shindan_note ?? undefined,
@@ -3466,7 +3466,7 @@ function MiteneButton({ cast }) {
     setSendCount(n);
     try { localStorage.setItem(skey("mitene_send_count"), String(n)); } catch {}
   }
-  const hasPass = !!(cast?.heaven_id && cast?.heaven_pass);
+  const hasPass = !!cast?.heaven_id; // heaven_pass はサーバーが取得するため heaven_id の有無で判定
 
   async function send() {
     setSending(true); setMsg(null); setErr(null);
@@ -3474,7 +3474,7 @@ function MiteneButton({ cast }) {
       const res = await apiFetch("/api/heaven-mitene", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ heavenId: cast.heaven_id, heavenPass: cast.heaven_pass, max: sendCount }),
+        body: JSON.stringify({ heavenId: cast.heaven_id, max: sendCount }),
       });
       const data = await res.json();
       if (data.ok) {
@@ -3482,6 +3482,8 @@ function MiteneButton({ cast }) {
         const remAfter = resolveMiteneRemaining(data); // remainingAfter が無ければ before - sent で補完
         setMsg(`${data.sent ?? 0}件送信（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・マイガール${bt["マイガール"] || 0}）／残り${remAfter ?? "?"}回`);
         saveMiteneRemaining(cast.heaven_id || cast.name, remAfter); // 常時表示用に保存
+      } else if (data.error === "no_heaven_pass") {
+        setErr("PW未登録（出勤同期でPW取得を実行）");
       } else {
         setErr(data.error || "送信に失敗しました");
       }
@@ -4312,33 +4314,32 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         let addedCount = 0, updatedCount = 0;
         const next = [...casts];
 
-        incoming.forEach(({ name: rawName, heavenId, heavenPass }) => {
+        incoming.forEach(({ name: rawName, heavenId }) => {
           const name = normalizeName(rawName); // 最初のスペースより前だけを保存名にする
-          const pass = heavenPass || null;     // 取得できた時だけ上書き（失敗時は既存値を維持）
-          // heaven_pass は端末ローカルのみ（Supabaseには送らない）。毎回の同期で最新に追従。
-          // 1. heavenId一致 → name更新（取得できればパスワードも更新）
+          // heaven_pass はクライアントに保持しない（サーバーが service_role で casts に直接保存する）。
+          // 1. heavenId一致 → name更新
           const byId = next.findIndex((c) => c.heaven_id && c.heaven_id === heavenId);
           if (byId !== -1) {
-            next[byId] = { ...next[byId], name, ...(pass ? { heaven_pass: pass } : {}) };
+            next[byId] = { ...next[byId], name };
             updatedCount++;
             return;
           }
-          // 2. name一致（正規化名で照合）→ heaven_id更新＋name正規化（取得できればパスワードも更新）
+          // 2. name一致（正規化名で照合）→ heaven_id更新＋name正規化
           const byName = next.findIndex((c) => normalizeName(c.name) === name);
           if (byName !== -1) {
-            next[byName] = { ...next[byName], heaven_id: heavenId, name, ...(pass ? { heaven_pass: pass } : {}) };
+            next[byName] = { ...next[byName], heaven_id: heavenId, name };
             updatedCount++;
             return;
           }
           // 3. 新規追加
-          next.push({ name, is_active: true, work_start: "", strong: "未分析", weak: "未分析", heaven_id: heavenId, heaven_pass: pass || "" });
+          next.push({ name, is_active: true, work_start: "", strong: "未分析", weak: "未分析", heaven_id: heavenId, heaven_pass: "" });
           addedCount++;
         });
 
         // (store_id, name) の重複排除。normalizeName で飾り(新人/🔰)を除去した結果、
         // 同名が複数できると Postgres の ON CONFLICT が
         // "cannot affect row a second time" でバッチ全体を拒否し 0件保存になるため必須。
-        // 空名は除外。重複時は heaven_id/heaven_pass を補完して情報を失わない。
+        // 空名は除外。重複時は heaven_id を補完して情報を失わない。
         const dedupedNext = [];
         const seenName = new Map(); // normalizedName -> index in dedupedNext
         for (const c of next) {
@@ -4347,7 +4348,6 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
           if (seenName.has(key)) {
             const ex = dedupedNext[seenName.get(key)];
             if (!ex.heaven_id && c.heaven_id) ex.heaven_id = c.heaven_id;
-            if (!ex.heaven_pass && c.heaven_pass) ex.heaven_pass = c.heaven_pass;
             continue;
           }
           seenName.set(key, dedupedNext.length);
@@ -5696,13 +5696,13 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
     try {
       // 全行を初期化（送信不可は最初からスキップ表示）
       const init = todayCasts.map((c) => {
-        const sendable = !!(c.heaven_id && c.heaven_pass);
+        const sendable = !!c.heaven_id;
         return { name: c.name, sendable, status: sendable ? "pending" : "skip", msg: sendable ? "" : "スキップ（要ID設定）" };
       });
       setRows(init);
 
       // 「送信可」だけを上から順に1人ずつ直列で呼ぶ
-      const sendable = todayCasts.filter((c) => c.heaven_id && c.heaven_pass);
+      const sendable = todayCasts.filter((c) => c.heaven_id);
       let totalSent = 0;
       let successCount = 0;
       const errors = [];
@@ -5715,7 +5715,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
         const res = await apiFetch("/api/heaven-mitene", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ heavenId: c.heaven_id, heavenPass: c.heaven_pass, max: perMax }),
+          body: JSON.stringify({ heavenId: c.heaven_id, max: perMax }),
         });
         const data = await res.json();
         if (data.ok) {
@@ -5736,7 +5736,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
           }
           updateRow(c.name, { status: "done", msg: `${sent}件（マッチ率${bt["マッチ率"] || 0}・口コミ${bt["口コミ"] || 0}・マイガール${bt["マイガール"] || 0}）／残り${remAfter ?? "?"}回${reason}` });
         } else {
-          const em = data.error || "送信に失敗しました";
+          const em = data.error === "no_heaven_pass" ? "PW未登録（出勤同期でPW取得を実行）" : (data.error || "送信に失敗しました");
           errors.push(`${c.name}：${em}`);
           updateRow(c.name, { status: "error", msg: em });
         }
@@ -5772,12 +5772,12 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
 
     // ID/パスあり＝チェック対象。無い子は最初からスキップ表示
     const init = todayCasts.map((c) => {
-      const sendable = !!(c.heaven_id && c.heaven_pass);
+      const sendable = !!c.heaven_id;
       return { name: c.name, sendable, status: sendable ? "pending" : "skip", msg: sendable ? "" : "スキップ（要ID設定）" };
     });
     setRows(init);
 
-    const targets = todayCasts.filter((c) => c.heaven_id && c.heaven_pass);
+    const targets = todayCasts.filter((c) => c.heaven_id);
     for (let i = 0; i < targets.length; i++) {
       const c = targets[i];
       const castId = c.heaven_id || c.name; // 保存/読み出しキーは既存と完全一致
@@ -5786,11 +5786,11 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
         const res = await apiFetch("/api/mitene-status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ heavenId: c.heaven_id, heavenPass: c.heaven_pass }),
+          body: JSON.stringify({ heavenId: c.heaven_id }),
         });
         const data = await res.json();
         if (!data.ok) {
-          updateRow(c.name, { status: "error", msg: data.error || "確認に失敗しました" });
+          updateRow(c.name, { status: "error", msg: data.error === "no_heaven_pass" ? "PW未登録（出勤同期でPW取得を実行）" : (data.error || "確認に失敗しました") });
         } else if (data.usedUp === true) {
           saveMiteneRemaining(castId, 0); // 使い切り＝本日完了
           updateRow(c.name, { status: "done", msg: "本日完了（使い切り）" });
@@ -5818,7 +5818,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
   const displayRows = rows.length
     ? rows
     : todayCasts.map((c) => {
-        const sendable = !!(c.heaven_id && c.heaven_pass);
+        const sendable = !!c.heaven_id;
         return { name: c.name, sendable, status: sendable ? "pending" : "skip", msg: sendable ? "" : "要ID設定（スキップ）" };
       });
 
