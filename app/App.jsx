@@ -1322,12 +1322,12 @@ function CastLoginScreen({ casts, onLogin }) {
     if (!heavenId || !heavenPass) { setError("IDとパスワードを入力してください"); return; }
     setLoading(true); setError("");
     try {
-      // 存在確認とトークン発行はサーバー側（/api/cast-login）で行う。
-      // 判定条件は従来と同等（heaven_id 一致 + is_active）。パスワード検証は別タスク。
+      // 存在確認・パスワード照合・トークン発行はサーバー側（/api/cast-login）で行う。
+      // heaven_pass 設定済みのキャストはサーバーで照合される（段階導入）。
       const res = await fetch("/api/cast-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storeId: getActiveStoreId(), heavenId }),
+        body: JSON.stringify({ storeId: getActiveStoreId(), heavenId, heavenPass }),
       });
       const data = await res.json();
       setLoading(false);
