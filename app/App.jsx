@@ -4226,9 +4226,10 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     try { supabase.from("casts").upsert(toSupabaseCast({ ...modal, heaven_id: modalId }), { onConflict: "store_id,name" }).then(({ error }) => { if (error) console.error("[saveModal casts upsert]", error.message, error.details, error.hint); }).catch((e) => console.error("[saveModal casts upsert] exception:", e?.message || e)); } catch {}
   }
 
-  // ミテネ用パスワードを非ブロッキングで取得してローカル heaven_pass を埋める。
+  // ミテネ用パスワードを非ブロッキングで取得する。
   // 今日出勤キャストだけを対象＝件数を絞り Vercel タイムアウト内に収める。失敗してもロスターに影響なし。
-  // heaven_pass は端末ローカルのみ（Supabase 非保存）＝各端末で同期したときにその端末に入る。
+  // heaven_pass の保存はサーバー(mitene-creds)が service_role で casts に直接行う。
+  // クライアントはパスワードに一切触れず、保存件数だけを受け取って表示する。
   // バックグラウンドで数十秒かかるため、進捗を syncResult.credStatus で画面に出す。
   async function fillMitenePasswords(castList, shiftData) {
     try {
@@ -4261,40 +4262,17 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir, memberIds }),
       });
       const data = await res.json();
-      if (!data.ok || !Array.isArray(data.creds)) {
+      if (!data.ok) {
         console.error("[fillMitenePasswords] error:", data && data.error);
         setSyncResult((p) => ({ ...(p || {}), credStatus: "⚠️ パスワード取得に失敗しました（ロスターは保存済み）" }));
         return;
       }
-      const pwById = new Map(data.creds.filter((c) => c.password).map((c) => [String(c.memberId), c.password]));
-      console.log("[fillMitenePasswords] applied=" + pwById.size + "/" + memberIds.length);
-      setCasts((prev) => prev.map((c) => {
-        const pw = pwById.get(String(c.heaven_id));
-        return pw ? { ...c, heaven_pass: pw } : c; // ローカルのみ更新（毎回上書き）
-      }));
-
-      // Supabase の casts.heaven_pass にも保存して端末間で共有する（heaven_pass 専用の小さな upsert。
-      // toSupabaseCast は heaven_pass を除外する設計のままにし、他カラムの保存挙動には触れない）。
-      // onConflict(store_id,name) で既存行の heaven_pass だけを更新する（payload に無いカラムは変更しない）。
-      const store = getActiveStoreId();
-      const passRows = (castList || [])
-        .map((c) => {
-          const pw = pwById.get(String(c.heaven_id));
-          return pw ? { store_id: store, name: c.name, heaven_pass: pw } : null;
-        })
-        .filter(Boolean);
-      if (passRows.length > 0) {
-        try {
-          supabase.from("casts").upsert(passRows, { onConflict: "store_id,name" })
-            .then(({ error }) => {
-              if (error) console.error("[fillMitenePasswords pass upsert] error:", error.message || error, error.details || "", error.hint || "");
-              else console.log("[fillMitenePasswords pass upsert] saved rows=" + passRows.length);
-            })
-            .catch((e) => console.error("[fillMitenePasswords pass upsert] exception:", e?.message || e));
-        } catch (e) { console.error("[fillMitenePasswords pass upsert] threw:", e?.message || e); }
-      }
-
-      setSyncResult((p) => ({ ...(p || {}), credStatus: `✅ 今日出勤 ${pwById.size}人にミテネ用パスワードを設定（クラウド共有）` }));
+      // heaven_pass の保存はサーバーが service_role で casts に直接行う。
+      // クライアントはパスワードに触れず、件数だけを表示する。
+      const updated = data.updated ?? 0;
+      const notFound = data.notFound ?? 0;
+      console.log("[fillMitenePasswords] updated=" + updated + " notFound=" + notFound + " total=" + (data.total ?? 0));
+      setSyncResult((p) => ({ ...(p || {}), credStatus: `✅ ミテネ用パスワードを保存: ${updated}件（クラウド共有）${notFound > 0 ? ` ／ 台帳に無いID: ${notFound}件` : ""}` }));
     } catch (e) {
       console.error("[fillMitenePasswords] exception:", e && e.message);
       setSyncResult((p) => ({ ...(p || {}), credStatus: "⚠️ パスワード取得に失敗しました（ロスターは保存済み）" }));
