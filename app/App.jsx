@@ -172,16 +172,8 @@ const initScores = [
   { id: 3, cast_name: "りな", diary: "お疲れ様です", result: "総合点：32点\n\n保証条件チェック\n・文字数判定：文字数不足\n・画像判定：画像不足\n\n保証改善提案\n・最低100文字必要です。自己紹介や今日の気分を追記してください\n\n良い点\n・挨拶ができている\n\n改善点\n・文字数が大幅に不足\n・画像がない\n\n改善タイトル案\n・「今日もよろしくお願いします♪」", posted_at: new Date(Date.now() - 7200000).toISOString(), has_image: false, score: 32 },
 ];
 
-const ADMIN_PASSWORD = "1234"; // 未知店舗のフォールバック（ロックアウト防止）
-// 管理ログインパスワード（店舗ごと）
-const ADMIN_PASSWORDS = {
-  nadeshiko: "1234",
-  club_audition_nagano: "4321",
-  lj_brothers: "1111",
-  club_audition_saku: "2222",
-  club_audition_matsumoto: "3333",
-  viking: "4444",
-};
+// 管理ログインのパスワードはクライアントに置かない。
+// 照合はサーバ側 API（/api/admin-login）＋環境変数 ADMIN_PASSWORDS で行う。
 const AUTO_LOGIN_KEY = "shamenikki_autologin";
 const CREDS_KEY      = "shamenikki_creds";
 
@@ -444,6 +436,8 @@ function App() {
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [passInput, setPassInput] = useState("");
   const [passError, setPassError] = useState(false);
+  const [passErrorMsg, setPassErrorMsg] = useState("パスワードが違います");
+  const [passLoading, setPassLoading] = useState(false);
   const [castPage, setCastPage] = useState("score");
   const [showShindan, setShowShindan] = useState(false);
   const [adminPage, setAdminPage] = useState("guarantee");
@@ -1016,13 +1010,33 @@ function App() {
     initSalaryRecords();
   }, []);
 
-  function tryUnlock() {
-    // 現在選択中の店舗のパスワードと照合（未知店舗は従来の 1234 にフォールバック）
-    const expected = ADMIN_PASSWORDS[getActiveStoreId()] ?? ADMIN_PASSWORD;
-    if (passInput === expected) {
-      setAdminUnlocked(true); setPassError(false); setPassInput("");
-    } else {
-      setPassError(true); setPassInput("");
+  async function tryUnlock() {
+    // 照合はサーバ側（/api/admin-login）で行う。パスワードはクライアントに持たない。
+    if (passLoading) return;
+    setPassLoading(true); setPassError(false);
+    try {
+      const res = await fetch("/api/admin-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storeId: getActiveStoreId(), password: passInput }),
+      });
+      const data = await res.json();
+      if (data?.ok) {
+        setAdminUnlocked(true); setPassError(false); setPassInput("");
+      } else if (data?.error === "server_config") {
+        // 環境変数が未設定/壊れている。誤って成功扱いにしない。
+        setPassErrorMsg("サーバー設定エラー。管理者に連絡してください");
+        setPassError(true); setPassInput("");
+      } else {
+        setPassErrorMsg("パスワードが違います");
+        setPassError(true); setPassInput("");
+      }
+    } catch {
+      // 通信失敗。誤って成功扱いにしない。
+      setPassErrorMsg("通信エラー。もう一度お試しください");
+      setPassError(true);
+    } finally {
+      setPassLoading(false);
     }
   }
 
@@ -1121,9 +1135,9 @@ function App() {
                 autoFocus
               />
             </Field>
-            {passError && <p style={{ color: C.red, fontSize: "13px", marginTop: "8px", marginBottom: 0 }}>パスワードが違います</p>}
+            {passError && <p style={{ color: C.red, fontSize: "13px", marginTop: "8px", marginBottom: 0 }}>{passErrorMsg}</p>}
             <div style={{ marginTop: "16px" }}>
-              <Btn onClick={tryUnlock} loading={false} label="ログイン" color={C.accent} />
+              <Btn onClick={tryUnlock} loading={passLoading} label="ログイン" color={C.accent} />
             </div>
           </div>
           <button onClick={() => setMode("cast")} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "13px", textAlign: "center" }}>
