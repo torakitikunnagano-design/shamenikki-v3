@@ -17,17 +17,17 @@ export async function POST(request) {
     // heaven_pass はクライアントから受け取らず、service_role で casts から直接取得する。
     const supabase = getServiceClient();
     if (!supabase) return NextResponse.json({ ok: false, error: "server_config" }, { status: 500 });
-    const { data, error } = await supabase
+    const { data: castRows, error: castErr } = await supabase
       .from("casts")
       .select("heaven_pass")
       .eq("store_id", storeId)
       .eq("heaven_id", heavenId)
       .limit(1);
-    if (error) {
-      console.error("[heaven-mitene] supabase error:", error.message);
+    if (castErr) {
+      console.error("[heaven-mitene] supabase error:", castErr.message);
       return NextResponse.json({ ok: false, error: "server_error" }, { status: 500 });
     }
-    const cast = data && data[0];
+    const cast = castRows && castRows[0];
     if (!cast) return NextResponse.json({ ok: false, error: "cast_not_found" }, { status: 404 });
     const heavenPass = cast.heaven_pass;
     if (!heavenPass) return NextResponse.json({ ok: false, error: "no_heaven_pass" }, { status: 400 });
