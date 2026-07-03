@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
+import { requireAuth } from "../../../lib/requireAuth";
 
 const VPS_URL = "http://163.44.98.98:3000/mitene";
 
 export async function POST(request) {
   try {
+    const auth = requireAuth(request, { roles: ["admin"] });
+    if (!auth.ok) return auth.response;
+
     const { heavenId, heavenPass, max } = await request.json();
 
     const payload = { heavenId, heavenPass, max };

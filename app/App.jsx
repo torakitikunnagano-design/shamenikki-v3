@@ -176,6 +176,39 @@ const initScores = [
 // 照合はサーバ側 API（/api/admin-login）＋環境変数 ADMIN_PASSWORDS で行う。
 const AUTO_LOGIN_KEY = "shamenikki_autologin";
 const CREDS_KEY      = "shamenikki_creds";
+const AUTH_TOKEN_KEY = "shamenikki_auth_token";
+
+// ============================================================
+// APIトークン（サーバー発行の署名付きトークン）
+// ------------------------------------------------------------
+// ログイン時にサーバーから受け取り localStorage に保存。
+// /api/ への呼び出しは apiFetch 経由で Authorization: Bearer を自動付与する。
+// ============================================================
+function getAuthToken() {
+  try { return localStorage.getItem(AUTH_TOKEN_KEY) || ""; } catch { return ""; }
+}
+function saveAuthToken(token) {
+  try { localStorage.setItem(AUTH_TOKEN_KEY, token); } catch {}
+}
+function clearAuthToken() {
+  try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch {}
+}
+
+// 401 を受けたときに呼ぶハンドラ。App が useEffect で登録する
+// （モジュール変数にすることで、子コンポーネントからの apiFetch でも発火する）。
+let unauthorizedHandler = null;
+function setUnauthorizedHandler(fn) { unauthorizedHandler = fn; }
+
+// /api/ 呼び出し共通ラッパー。トークンを付与し、401なら再ログイン誘導を発火。
+// 呼び出し側は従来の fetch と同じ (url, options) で使える。
+async function apiFetch(url, options = {}) {
+  const token = getAuthToken();
+  const headers = { ...(options.headers || {}) };
+  if (token) headers["Authorization"] = "Bearer " + token;
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401 && unauthorizedHandler) unauthorizedHandler();
+  return res;
+}
 
 // ============================================================
 // 複数店舗対応（Phase 1）: 店舗ごとに localStorage を名前空間化する土台
@@ -438,6 +471,7 @@ function App() {
   const [passError, setPassError] = useState(false);
   const [passErrorMsg, setPassErrorMsg] = useState("パスワードが違います");
   const [passLoading, setPassLoading] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [castPage, setCastPage] = useState("score");
   const [showShindan, setShowShindan] = useState(false);
   const [adminPage, setAdminPage] = useState("guarantee");
@@ -1021,7 +1055,9 @@ function App() {
         body: JSON.stringify({ storeId: getActiveStoreId(), password: passInput }),
       });
       const data = await res.json();
-      if (data?.ok) {
+      if (data?.ok && data?.token) {
+        saveAuthToken(data.token);
+        setSessionExpired(false);
         setAdminUnlocked(true); setPassError(false); setPassInput("");
       } else if (data?.error === "server_config") {
         // 環境変数が未設定/壊れている。誤って成功扱いにしない。
@@ -1040,9 +1076,23 @@ function App() {
     }
   }
 
+  // トークンが失効（401）したときの共通処理: トークンを消して各ログイン状態を解除し、
+  // 「セッション切れ」メッセージを出してログイン画面へ戻す。
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      clearAuthToken();
+      setAdminUnlocked(false);
+      setLoggedInCast(null);
+      setSessionPass("");
+      setMode("cast");
+      setSessionExpired(true);
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
   // 管理ログアウト＝Supabase Auth からもサインアウト（外側のログイン画面へ戻る）
-  function logout() { setAdminUnlocked(false); setMode("cast"); try { supabase.auth.signOut(); } catch {} }
-  function castLogout() { setLoggedInCast(null); setSessionPass(""); setCastPage("score"); setShowShindan(false); }
+  function logout() { clearAuthToken(); setAdminUnlocked(false); setMode("cast"); try { supabase.auth.signOut(); } catch {} }
+  function castLogout() { clearAuthToken(); setLoggedInCast(null); setSessionPass(""); setCastPage("score"); setShowShindan(false); }
   function handleCastLogin(name, pass) {
     setLoggedInCast(name);
     setSessionPass(pass || "");
@@ -1103,6 +1153,13 @@ function App() {
           <ModeBtn active={mode === "admin"} onClick={() => setMode("admin")} label="管理" />
         </div>
       </header>
+
+      {/* セッション切れ通知（401で再ログインが必要になったとき） */}
+      {sessionExpired && (
+        <div style={{ background: "#fff3f5", color: C.red, borderBottom: `1.5px solid ${C.red}`, padding: "10px 16px", fontSize: "13px", fontWeight: "700", textAlign: "center" }}>
+          セッションの有効期限が切れました。再ログインしてください
+        </div>
+      )}
 
       {/* 管理ロック */}
       {mode === "admin" && !adminUnlocked ? (
@@ -1261,20 +1318,34 @@ function CastLoginScreen({ casts, onLogin }) {
     } catch {}
   }, []);
 
-  function handleLogin() {
+  async function handleLogin() {
     if (!heavenId || !heavenPass) { setError("IDとパスワードを入力してください"); return; }
     setLoading(true); setError("");
-    const matched = casts.find((c) => c.heaven_id === heavenId && c.is_active); // passはメモリのみ・保存値とは比較しない
-    setTimeout(() => {
+    try {
+      // 存在確認とトークン発行はサーバー側（/api/cast-login）で行う。
+      // 判定条件は従来と同等（heaven_id 一致 + is_active）。パスワード検証は別タスク。
+      const res = await fetch("/api/cast-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storeId: getActiveStoreId(), heavenId }),
+      });
+      const data = await res.json();
       setLoading(false);
-      if (matched) {
+      if (data?.ok && data?.token) {
+        saveAuthToken(data.token);
         // ログイン成功: IDのみ保存。パスワードはどこにも保存しない
         localStorage.setItem(CREDS_KEY, JSON.stringify({ heavenId }));
-        onLogin(matched.name, heavenPass); // passをメモリ経由で渡す
+        const matched = casts.find((c) => c.heaven_id === heavenId && c.is_active);
+        onLogin(matched ? matched.name : heavenId, heavenPass); // passをメモリ経由で渡す
+      } else if (data?.error === "server_config") {
+        setError("サーバー設定エラー。管理者に連絡してください");
       } else {
         setError("IDまたはパスワードが一致しません");
       }
-    }, 800);
+    } catch {
+      setLoading(false);
+      setError("通信エラー。もう一度お試しください");
+    }
   }
 
   function clearSavedId() {
@@ -1547,7 +1618,7 @@ function ShindanPage({ casts, setCasts, loggedInCast, onComplete }) {
     setStep("result"); setLoading(true);
     const typeGuess = calcType(answers);
     try {
-      const res = await fetch("/api/xai", {
+      const res = await apiFetch("/api/xai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1950,7 +2021,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
     let finalDiary = diary;
     if (textSupport) {
       try {
-        const rwRes = await fetch("/api/xai", {
+        const rwRes = await apiFetch("/api/xai", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1975,7 +2046,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
     let sc = 0;
     try {
       // Step 2: AI採点・タイトル生成・画像分析を並列実行
-      const scoreReqPromise = fetch("/api/xai", {
+      const scoreReqPromise = apiFetch("/api/xai", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1985,7 +2056,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
         });
 
       const titleGenPromise = titleAssist
-        ? fetch("/api/xai", {
+        ? apiFetch("/api/xai", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1999,7 +2070,7 @@ function ScorePage({ casts, settings, scores, setScores, loggedInCast, sessionPa
         : Promise.resolve(null);
 
       const imageAnalysisPromise = (imageSupport && imageFile)
-        ? toBase64(imageFile).then((base64) => fetch("/api/xai", {
+        ? toBase64(imageFile).then((base64) => apiFetch("/api/xai", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -2277,6 +2348,7 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
     setShowConfirm(false); setPosting(true);
     try {
       const formData = new FormData();
+      formData.append("storeId", getActiveStoreId()); // cast トークンの店舗一致検証用
       formData.append("heavenId", cast.heaven_id);
       formData.append("heavenPass", sessionPass); // 保存せずメモリのパスを使用
       formData.append("title", editTitle);
@@ -2286,7 +2358,7 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
 
       // HTTPSアプリ→HTTPのVPS直接fetchはMixed Contentでブロックされるため
       // Next.jsのサーバーサイドプロキシ経由で転送する（同一オリジン）
-      const res = await fetch("/api/heaven-post", {
+      const res = await apiFetch("/api/heaven-post", {
         method: "POST",
         body: formData,
         // AuthorizationはAPIルート(サーバー側)で付与するためここでは不要
@@ -2435,7 +2507,7 @@ function TitlePage({ casts }) {
     if (!title.trim()) return alert("タイトルを入力してください");
     setLoading(true); setResult(null);
     try {
-      const res = await fetch("/api/xai", {
+      const res = await apiFetch("/api/xai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2540,7 +2612,7 @@ function SalaryInputForm({ castId, date, courses = [], startTime = "", endTime =
 
 金額はすべて円（数値のみ、記号・カンマなし）。必ずこのJSONのみで返してください（説明文不要）：
 {"sessions":[{"courseMin":60,"shimei":"本指名","courseFee":5000,"shimeiRyou":2000,"extCount":0,"extMin":0,"extFee":0,"op":0,"subtotal":7000}],"gross":50000,"misc":3000,"dorm":10000,"transport":1000,"takeHome":36000}`;
-      const res = await fetch("/api/xai", {
+      const res = await apiFetch("/api/xai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3399,7 +3471,7 @@ function MiteneButton({ cast }) {
   async function send() {
     setSending(true); setMsg(null); setErr(null);
     try {
-      const res = await fetch("/api/heaven-mitene", {
+      const res = await apiFetch("/api/heaven-mitene", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ heavenId: cast.heaven_id, heavenPass: cast.heaven_pass, max: sendCount }),
@@ -4183,7 +4255,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       if (memberIds.length === 0) { console.log("[fillMitenePasswords] no today-working targets"); return; }
 
       setSyncResult((p) => ({ ...(p || {}), credStatus: `今日出勤 ${memberIds.length}人のミテネ用パスワード取得中…（数十秒）` }));
-      const res = await fetch("/api/mitene-creds", {
+      const res = await apiFetch("/api/mitene-creds", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir, memberIds }),
@@ -4237,7 +4309,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     setSyncLoading(mode);
     setSyncResult(null);
     try {
-      const res = await fetch("/api/store-sync", {
+      const res = await apiFetch("/api/store-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir, mode }),
@@ -5614,7 +5686,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
     // 店舗まるごとロックを取得（2台目を開始時点で弾く）。安全優先: 200 OK で確実に取れたときだけ送信に進む。
     const shopdir = syncConfig?.shopdir;
     try {
-      const acq = await fetch("/api/bulk-mitene-acquire", {
+      const acq = await apiFetch("/api/bulk-mitene-acquire", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ shopdir }),
@@ -5662,7 +5734,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
       setProgress({ current: i + 1, total: sendable.length, name: c.name });
       updateRow(c.name, { status: "sending", msg: "送信中…" });
       try {
-        const res = await fetch("/api/heaven-mitene", {
+        const res = await apiFetch("/api/heaven-mitene", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ heavenId: c.heaven_id, heavenPass: c.heaven_pass, max: perMax }),
@@ -5704,7 +5776,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
     } finally {
       // 成功・失敗・中断のいずれでも必ず店舗ロックを解放（接続不可でも握りつぶす）
       try {
-        await fetch("/api/bulk-mitene-release", {
+        await apiFetch("/api/bulk-mitene-release", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ shopdir }),
@@ -5733,7 +5805,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
       const castId = c.heaven_id || c.name; // 保存/読み出しキーは既存と完全一致
       updateRow(c.name, { status: "sending", msg: "確認中…" });
       try {
-        const res = await fetch("/api/mitene-status", {
+        const res = await apiFetch("/api/mitene-status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ heavenId: c.heaven_id, heavenPass: c.heaven_pass }),

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAuth } from "../../../lib/requireAuth";
 
 const VPS_URL = "http://163.44.98.98:3000/post";
 const BASE64_LIMIT_BYTES = 3 * 1024 * 1024; // base64後 約3MB を上限
@@ -6,6 +7,12 @@ const BASE64_LIMIT_BYTES = 3 * 1024 * 1024; // base64後 約3MB を上限
 export async function POST(request) {
   try {
     const formData = await request.formData();
+
+    // キャスト画面（写メ投稿）からも呼ばれるため admin/cast 両方を許可。
+    // cast トークンは storeId 一致も検証する。
+    const auth = requireAuth(request, { roles: ["admin", "cast"], storeId: formData.get("storeId") || undefined });
+    if (!auth.ok) return auth.response;
+
     const heavenId    = formData.get("heavenId")    || "";
     const heavenPass  = formData.get("heavenPass")  || "";
     const title       = formData.get("title")       || "";

@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
+import { requireAuth } from "../../../lib/requireAuth";
 
 const XAI_URL = "https://api.x.ai/v1/chat/completions";
 
 // クライアントから受け取った payload をそのまま x.ai へ中継する。
 // APIキーはサーバ専用の環境変数 XAI_API_KEY から読む（ブラウザに一切出さない）。
+// AI採点・診断・給料OCR などキャスト画面からも使うため admin/cast 両方を許可。
+// （店舗データを操作しない純粋なAIプロキシのため storeId チェックは行わない）
 export async function POST(request) {
   try {
+    const auth = requireAuth(request, { roles: ["admin", "cast"] });
+    if (!auth.ok) return auth.response;
+
     const payload = await request.json();
 
     const r = await fetch(XAI_URL, {
