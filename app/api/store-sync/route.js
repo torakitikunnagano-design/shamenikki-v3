@@ -28,6 +28,12 @@ export async function POST(request) {
       console.error("[store-sync] VPS error", vpsRes.status, resText);
     }
 
+    // 防御的措置: VPS応答の casts 配列から heavenPass を除去してブラウザに返さない。
+    // クライアントは Step3-3 以降 heavenPass を使わない。casts 以外（shifts・件数など）は変更しない。
+    if (data && Array.isArray(data.casts)) {
+      data.casts = data.casts.map(({ heavenPass, ...rest }) => rest);
+    }
+
     return NextResponse.json(data, { status: vpsRes.status });
   } catch (e) {
     console.error("[store-sync] proxy error:", e.message);
