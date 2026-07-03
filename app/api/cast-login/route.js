@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { createToken } from "../../../lib/authToken";
+import { getServiceClient } from "../../../lib/serviceClient";
 
 // キャストログイン。ログイン前に呼ぶため認証は不要。
 // POST { storeId, heavenId } を受け取り、casts テーブルに該当キャスト
@@ -18,12 +18,8 @@ export async function POST(request) {
     const { storeId, heavenId } = await request.json();
     if (!storeId || !heavenId) return NextResponse.json({ ok: false });
 
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY; // サーバー専用・NEXT_PUBLIC_ 禁止（ブラウザに漏らさない）
-    if (!url || !key) return NextResponse.json({ ok: false, error: "server_config" });
-
-    // service_role キーはセッションを持たせない（サーバー内の単発クエリ用）。
-    const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+    const supabase = getServiceClient();
+    if (!supabase) return NextResponse.json({ ok: false, error: "server_config" });
     const { data, error } = await supabase
       .from("casts")
       .select("name, heaven_id, is_active")

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "../../../lib/requireAuth";
+import { getServiceClient } from "../../../lib/serviceClient";
 
 const VPS_URL = "http://163.44.98.98:3000/mitene-status";
 
@@ -8,7 +9,28 @@ export async function POST(request) {
     const auth = requireAuth(request, { roles: ["admin"] });
     if (!auth.ok) return auth.response;
 
-    const { heavenId, heavenPass } = await request.json();
+    // 店舗はトークン（改ざん不可）から取る。body の storeId は使わない。
+    const storeId = auth.payload.storeId;
+    // body からは heavenId のみ使用。heavenPass が入っていても無視する（旧クライアント互換）。
+    const { heavenId } = await request.json();
+
+    // heaven_pass はクライアントから受け取らず、service_role で casts から直接取得する。
+    const supabase = getServiceClient();
+    if (!supabase) return NextResponse.json({ ok: false, error: "server_config" }, { status: 500 });
+    const { data, error } = await supabase
+      .from("casts")
+      .select("heaven_pass")
+      .eq("store_id", storeId)
+      .eq("heaven_id", heavenId)
+      .limit(1);
+    if (error) {
+      console.error("[mitene-status] supabase error:", error.message);
+      return NextResponse.json({ ok: false, error: "server_error" }, { status: 500 });
+    }
+    const cast = data && data[0];
+    if (!cast) return NextResponse.json({ ok: false, error: "cast_not_found" }, { status: 404 });
+    const heavenPass = cast.heaven_pass;
+    if (!heavenPass) return NextResponse.json({ ok: false, error: "no_heaven_pass" }, { status: 400 });
 
     const payload = { heavenId, heavenPass };
 
