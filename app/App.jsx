@@ -4355,6 +4355,22 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         }
 
         setCasts(dedupedNext);
+
+        // 同一 heaven_id の古い装飾名行（例「かすみ☆エ」）を削除対象として割り出す。
+        // survivingByHeavenId: 同期後に生き残る正規化名（heaven_id → name）。
+        const survivingByHeavenId = new Map();
+        dedupedNext.forEach((c) => { if (c.heaven_id) survivingByHeavenId.set(c.heaven_id, c.name); });
+        const survivingNames = new Set(dedupedNext.map((c) => c.name));
+        const staleNames = [];
+        casts.forEach((c) => {
+          if (!c.heaven_id) return;
+          const keepName = survivingByHeavenId.get(c.heaven_id);
+          if (!keepName) return;                   // 同期後も生存している heaven_id の行だけが対象
+          if (c.name === keepName) return;         // 生き残りの正規化名は絶対に消さない
+          if (survivingNames.has(c.name)) return;  // 念のため: 生存中の名前は消さない
+          if (!staleNames.includes(c.name)) staleNames.push(c.name);
+        });
+
         // Supabase upsert（supabase-js は reject せず {error} を resolve するので必ず error を見る）
         try {
           supabase.from("casts").upsert(dedupedNext.map(toSupabaseCast), { onConflict: "store_id,name" })
@@ -4362,8 +4378,22 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
               if (error) {
                 console.error("[doSync casts upsert] error:", error.message || error, error.details || "", error.hint || "");
                 setSyncResult((p) => ({ ...(p || {}), upsertError: (error.message || String(error)) }));
-              } else {
-                console.log("[doSync casts upsert] saved rows=" + dedupedNext.length);
+                return; // upsert 失敗時は削除しない（データ保全のため先に消さない）
+              }
+              console.log("[doSync casts upsert] saved rows=" + dedupedNext.length);
+              // 順序厳守: upsert 成功後にのみ、同一 heaven_id の古い装飾名行を削除する。
+              if (staleNames.length > 0) {
+                supabase.from("casts").delete().eq("store_id", getActiveStoreId()).in("name", staleNames)
+                  .then(({ error: delErr }) => {
+                    if (delErr) {
+                      // 削除失敗は同期全体を失敗にしない（次回同期でまた試行される）。
+                      console.error("[doSync casts stale delete] error:", delErr.message || delErr, delErr.details || "", delErr.hint || "");
+                    } else {
+                      console.log("[doSync casts stale delete] removed rows=" + staleNames.length + " names=" + staleNames.join(","));
+                      setSyncResult((p) => ({ ...(p || {}), deletedCount: staleNames.length }));
+                    }
+                  })
+                  .catch((e) => console.error("[doSync casts stale delete] exception:", e?.message || e));
               }
             })
             .catch((e) => { console.error("[doSync casts upsert] exception:", e?.message || e); setSyncResult((p) => ({ ...(p || {}), upsertError: String(e?.message || e) })); });
@@ -4739,7 +4769,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
           {syncResult.error
             ? `⚠️ ${syncResult.error}`
             : syncResult.mode === "casts"
-              ? `✅ キャスト${syncResult.total}人を同期（新規${syncResult.addedCount}人 / 更新${syncResult.updatedCount}人）`
+              ? `✅ キャスト${syncResult.total}人を同期（新規${syncResult.addedCount}人 / 更新${syncResult.updatedCount}人${syncResult.deletedCount ? ` / 残骸削除${syncResult.deletedCount}件` : ""}）`
               : `✅ 出勤${syncResult.total}人を同期`}
           {syncResult.upsertError && (
             <span style={{ display: "block", marginTop: "6px", color: C.red, fontWeight: "700" }}>⚠️ クラウド保存エラー: {syncResult.upsertError}</span>
