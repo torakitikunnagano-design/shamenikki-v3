@@ -589,7 +589,7 @@ function App() {
   useEffect(() => {
     async function initCasts() {
       try {
-        const { data, error } = await supabase.from("casts").select("*").eq("store_id", getActiveStoreId());
+        const { data, error } = await supabase.from("casts").select("id, name, is_active, work_start, strong, weak, heaven_id, type, disclose, shindan_note, created_at, store_id").eq("store_id", getActiveStoreId());
         if (error) throw error;
 
         if (data.length === 0) {
@@ -646,7 +646,7 @@ function App() {
   // データ形は initCasts の「Supabaseにデータあり」分岐と同じ（heaven_pass は Supabase優先・空ならlocalStorageでフォールバック）。
   async function refreshCasts() {
     try {
-      const { data, error } = await supabase.from("casts").select("*").eq("store_id", getActiveStoreId());
+      const { data, error } = await supabase.from("casts").select("id, name, is_active, work_start, strong, weak, heaven_id, type, disclose, shindan_note, created_at, store_id").eq("store_id", getActiveStoreId());
       if (error) { console.error("refreshCasts 取得失敗:", error.message, error.details, error.hint); return; }
       if (!Array.isArray(data) || data.length === 0) return; // 空読みではキャスト一覧を壊さない
       const stored = localStorage.getItem(skey("shamenikki_casts"));
