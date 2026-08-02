@@ -7,8 +7,8 @@ export const viewport: Viewport = {
 }
 
 export const metadata = {
-  title: 'SHAMENIKKI AI',
-  description: '写メ日記AIサポートツール',
+  title: '自動ミテネ',
+  description: 'キャスト・出勤・ミテネ管理ツール',
 }
 
 export default function RootLayout({
