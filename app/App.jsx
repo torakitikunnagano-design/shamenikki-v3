@@ -5934,10 +5934,7 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
                 style={{ ...inp, width: "64px", padding: "7px 8px", opacity: i === lastSlotIdx ? 0.5 : 1 }} />
               <span style={{ fontSize: "11px", color: C.muted, whiteSpace: "nowrap" }}>件</span>
               {i === lastSlotIdx && (
-                <>
-                  <span style={{ fontSize: "11px", color: C.accent2, fontWeight: "700", whiteSpace: "nowrap" }}>残り全部（自動）</span>
-                  <span style={{ fontSize: "10px", color: C.accent2, fontWeight: "700", whiteSpace: "nowrap" }}>最終回は残り全部で送信されます</span>
-                </>
+                <span style={{ fontSize: "10px", color: C.accent2, fontWeight: "700", whiteSpace: "nowrap" }}>最終スロットは残りすべて自動で送信されます</span>
               )}
               <button onClick={() => removeSlot(i)}
                 style={{ marginLeft: "auto", padding: "5px 10px", borderRadius: "10px", border: `1.5px solid ${C.red}50`, background: `${C.red}08`, color: C.red, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
