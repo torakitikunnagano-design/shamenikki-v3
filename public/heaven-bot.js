@@ -168,17 +168,13 @@ app.post('/post', async (req, res) => {
 // ============================================================
 // 店舗管理からキャスト一覧を吸い上げる
 // ============================================================
-app.post('/store-sync', async (req, res) => {
-  const { adminId, adminPass, shopdir, mode } = req.body || {};
-  const lockKey = shopdir ? 'shop:' + shopdir : null; // 店舗キー=管理shopdir
-  if (lockKey) {
-    if (storeLocks.has(lockKey)) return res.status(409).json({ ok: false, error: 'busy', message: 'この店舗は現在ほかの処理を実行中です。少し待ってからもう一度お試しください。' });
-    storeLocks.set(lockKey, true);
-  }
+// 店舗管理画面のスクレイプ本体（/store-sync ルートと朝の自動同期で共用）。
+// ロック(storeLocks)は呼び出し側が管理する。戻り値は従来 /store-sync が返していた JSON と同形。
+async function runStoreSyncScrape(adminId, adminPass, shopdir) {
   let browser;
   try {
     if (!adminId || !adminPass || !shopdir) {
-      return res.json({ ok: false, error: 'adminId, adminPass, shopdir are required' });
+      return { ok: false, error: 'adminId, adminPass, shopdir are required' };
     }
 
     browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'] });
@@ -331,12 +327,25 @@ app.post('/store-sync', async (req, res) => {
     }
 
     console.log('[store-sync] shifts=' + allShifts.length);
-    res.json({ ok: true, casts, shifts: allShifts });
+    return { ok: true, casts, shifts: allShifts };
   } catch (e) {
     console.log('[store-sync] ERROR: ' + e.message);
-    res.json({ ok: false, error: e.message });
+    return { ok: false, error: e.message };
   } finally {
     if (browser) { try { await browser.close(); } catch (_) {} }
+  }
+}
+
+app.post('/store-sync', async (req, res) => {
+  const { adminId, adminPass, shopdir, mode } = req.body || {};
+  const lockKey = shopdir ? 'shop:' + shopdir : null; // 店舗キー=管理shopdir
+  if (lockKey) {
+    if (storeLocks.has(lockKey)) return res.status(409).json({ ok: false, error: 'busy', message: 'この店舗は現在ほかの処理を実行中です。少し待ってからもう一度お試しください。' });
+    storeLocks.set(lockKey, true);
+  }
+  try {
+    res.json(await runStoreSyncScrape(adminId, adminPass, shopdir));
+  } finally {
     if (lockKey) storeLocks.delete(lockKey);
   }
 });
@@ -561,17 +570,13 @@ app.post('/mitene', async (req, res) => {
 //  - 指定 memberIds（バッチ）だけ取得。件数は呼び出し側で絞る（Vercel タイムアウト対策）。
 //  - ここでの失敗はロスター保存に影響しない（別エンドポイント）。
 // ============================================================
-app.post('/mitene-creds', async (req, res) => {
-  const { adminId, adminPass, shopdir, memberIds } = req.body || {};
-  const lockKey = shopdir ? 'shop:' + shopdir : null; // 店舗キー=管理shopdir
-  if (lockKey) {
-    if (storeLocks.has(lockKey)) return res.status(409).json({ ok: false, error: 'busy', message: 'この店舗は現在ほかの処理を実行中です。少し待ってからもう一度お試しください。' });
-    storeLocks.set(lockKey, true);
-  }
+// ミテネ用ID/PW取得の本体（/mitene-creds ルートと朝の自動同期で共用）。
+// ロック(storeLocks)は呼び出し側が管理する。戻り値は従来 /mitene-creds が返していた JSON と同形。
+async function runMiteneCredsFetch(adminId, adminPass, shopdir, memberIds) {
   let browser;
   try {
     if (!adminId || !adminPass || !shopdir || !Array.isArray(memberIds)) {
-      return res.json({ ok: false, error: 'adminId, adminPass, shopdir, memberIds are required' });
+      return { ok: false, error: 'adminId, adminPass, shopdir, memberIds are required' };
     }
     const ids = memberIds.slice(0, 60); // 1回の上限（タイムアウト対策）
 
@@ -623,11 +628,23 @@ app.post('/mitene-creds', async (req, res) => {
     console.log('[mitene-creds] fetched=' + creds.filter(c => c.password).length + '/' + ids.length);
 
     await browser.close();
-    res.json({ ok: true, creds });
+    return { ok: true, creds };
   } catch (e) {
     console.log('[mitene-creds] ERROR: ' + e.message);
     if (browser) { try { await browser.close(); } catch (_) {} }
-    res.json({ ok: false, error: e.message });
+    return { ok: false, error: e.message };
+  }
+}
+
+app.post('/mitene-creds', async (req, res) => {
+  const { adminId, adminPass, shopdir, memberIds } = req.body || {};
+  const lockKey = shopdir ? 'shop:' + shopdir : null; // 店舗キー=管理shopdir
+  if (lockKey) {
+    if (storeLocks.has(lockKey)) return res.status(409).json({ ok: false, error: 'busy', message: 'この店舗は現在ほかの処理を実行中です。少し待ってからもう一度お試しください。' });
+    storeLocks.set(lockKey, true);
+  }
+  try {
+    res.json(await runMiteneCredsFetch(adminId, adminPass, shopdir, memberIds));
   } finally {
     if (lockKey) storeLocks.delete(lockKey);
   }
@@ -778,6 +795,308 @@ function bizDateOf(msUtc) {
   return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
 }
 
+// ============================================================
+// 朝の自動同期用: App.jsx から移植したヘルパー群
+// （保存ロジックをアプリの doSync と一致させるための忠実移植。
+//   App.jsx 側を変更したら必ずここも追従させること）
+// ============================================================
+// App.jsx:231 と同値: キャスト同期で保存する上位N名（ヘブン掲載順の先頭から）
+const CAST_SYNC_LIMIT = 300;
+
+// App.jsx:104-123 normalizeName の忠実移植。
+// 「半角/全角スペース」「新人」「🔰」のうち最初に現れた位置で切り、その前だけを名前とする。
+function normalizeName(s) {
+  let name = String(s || '');
+  // ☆/★ を含む店舗対策: 最初の ☆/★ より前だけを残し前後空白をトリム。空になる場合は元の名前を使う（App.jsx:108-112）
+  const star = name.search(/[★☆]/);
+  if (star >= 0) {
+    const cut = name.slice(0, star).trim();
+    if (cut) name = cut;
+  }
+  // 装飾語が名前の前に付く店舗対策（App.jsx:114）
+  name = name.replace(/新人|体験割|体験|🔰/g, ' ').trim();
+  const cuts = [];
+  const sp = name.search(/[\s　]/);     // 最初の半角/全角スペース（App.jsx:116）
+  const ni = name.indexOf('新人');
+  const mk = name.indexOf('🔰');
+  [sp, ni, mk].forEach((i) => { if (i >= 0) cuts.push(i); });
+  if (cuts.length) name = name.slice(0, Math.min(...cuts));
+  // 末尾に残った装飾・空白を除去（App.jsx:122）
+  return name.replace(/[\s　★☆♪♫♡♥❤◎○●◯◆◇■□▲△▼▽※‼！!♢❀✿✦✧♛👑💖💕✨🌟⭐️⭐🔰]+$/u, '').trim();
+}
+
+// App.jsx:83-95 mdToYMD の忠実移植: "M/D"→"YYYY-MM-DD"（営業日基準±180日で年跨ぎ補正）
+function mdToYMD(md) {
+  const parts = String(md || '').split('/').map(Number);
+  const m = parts[0], d = parts[1];
+  if (!m || !d) return '';
+  const todayStr = bizDateOf(Date.now()); // App.jsx:86 getBusinessToday() 相当
+  const year = Number(todayStr.slice(0, 4));
+  const mk = (y) => y + '-' + pad2(m) + '-' + pad2(d);
+  const base = new Date(todayStr).getTime();
+  const diff = Math.round((new Date(mk(year)).getTime() - base) / 86400000);
+  if (diff >= 180) return mk(year - 1);
+  if (diff <= -180) return mk(year + 1);
+  return mk(year);
+}
+
+// App.jsx:96-99 getBusinessTodayKey の忠実移植: 営業日の "M/D"（ゼロ埋めなし）
+function getBusinessTodayKeyMD() {
+  const d = new Date(Date.now() + 3 * 3600000);
+  return (d.getUTCMonth() + 1) + '/' + d.getUTCDate();
+}
+
+// App.jsx:393-406 toSupabaseCast の忠実移植（store_id は引数で受ける。heaven_pass は含めない
+// ＝upsertペイロードに無いカラムはDBの既存値が保持される）
+function toSupabaseCastRow(storeId, c) {
+  return {
+    store_id:     storeId,
+    name:         c.name,
+    is_active:    c.is_active,
+    work_start:   c.work_start || '',
+    strong:       c.strong || '未分析',
+    weak:         c.weak || '未分析',
+    heaven_id:    c.heaven_id || '',
+    type:         c.type != null ? c.type : null,
+    disclose:     c.disclose != null ? c.disclose : null,
+    shindan_note: c.shindan_note != null ? c.shindan_note : null,
+  };
+}
+
+// ============================================================
+// 朝の自動同期（キャスト同期＋出勤同期＋ミテネPW取得）
+//  - スクレイプは runStoreSyncScrape / runMiteneCredsFetch（手動 /store-sync・/mitene-creds と同一の内部関数）
+//  - 保存ロジックは App.jsx の doSync（App.jsx:1182-1391）と fillMitenePasswords（App.jsx:1134-1160）の忠実移植。
+//    ローカルUI state 更新（setCasts/setShifts/setSyncResult等）はブラウザ専用のため対象外。
+//  - 二重実行防止: mitene_auto_runs の slot_no=0 を同期用に予約（UNIQUE(store_id, run_date, 0) のクレーム方式）
+// ============================================================
+const SYNC_SLOT_NO = 0;            // mitene_auto_runs の slot_no=0 は朝の自動同期用に予約
+const AUTO_SYNC_MIN = 6 * 60;      // JST 06:00（グレース窓は AUTO_MITENE_GRACE_MIN と共通の10分）
+
+async function runAutoSync(store, runDate) {
+  const tag = '[auto-sync] ' + store.store_id + ' (' + runDate + ') ';
+
+  // クレーム: 自動送信スロットと同じ方式（重複エラー23505＝この営業日は実行済み → 静かにスキップ）
+  const { data: claimed, error: claimErr } = await supabaseAdmin
+    .from('mitene_auto_runs')
+    .insert({ store_id: store.store_id, run_date: runDate, slot_no: SYNC_SLOT_NO, send_count: null })
+    .select('id');
+  if (claimErr) {
+    if (claimErr.code !== '23505') console.error(tag + 'クレーム失敗: ' + claimErr.message);
+    return;
+  }
+  const runId = claimed && claimed[0] && claimed[0].id;
+  if (!runId) return;
+  console.log(tag + '朝の自動同期 開始 runId=' + runId);
+
+  const closeRun = async (patch) => {
+    const { error } = await supabaseAdmin.from('mitene_auto_runs')
+      .update({ ...patch, finished_at: new Date().toISOString() })
+      .eq('id', runId);
+    if (error) console.error(tag + 'run更新失敗: ' + error.message);
+  };
+
+  // 手動同期（/store-sync・/mitene-creds）と同じ 'shop:'+shopdir ロック
+  const lockKey = 'shop:' + store.shopdir;
+  if (storeLocks.has(lockKey)) {
+    console.log(tag + '手動同期が実行中(busy) → スキップ');
+    await closeRun({ status: 'error', error: 'busy' });
+    return;
+  }
+  storeLocks.set(lockKey, true);
+
+  let castCount = 0, shiftRowCount = 0, pwUpdated = 0;
+  // d. 実行結果ログ（cast_name='[sync]' の1行で識別。sent_count=同期キャスト数 / remaining_after=PW保存件数 として流用）
+  const logRow = {
+    run_id: runId, store_id: store.store_id, run_date: runDate, slot_no: SYNC_SLOT_NO,
+    cast_name: '[sync]', heaven_id: '', requested_count: null,
+    sent_count: 0, remaining_after: null, ok: false, error: null,
+  };
+  try {
+    // b. スクレイプ（/store-sync と同一の内部関数。認証情報は settings の値）
+    const data = await runStoreSyncScrape(store.admin_id, store.admin_pass, store.shopdir);
+    if (!data.ok || !Array.isArray(data.casts)) throw new Error(data.error || '同期データの取得に失敗しました'); // App.jsx:1202 相当
+
+    // ── casts 保存（App.jsx doSync mode==="casts" App.jsx:1204-1300 の移植）──
+    // App.jsx:1205-1211: 掲載順の先頭 CAST_SYNC_LIMIT 名 ∪ 出勤データに載っているキャスト。
+    //   ※App.jsx は前回同期のローカル shifts state を使うが、bot には無いため
+    //     今回スクレイプの最新 shifts で代用（より新しい同一情報源）。
+    const all = data.casts || [];
+    const top = all.slice(0, CAST_SYNC_LIMIT);                       // App.jsx:1207
+    const shiftNames = new Set();
+    (data.shifts || []).forEach((s) => { if (s && s.name) shiftNames.add(normalizeName(s.name)); }); // App.jsx:1208-1209 相当
+    const extra = all.slice(CAST_SYNC_LIMIT).filter((c) => shiftNames.has(normalizeName(c.name)));   // App.jsx:1210
+    const incoming = [...top, ...extra];                             // App.jsx:1211
+
+    // App.jsx:1214 const next = [...casts]: ブラウザの casts state の代わりに Supabase の既存行を読む
+    const { data: existingCasts, error: exErr } = await supabaseAdmin.from('casts')
+      .select('name, is_active, work_start, strong, weak, heaven_id, type, disclose, shindan_note')
+      .eq('store_id', store.store_id);
+    if (exErr) throw new Error('casts取得失敗: ' + exErr.message);
+    const next = [...(existingCasts || [])];
+
+    // App.jsx:1216-1236 3段マージの忠実移植
+    incoming.forEach(({ name: rawName, heavenId }) => {
+      const name = normalizeName(rawName);                                        // App.jsx:1217 最初のスペースより前だけを保存名にする
+      const byId = next.findIndex((c) => c.heaven_id && c.heaven_id === heavenId); // App.jsx:1219 1. heavenId一致 → name更新
+      if (byId !== -1) { next[byId] = { ...next[byId], name }; return; }           // App.jsx:1220-1224
+      const byName = next.findIndex((c) => normalizeName(c.name) === name);        // App.jsx:1226 2. name一致 → heaven_id更新＋name正規化
+      if (byName !== -1) { next[byName] = { ...next[byName], heaven_id: heavenId, name }; return; } // App.jsx:1227-1231
+      next.push({ name, is_active: true, work_start: '', strong: '未分析', weak: '未分析', heaven_id: heavenId, heaven_pass: '' }); // App.jsx:1233 3. 新規追加
+    });
+
+    // App.jsx:1241-1253 (store_id,name) 重複排除＋空名除外＋heaven_id補完 の忠実移植
+    const dedupedNext = [];
+    const seenName = new Map(); // normalizedName -> index in dedupedNext（App.jsx:1242）
+    for (const c of next) {
+      const key = normalizeName(c.name);
+      if (!key) continue;                                            // App.jsx:1245 名前空は除外（必須カラム違反も防ぐ）
+      if (seenName.has(key)) {
+        const ex = dedupedNext[seenName.get(key)];
+        if (!ex.heaven_id && c.heaven_id) ex.heaven_id = c.heaven_id; // App.jsx:1248-1250 重複時は heaven_id を補完して情報を失わない
+        continue;
+      }
+      seenName.set(key, dedupedNext.length);
+      dedupedNext.push({ ...c, name: key });
+    }
+
+    // App.jsx:1257-1270 残骸削除対象の割り出し（3重ガード）の忠実移植
+    const survivingByHeavenId = new Map();                            // App.jsx:1259
+    dedupedNext.forEach((c) => { if (c.heaven_id) survivingByHeavenId.set(c.heaven_id, c.name); }); // App.jsx:1260
+    const survivingNames = new Set(dedupedNext.map((c) => c.name));   // App.jsx:1261
+    const staleNames = [];
+    (existingCasts || []).forEach((c) => {                            // App.jsx:1263 casts.forEach（同期前の既存一覧が対象）
+      if (!c.heaven_id) return;                                       // App.jsx:1264
+      const keepName = survivingByHeavenId.get(c.heaven_id);
+      if (!keepName) return;                                          // App.jsx:1266 同期後も生存している heaven_id の行だけが対象
+      if (c.name === keepName) return;                                // App.jsx:1267 生き残りの正規化名は絶対に消さない
+      if (survivingNames.has(c.name)) return;                         // App.jsx:1268 念のため: 生存中の名前は消さない
+      if (!staleNames.includes(c.name)) staleNames.push(c.name);      // App.jsx:1269
+    });
+
+    // App.jsx:1273-1297 upsert → 成功後にのみ残骸削除（順序厳守）の忠実移植
+    const { error: upErr } = await supabaseAdmin.from('casts')
+      .upsert(dedupedNext.map((c) => toSupabaseCastRow(store.store_id, c)), { onConflict: 'store_id,name' }); // App.jsx:1274
+    if (upErr) throw new Error('casts upsert失敗: ' + upErr.message);  // App.jsx:1276-1281 upsert失敗時は削除しない（データ保全）
+    castCount = dedupedNext.length;
+    if (staleNames.length > 0) {                                      // App.jsx:1283-1295 upsert成功後にのみ削除
+      const { error: delErr } = await supabaseAdmin.from('casts').delete()
+        .eq('store_id', store.store_id).in('name', staleNames);       // App.jsx:1284
+      if (delErr) console.error(tag + '残骸削除失敗（次回同期で再試行）: ' + delErr.message); // App.jsx:1287-1289 削除失敗は同期全体を失敗にしない
+      else console.log(tag + '残骸削除 ' + staleNames.length + '件');
+    }
+    console.log(tag + 'casts保存 ' + castCount + '件');
+
+    // ── shifts 保存（App.jsx doSync else分岐 App.jsx:1310-1391 の移植。ローカルstate更新は対象外）──
+    if (!Array.isArray(data.shifts)) throw new Error('出勤データが取得できませんでした'); // App.jsx:1311
+    const todayYmd = runDate;       // App.jsx:1313 営業日基準の今日（削除は今日以降のみ＝過去実績は消さない）。run_date=営業日
+    const shiftRows = [];           // App.jsx:1314 Supabase 保存用
+    const seenRow = new Set();      // App.jsx:1315 (store_id,cast_name,date) 重複排除
+    const syncedNames = new Set();  // App.jsx:1316 今回同期に登場したキャスト名（cleanName済み）
+    const syncedKeys = new Set();   // App.jsx:1317 今回同期の "cast_name|YYYY-MM-DD" 組
+    data.shifts.forEach(({ name, days }) => {                          // App.jsx:1324 行構築部分
+      if (!name || !Array.isArray(days)) return;                       // App.jsx:1325
+      const cleanName = normalizeName(name);                           // App.jsx:1327 ボット由来の装飾を保存前に除去
+      if (!cleanName) return;                                          // App.jsx:1328
+      days.forEach(({ date, start, end }) => {                         // App.jsx:1330
+        if (!date) return;
+        const ymd = mdToYMD(date);                                     // App.jsx:1332
+        if (!ymd) return;
+        syncedNames.add(cleanName);                                    // App.jsx:1334
+        syncedKeys.add(cleanName + '|' + ymd);                         // App.jsx:1335
+        const rk = store.store_id + '::' + cleanName + '::' + ymd;     // App.jsx:1337
+        if (!seenRow.has(rk)) {
+          seenRow.add(rk);
+          shiftRows.push({ store_id: store.store_id, cast_name: cleanName, date: ymd, start_time: start || '', end_time: end || '' }); // App.jsx:1340
+        }
+      });
+    });
+    if (shiftRows.length > 0) {                                        // App.jsx:1348
+      const { error: shUpErr } = await supabaseAdmin.from('shifts')
+        .upsert(shiftRows, { onConflict: 'store_id,cast_name,date' }); // App.jsx:1349
+      if (shUpErr) throw new Error('shifts upsert失敗: ' + shUpErr.message); // App.jsx:1352-1356 upsert失敗時は削除しない
+      shiftRowCount = shiftRows.length;
+
+      // App.jsx:1359-1382 取消シフト削除（4条件: store一致 / date>=今日(営業日) / 今回同期に登場したキャスト / 今回同期に無い(cast,date)組）
+      const { data: existing, error: selErr } = await supabaseAdmin.from('shifts')
+        .select('cast_name, date').eq('store_id', store.store_id).gte('date', todayYmd); // App.jsx:1362-1364
+      if (selErr) {
+        console.error(tag + '取消シフトselect失敗（削除は行わない）: ' + selErr.message); // App.jsx:1365 select失敗時は削除しない
+      } else {
+        const staleShifts = (existing || []).filter(
+          (r) => syncedNames.has(r.cast_name) && !syncedKeys.has(r.cast_name + '|' + r.date) // App.jsx:1366-1368
+        );
+        if (staleShifts.length > 0) {
+          const byDate = new Map();                                    // App.jsx:1372 date -> [cast_name]
+          staleShifts.forEach((r) => { if (!byDate.has(r.date)) byDate.set(r.date, []); byDate.get(r.date).push(r.cast_name); }); // App.jsx:1373
+          let deleted = 0;
+          for (const [d, names] of byDate) {                           // App.jsx:1375 日付ごとにまとめて削除
+            const { error: delErr } = await supabaseAdmin.from('shifts').delete()
+              .eq('store_id', store.store_id).eq('date', d).in('cast_name', names); // App.jsx:1376-1377
+            if (delErr) { console.error(tag + '取消シフト削除失敗(' + d + '): ' + delErr.message); continue; } // App.jsx:1378 失敗した組は残す
+            deleted += names.length;
+          }
+          if (deleted > 0) console.log(tag + '取消シフト削除 ' + deleted + '件');
+        }
+      }
+    }
+    console.log(tag + 'shifts保存 ' + shiftRowCount + '行');
+
+    // ── ミテネPW取得（App.jsx fillMitenePasswords App.jsx:1134-1160 相当）──
+    // App.jsx:1137-1148: 今日出勤の名前集合。App.jsx は今回同期の shifts と既存 state の和集合だが、
+    // bot には state が無いため今回スクレイプの shifts のみで判定（同じ最新情報源）。
+    const todayKeyMD = getBusinessTodayKeyMD();
+    const workingNames = new Set();
+    (data.shifts || []).forEach((s) => {
+      if (s && Array.isArray(s.days) && s.days.some((dd) => dd.date === todayKeyMD)) workingNames.add(normalizeName(s.name)); // App.jsx:1139-1141
+    });
+    // App.jsx:1150-1155: heaven_id ありかつ今日出勤だけを対象にする
+    const targets = dedupedNext.filter((c) => c.heaven_id && workingNames.has(normalizeName(c.name)));
+    const memberIds = targets.map((c) => c.heaven_id);                 // App.jsx:1155
+    if (memberIds.length > 0) {
+      const credRes = await runMiteneCredsFetch(store.admin_id, store.admin_pass, store.shopdir, memberIds);
+      if (credRes.ok && Array.isArray(credRes.creds)) {
+        // 保存規約は Vercel /api/mitene-creds と同一: UPDATE のみ（台帳に無い heaven_id を INSERT しない）
+        for (const c of credRes.creds) {
+          const memberId = c && c.memberId != null ? String(c.memberId) : '';
+          const password = c && c.password;
+          if (!memberId || !password) continue; // パスワード未取得はスキップ
+          const { data: rows, error: pwErr } = await supabaseAdmin.from('casts')
+            .update({ heaven_pass: password })
+            .eq('store_id', store.store_id).eq('heaven_id', memberId)
+            .select('heaven_id');
+          if (pwErr) { console.error(tag + 'PW保存失敗(' + memberId + '): ' + pwErr.message); continue; }
+          if (rows && rows.length > 0) pwUpdated++;
+        }
+        console.log(tag + 'ミテネPW保存 ' + pwUpdated + '/' + memberIds.length + '件');
+      } else {
+        // App.jsx:1156-1159: PW取得失敗はロスター保存済みのため同期全体を失敗にしない
+        console.error(tag + 'ミテネPW取得失敗（ロスターは保存済み）: ' + (credRes.error || 'unknown'));
+      }
+    } else {
+      console.log(tag + '今日出勤のPW取得対象なし');
+    }
+
+    // e. クローズ（total_casts=同期キャスト数 / total_sent=保存shift行数 として流用）
+    logRow.ok = true;
+    logRow.sent_count = castCount;
+    logRow.remaining_after = pwUpdated;
+    await closeRun({ status: 'done', total_casts: castCount, total_sent: shiftRowCount });
+    console.log(tag + '完了 casts=' + castCount + ' shiftRows=' + shiftRowCount + ' pw=' + pwUpdated);
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    console.error(tag + 'エラー: ' + msg);
+    logRow.ok = false;
+    logRow.error = msg;
+    await closeRun({ status: 'error', error: msg, total_casts: castCount, total_sent: shiftRowCount });
+  } finally {
+    storeLocks.delete(lockKey);
+    // d. 成否どちらでも '[sync]' 行を1行残す
+    const { error: logErr } = await supabaseAdmin.from('mitene_auto_logs').insert(logRow);
+    if (logErr) console.error(tag + 'ログ保存失敗: ' + logErr.message);
+  }
+}
+
 // 1スロットぶんの実行（クレーム→ロック→対象抽出→逐次送信→ログ→クローズ）
 async function runAutoSlot(slot, runDate, shopdir) {
   const tag = '[auto-mitene] ' + slot.store_id + ' slot' + slot.slot_no + ' (' + runDate + ') ';
@@ -911,6 +1230,30 @@ async function autoMiteneTick() {
     const nowMs = Date.now();
     const nowJst = new Date(nowMs + 9 * 3600 * 1000); // JSTを明示計算（VPSのOSタイムゾーンに依存しない）
     const nowMin = nowJst.getUTCHours() * 60 + nowJst.getUTCMinutes();
+
+    // ── 朝の自動同期（JST 06:00〜06:10 のグレース窓）──
+    // ミテネ送信スロットの処理より必ず先に実行する: 6:00 に送信スロットがある店でも
+    // 同一分内で「同期 → 送信」の順になる（awaitで直列。クレームにより二重実行はしない）。
+    const syncDiff = (nowMin - AUTO_SYNC_MIN + 1440) % 1440;
+    if (syncDiff < AUTO_MITENE_GRACE_MIN) {
+      const { data: syncStores, error: ssErr } = await supabaseAdmin.from('settings')
+        .select('store_id, shopdir, admin_id, admin_pass')
+        .eq('auto_sync_enabled', true);
+      if (ssErr) {
+        console.error('[auto-sync] settings取得失敗: ' + ssErr.message);
+      } else {
+        // run_date は発火予定時刻(6:00)の営業日で固定（送信スロットと同じ考え方）
+        const syncRunDate = bizDateOf(nowMs - syncDiff * 60 * 1000);
+        for (const st of (syncStores || [])) {
+          // admin_id / admin_pass / shopdir が全て非空の店舗だけ実行
+          if (!st.admin_id || !st.admin_pass || !st.shopdir) {
+            console.warn('[auto-sync] ' + st.store_id + ': admin_id/admin_pass/shopdir 未設定のためスキップ（一括ミテネ画面でスケジュールを保存すると解消）');
+            continue;
+          }
+          await runAutoSync(st, syncRunDate); // 店舗ごとに逐次
+        }
+      }
+    }
 
     // 自動送信ONの店舗（shopdirも同時に取得。settings.shopdir 列が無い場合はここでエラーになる
     // → ALTER TABLE settings ADD COLUMN shopdir ... の適用が必要）
