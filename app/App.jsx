@@ -5869,6 +5869,9 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i];
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.send_time)) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 時刻を入力してください` }); return; }
+      // ヘブン側のミテネ残数は毎朝9:00更新のため、9:05より前のスロットは無意味（サーバー側でも同じ検証をする）
+      const [hh, mm] = s.send_time.split(":").map(Number);
+      if (hh * 60 + mm < 9 * 60 + 5) { setSaveMsg({ ok: false, text: `スロット${i + 1}: スロットは9:05以降に設定してください（ヘブン側のミテネ更新が朝9:00のため）` }); return; }
       if (i !== lastSlotIdx) { // 最終回は自動で「残り全部」になるため件数チェック不要
         const n = parseInt(s.countStr, 10);
         if (!(n >= 1 && n <= 50)) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 送信数は1〜50で入力してください` }); return; }
@@ -5908,6 +5911,9 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
       <p style={{ fontSize: "11px", color: C.muted, margin: 0, lineHeight: 1.5 }}>
         実際の自動送信はVPS側の対応（次の段階）が完了してから動きます
       </p>
+      <p style={{ fontSize: "11px", color: C.sub, fontWeight: "700", margin: 0, lineHeight: 1.5 }}>
+        ⚠ ミテネはヘブン側で毎朝9:00に更新されます。スロットは9:05以降で設定してください
+      </p>
       {loading ? (
         <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>読み込み中…</p>
       ) : loadError ? (
@@ -5927,7 +5933,7 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
                 <input type="checkbox" checked={s.enabled} onChange={(e) => updateSlot(i, { enabled: e.target.checked })} />
                 有効
               </label>
-              <input type="time" value={s.send_time} onChange={(e) => updateSlot(i, { send_time: e.target.value })}
+              <input type="time" min="09:05" value={s.send_time} onChange={(e) => updateSlot(i, { send_time: e.target.value })}
                 style={{ ...inp, width: "110px", padding: "7px 8px" }} />
               <input type="number" min={1} max={50} value={s.countStr} disabled={i === lastSlotIdx}
                 onChange={(e) => updateSlot(i, { countStr: e.target.value })}

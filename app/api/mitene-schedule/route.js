@@ -47,6 +47,9 @@ export async function POST(request) {
       seenSlotNo.add(s.slot_no);
       if (typeof s.enabled !== "boolean") return bad("enabled が不正です");
       if (typeof s.send_time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(s.send_time)) return bad("send_time は HH:MM 形式で指定してください");
+      // ヘブン側のミテネ残数は毎朝9:00更新のため、9:05より前のスロットは受け付けない（UI側と同じ検証）
+      const [sh, sm] = s.send_time.split(":").map(Number);
+      if (sh * 60 + sm < 9 * 60 + 5) return bad("スロットは9:05以降に設定してください（ヘブン側のミテネ更新が朝9:00のため）");
       if (s.send_count !== null && (!Number.isInteger(s.send_count) || s.send_count < 1 || s.send_count > 50)) {
         return bad("send_count は 1〜50 の整数 または null（残り全部）で指定してください");
       }
