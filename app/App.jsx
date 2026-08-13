@@ -1444,8 +1444,8 @@ function App() {
         boxShadow: "0 2px 16px rgba(31,43,68,0.35)",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <div style={{ width: "30px", height: "30px", borderRadius: "10px", background: "rgba(255,255,255,0.25)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>💕</div>
-          <span style={{ fontWeight: "700", fontSize: "15px", letterSpacing: "0.08em", color: "white", textShadow: "0 1px 4px rgba(0,0,0,0.15)" }}>SHAMENIKKI AI</span>
+          <div style={{ width: "30px", height: "30px", borderRadius: "10px", background: "rgba(255,255,255,0.25)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>👑</div>
+          <span style={{ fontWeight: "700", fontSize: "15px", letterSpacing: "0.08em", color: "white", textShadow: "0 1px 4px rgba(0,0,0,0.15)" }}>自動ミテネ</span>
         </div>
 
         <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
@@ -1660,8 +1660,8 @@ function CastLoginScreen({ casts, onLogin }) {
   return (
     <div style={{ padding: "40px 16px", maxWidth: "400px", margin: "0 auto", display: "grid", gap: "24px" }}>
       <div style={{ textAlign: "center" }}>
-        <div style={{ width: "80px", height: "80px", borderRadius: "28px", background: "linear-gradient(135deg, #1f2b44, #b08d4a)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "34px", margin: "0 auto 16px", boxShadow: "0 6px 24px rgba(31,43,68,0.4)" }}>💕</div>
-        <h2 style={{ fontSize: "22px", fontWeight: "700", color: C.text, margin: "0 0 6px", letterSpacing: "0.06em" }}>SHAMENIKKI AI</h2>
+        <div style={{ width: "80px", height: "80px", borderRadius: "28px", background: "#1f2b44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "34px", margin: "0 auto 16px", boxShadow: "0 6px 24px rgba(31,43,68,0.4)" }}>👑</div>
+        <h2 style={{ fontSize: "22px", fontWeight: "700", color: C.text, margin: "0 0 6px", letterSpacing: "0.06em" }}>自動ミテネ</h2>
         <p style={{ color: C.muted, fontSize: "13px", margin: 0 }}>ヘブンネットのID・パスでログイン</p>
       </div>
 
@@ -2715,7 +2715,7 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
                     padding: "14px 10px",
                     borderRadius: "14px",
                     border: active ? "none" : `1.5px solid ${C.border}`,
-                    background: active ? "linear-gradient(135deg, #1f2b44, #b08d4a)" : "white",
+                    background: active ? "#1f2b44" : "white",
                     color: active ? "white" : C.muted,
                     fontWeight: "700",
                     fontSize: "13px",
@@ -2774,13 +2774,13 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
           <p style={{ fontSize: "13px", color: C.muted, marginBottom: "16px" }}>VPSサーバー経由でヘブンに自動投稿します。</p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
             <button onClick={() => setShowConfirm(false)} style={{ padding: "12px", borderRadius: "12px", border: `1.5px solid ${C.border}`, background: "white", color: C.muted, cursor: "pointer", fontWeight: "700" }}>キャンセル</button>
-            <button onClick={handlePost} style={{ padding: "12px", borderRadius: "12px", border: "none", background: "linear-gradient(135deg, #1f2b44, #b08d4a)", color: "white", cursor: "pointer", fontWeight: "700" }}>投稿する</button>
+            <button onClick={handlePost} style={{ padding: "12px", borderRadius: "12px", border: "none", background: "#1f2b44", color: "white", cursor: "pointer", fontWeight: "700" }}>投稿する</button>
           </div>
         </div>
       )}
 
       {!posted && !showConfirm && (
-        <button onClick={() => setShowConfirm(true)} disabled={posting} style={{ padding: "16px", borderRadius: "16px", border: "none", background: posting ? C.surface : "linear-gradient(135deg, #1f2b44, #b08d4a)", color: posting ? C.muted : "white", fontWeight: "700", fontSize: "15px", cursor: posting ? "not-allowed" : "pointer", boxShadow: posting ? "none" : "0 4px 20px rgba(31,43,68,0.4)" }}>
+        <button onClick={() => setShowConfirm(true)} disabled={posting} style={{ padding: "16px", borderRadius: "16px", border: "none", background: posting ? C.surface : "#1f2b44", color: posting ? C.muted : "white", fontWeight: "700", fontSize: "15px", cursor: posting ? "not-allowed" : "pointer", boxShadow: posting ? "none" : "0 4px 20px rgba(31,43,68,0.4)" }}>
           ヘブンに投稿する
         </button>
       )}
@@ -6307,7 +6307,7 @@ function Btn({ onClick, loading, label, color, textColor = "white" }) {
 function Toggle({ checked, onChange, label }) {
   return (
     <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer" }}>
-      <div onClick={() => onChange(!checked)} style={{ width: "44px", height: "26px", borderRadius: "13px", background: checked ? "linear-gradient(135deg, #1f2b44, #b08d4a)" : C.border, display: "flex", alignItems: "center", padding: "3px", transition: "all 0.3s", flexShrink: 0, boxShadow: checked ? "0 2px 8px rgba(31,43,68,0.4)" : "none" }}>
+      <div onClick={() => onChange(!checked)} style={{ width: "44px", height: "26px", borderRadius: "13px", background: checked ? "#1f2b44" : C.border, display: "flex", alignItems: "center", padding: "3px", transition: "all 0.3s", flexShrink: 0, boxShadow: checked ? "0 2px 8px rgba(31,43,68,0.4)" : "none" }}>
         <div style={{ width: "20px", height: "20px", borderRadius: "50%", background: "white", transform: checked ? "translateX(18px)" : "translateX(0)", transition: "transform 0.3s", boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }} />
       </div>
       <span style={{ fontSize: "14px", color: C.sub }}>{label}</span>

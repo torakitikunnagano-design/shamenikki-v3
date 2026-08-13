@@ -19,7 +19,7 @@ export default function RootLayout({
   return (
     <html lang="ja" style={{ overflowX: 'hidden', maxWidth: '100%' }}>
       <head>
-        <meta name="theme-color" content="#ff6b9d" />
+        <meta name="theme-color" content="#1f2b44" />
       </head>
       <body style={{
         margin: 0,
