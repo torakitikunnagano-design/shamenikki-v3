@@ -1557,7 +1557,7 @@ function App() {
                 </nav>
               )}
 
-              <div style={{ padding: "20px 16px", maxWidth: (mode === "admin" && page === "cast") ? "1280px" : "680px", margin: "0 auto" }}>
+              <div style={{ padding: "20px 16px", maxWidth: (mode === "admin" && (page === "cast" || page === "bulkmitene")) ? "1280px" : "680px", margin: "0 auto" }}>
                 {mode === "cast" && showShindan && <ShindanPage casts={casts} setCasts={setCasts} loggedInCast={loggedInCast} onComplete={() => { setShowShindan(false); setCastPage("score"); }} />}
                 {mode === "cast" && !showShindan && page === "score"       && <ScorePage casts={casts} settings={settings} scores={scores} setScores={setScores} loggedInCast={loggedInCast} sessionPass={sessionPass} onRetryDiagnosis={() => setShowShindan(true)} />}
                 {mode === "cast" && !showShindan && page === "salary"      && <SalaryPage loggedInCast={loggedInCast} casts={casts} courses={courses} shifts={shifts} />}
@@ -6140,6 +6140,10 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
         </p>
       </div>
 
+      {/* 2カラム: 左=送信操作＋自動送信スケジュール / 右=今日出勤一覧。
+          repeat(auto-fit, minmax(320px, 1fr)) により狭い画面（スマホ）では自動で1カラムに落ちる */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "14px", alignItems: "start" }}>
+        <div style={{ display: "grid", gap: "14px", alignItems: "start" }}>
       <div style={card}>
         <label style={{ fontSize: "11px", color: C.muted, fontWeight: "700", display: "block", marginBottom: "6px" }}>店</label>
         <select value={storeLabel} disabled style={{ ...inp, marginBottom: "14px" }}>
@@ -6177,6 +6181,11 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
         )}
       </div>
 
+      {/* 自動送信スケジュール設定。ミテネ専用モードのON/OFFに関わらず表示 */}
+      <AutoMiteneScheduleSection shopdir={syncConfig?.shopdir || ""} />
+        </div>
+
+        <div style={{ display: "grid", gap: "14px", alignItems: "start" }}>
       {todayCasts.length === 0 ? (
         <div style={{ ...card, textAlign: "center", padding: "30px", color: C.muted }}>今日出勤のキャストがいません</div>
       ) : (
@@ -6198,6 +6207,8 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
           })}
         </div>
       )}
+        </div>
+      </div>
 
       {summary && (
         <div style={{ ...card, borderColor: `${C.accent2}45`, background: `${C.accent2}08` }}>
@@ -6215,9 +6226,6 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
           )}
         </div>
       )}
-
-      {/* 自動送信スケジュール設定。ミテネ専用モードのON/OFFに関わらず表示 */}
-      <AutoMiteneScheduleSection shopdir={syncConfig?.shopdir || ""} />
     </div>
   );
 }
