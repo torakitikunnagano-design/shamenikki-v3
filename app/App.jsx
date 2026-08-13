@@ -240,6 +240,7 @@ const PER_STORE_BASE_KEYS = [
   "shamenikki_casts", "shamenikki_scores", "shamenikki_settings", "shamenikki_courses",
   "shamenikki_shifts", "shamenikki_sync_config", "shamenikki_cut_days",
   "shamenikki_guarantee", "shamenikki_violations", "shamenikki_extra_workdays",
+  "shamenikki_mitene_only",
 ];
 // キャスト等に紐づく動的キー（接頭辞で判定）
 const PER_STORE_PREFIXES = ["shamenikki_salary_", "cast_type_", "support_settings_"];
@@ -503,6 +504,15 @@ function App() {
   const [shifts, setShifts] = useLocalStorage("shamenikki_shifts", {});
   const [syncConfig, setSyncConfig] = useLocalStorage("shamenikki_sync_config", { shopdir: "", adminId: "", adminPass: "" });
   const [cutDays, setCutDays] = useLocalStorage("shamenikki_cut_days", initCutDays);
+  // ミテネ専用モード（店舗ごと保存・localStorage完結）: ONで管理画面を「一括ミテネ」「設定」だけに絞る
+  const [miteneOnly, setMiteneOnly] = useLocalStorage("shamenikki_mitene_only", false);
+  // ミテネ専用モード時はキャスト画面に入らせない。初期描画はサーバと同じ "cast" のまま
+  // （hydration mismatch回避）、localStorage 読込後にこの effect で管理側へ寄せる。
+  useEffect(() => { if (miteneOnly && mode === "cast") setMode("admin"); }, [miteneOnly, mode]);
+  // ミテネ専用モードで隠れたタブを指していたら一括ミテネへフォールバック（空白ページ防止）
+  useEffect(() => {
+    if (miteneOnly && adminPage !== "cast" && adminPage !== "bulkmitene" && adminPage !== "settings") setAdminPage("bulkmitene");
+  }, [miteneOnly, adminPage]);
   const [loggedInCast, setLoggedInCast] = useState(null);
   const [sessionPass, setSessionPass] = useState(""); // ログイン中のパスをメモリのみ保持
 
@@ -1084,14 +1094,14 @@ function App() {
       setAdminUnlocked(false);
       setLoggedInCast(null);
       setSessionPass("");
-      setMode("cast");
+      setMode(miteneOnly ? "admin" : "cast"); // ミテネ専用モード時はキャスト画面に飛ばさない
       setSessionExpired(true);
     });
     return () => setUnauthorizedHandler(null);
-  }, []);
+  }, [miteneOnly]);
 
   // 管理ログアウト＝Supabase Auth からもサインアウト（外側のログイン画面へ戻る）
-  function logout() { clearAuthToken(); setAdminUnlocked(false); setMode("cast"); try { supabase.auth.signOut(); } catch {} }
+  function logout() { clearAuthToken(); setAdminUnlocked(false); setMode(miteneOnly ? "admin" : "cast"); try { supabase.auth.signOut(); } catch {} } // ミテネ専用モード時はキャスト画面に飛ばさない
   function castLogout() { clearAuthToken(); setLoggedInCast(null); setSessionPass(""); setCastPage("score"); setShowShindan(false); }
   function handleCastLogin(name, pass) {
     setLoggedInCast(name);
@@ -1103,6 +1113,294 @@ function App() {
       if (typeData && JSON.parse(typeData)?.type) { setCastPage("score"); return; }
     } catch {}
     setShowShindan(true);
+  }
+
+  // ── 同期（キャスト同期・出勤同期・ミテネPW取得）: CastPage から持ち上げ ──
+  // ミテネ専用モードで一括ミテネ画面からも同じ doSync を使うため App 管理にする（本体ロジックは無改変で移動）。
+  // state も CastPage 時代と同名のまま App に置き、CastPage へは props で渡す。
+  const todayKey = getBusinessTodayKey();
+  const [syncLoading, setSyncLoading] = useState(null); // null | "casts" | "shifts"
+  const [syncResult, setSyncResult] = useState(null);
+  const [busyOverlay, setBusyOverlay] = useState(null); // 他スタッフ処理中(409 busy)の中央オーバーレイ文言（null=非表示）
+  const [showTodayOnly, setShowTodayOnly] = useState(true);
+
+  // ミテネ用パスワードを非ブロッキングで取得する。
+  // 今日出勤キャストだけを対象＝件数を絞り Vercel タイムアウト内に収める。失敗してもロスターに影響なし。
+  // heaven_pass の保存はサーバー(mitene-creds)が service_role で casts に直接行う。
+  // クライアントはパスワードに一切触れず、保存件数だけを受け取って表示する。
+  // バックグラウンドで数十秒かかるため、進捗を syncResult.credStatus で画面に出す。
+  async function fillMitenePasswords(castList, shiftData) {
+    try {
+      // 今日出勤の名前集合は「今回の同期で取れた最新シフト(shiftData)」を最優先。無ければ既存stateで判定。
+      const workingNames = new Set();
+      if (Array.isArray(shiftData)) {
+        shiftData.forEach((s) => {
+          if (s && Array.isArray(s.days) && s.days.some((d) => d.date === todayKey)) workingNames.add(normalizeName(s.name));
+        });
+      }
+      // shiftData に載らないキャスト（新人等）対策: アプリの shifts state（出勤同期由来・一括ミテネ画面と同じ情報源）
+      // からも今日出勤の名前を追加して和集合にする。名前キーの M/D 配列（shiftDaysFor が走査する形式）を todayKey で判定。
+      for (const k in shifts) {
+        const d = shifts[k];
+        if (Array.isArray(d) && d.some((s) => s && s.date === todayKey)) workingNames.add(normalizeName(k));
+      }
+      const targets = (castList || []).filter((c) => {
+        if (!c.heaven_id) return false;
+        if (workingNames.size > 0) return workingNames.has(normalizeName(c.name));
+        const d = shiftDaysFor(shifts, c.name);
+        return Array.isArray(d) && d.some((s) => s.date === todayKey);
+      });
+      const memberIds = targets.map((c) => c.heaven_id);
+      if (memberIds.length === 0) { console.log("[fillMitenePasswords] no today-working targets"); return; }
+
+      setSyncResult((p) => ({ ...(p || {}), credStatus: `今日出勤 ${memberIds.length}人のミテネ用パスワード取得中…（数十秒）` }));
+      const res = await apiFetch("/api/mitene-creds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir, memberIds }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        console.error("[fillMitenePasswords] error:", data && data.error);
+        setSyncResult((p) => ({ ...(p || {}), credStatus: "⚠️ パスワード取得に失敗しました（ロスターは保存済み）" }));
+        return;
+      }
+      // heaven_pass の保存はサーバーが service_role で casts に直接行う。
+      // クライアントはパスワードに触れず、件数だけを表示する。
+      const updated = data.updated ?? 0;
+      const notFound = data.notFound ?? 0;
+      console.log("[fillMitenePasswords] updated=" + updated + " notFound=" + notFound + " total=" + (data.total ?? 0));
+      setSyncResult((p) => ({ ...(p || {}), credStatus: `✅ ミテネ用パスワードを保存: ${updated}件（クラウド共有）${notFound > 0 ? ` ／ 台帳に無いID: ${notFound}件` : ""}` }));
+    } catch (e) {
+      console.error("[fillMitenePasswords] exception:", e && e.message);
+      setSyncResult((p) => ({ ...(p || {}), credStatus: "⚠️ パスワード取得に失敗しました（ロスターは保存済み）" }));
+    }
+  }
+
+  async function doSync(mode) {
+    if (!syncConfig?.adminId || !syncConfig?.adminPass || !syncConfig?.shopdir) {
+      setSyncResult({ error: "設定画面で管理者ID・パスワード・shopdirを保存してください" });
+      return;
+    }
+    setSyncLoading(mode);
+    setSyncResult(null);
+    try {
+      const res = await apiFetch("/api/store-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir, mode }),
+      });
+      const data = await res.json();
+      // 他のスタッフが同期中（サーバ側ロック）: 専用の中央オーバーレイを出して通常エラー表示はしない
+      if (res.status === 409 && data.error === "busy") {
+        setBusyOverlay("他のスタッフが更新してるよ！少しまってね");
+        setTimeout(() => setBusyOverlay(null), 6000); // 6秒で自動的に消える
+        return;
+      }
+      if (!res.ok || !data.casts) throw new Error(data.message || "同期に失敗しました");
+
+      if (mode === "casts") {
+        // 掲載順の先頭 CAST_SYNC_LIMIT 名 ∪ 出勤データに載っているキャスト（100位以降でも取り込む）
+        const all = data.casts || [];
+        const top = all.slice(0, CAST_SYNC_LIMIT);
+        const shiftNames = new Set();
+        for (const k in shifts) { if (Array.isArray(shifts[k])) shiftNames.add(normalizeName(k)); }
+        const extra = all.slice(CAST_SYNC_LIMIT).filter((c) => shiftNames.has(normalizeName(c.name)));
+        const incoming = [...top, ...extra];
+        let addedCount = 0, updatedCount = 0;
+        const next = [...casts];
+
+        incoming.forEach(({ name: rawName, heavenId }) => {
+          const name = normalizeName(rawName); // 最初のスペースより前だけを保存名にする
+          // heaven_pass はクライアントに保持しない（サーバーが service_role で casts に直接保存する）。
+          // 1. heavenId一致 → name更新
+          const byId = next.findIndex((c) => c.heaven_id && c.heaven_id === heavenId);
+          if (byId !== -1) {
+            next[byId] = { ...next[byId], name };
+            updatedCount++;
+            return;
+          }
+          // 2. name一致（正規化名で照合）→ heaven_id更新＋name正規化
+          const byName = next.findIndex((c) => normalizeName(c.name) === name);
+          if (byName !== -1) {
+            next[byName] = { ...next[byName], heaven_id: heavenId, name };
+            updatedCount++;
+            return;
+          }
+          // 3. 新規追加
+          next.push({ name, is_active: true, work_start: "", strong: "未分析", weak: "未分析", heaven_id: heavenId, heaven_pass: "" });
+          addedCount++;
+        });
+
+        // (store_id, name) の重複排除。normalizeName で飾り(新人/🔰)を除去した結果、
+        // 同名が複数できると Postgres の ON CONFLICT が
+        // "cannot affect row a second time" でバッチ全体を拒否し 0件保存になるため必須。
+        // 空名は除外。重複時は heaven_id を補完して情報を失わない。
+        const dedupedNext = [];
+        const seenName = new Map(); // normalizedName -> index in dedupedNext
+        for (const c of next) {
+          const key = normalizeName(c.name);
+          if (!key) continue; // 名前空は除外（必須カラム違反も防ぐ）
+          if (seenName.has(key)) {
+            const ex = dedupedNext[seenName.get(key)];
+            if (!ex.heaven_id && c.heaven_id) ex.heaven_id = c.heaven_id;
+            continue;
+          }
+          seenName.set(key, dedupedNext.length);
+          dedupedNext.push({ ...c, name: key });
+        }
+
+        setCasts(dedupedNext);
+
+        // 同一 heaven_id の古い装飾名行（例「かすみ☆エ」）を削除対象として割り出す。
+        // survivingByHeavenId: 同期後に生き残る正規化名（heaven_id → name）。
+        const survivingByHeavenId = new Map();
+        dedupedNext.forEach((c) => { if (c.heaven_id) survivingByHeavenId.set(c.heaven_id, c.name); });
+        const survivingNames = new Set(dedupedNext.map((c) => c.name));
+        const staleNames = [];
+        casts.forEach((c) => {
+          if (!c.heaven_id) return;
+          const keepName = survivingByHeavenId.get(c.heaven_id);
+          if (!keepName) return;                   // 同期後も生存している heaven_id の行だけが対象
+          if (c.name === keepName) return;         // 生き残りの正規化名は絶対に消さない
+          if (survivingNames.has(c.name)) return;  // 念のため: 生存中の名前は消さない
+          if (!staleNames.includes(c.name)) staleNames.push(c.name);
+        });
+
+        // Supabase upsert（supabase-js は reject せず {error} を resolve するので必ず error を見る）
+        try {
+          supabase.from("casts").upsert(dedupedNext.map(toSupabaseCast), { onConflict: "store_id,name" })
+            .then(({ error }) => {
+              if (error) {
+                console.error("[doSync casts upsert] error:", error.message || error, error.details || "", error.hint || "");
+                setSyncResult((p) => ({ ...(p || {}), upsertError: (error.message || String(error)) }));
+                return; // upsert 失敗時は削除しない（データ保全のため先に消さない）
+              }
+              console.log("[doSync casts upsert] saved rows=" + dedupedNext.length);
+              // 順序厳守: upsert 成功後にのみ、同一 heaven_id の古い装飾名行を削除する。
+              if (staleNames.length > 0) {
+                supabase.from("casts").delete().eq("store_id", getActiveStoreId()).in("name", staleNames)
+                  .then(({ error: delErr }) => {
+                    if (delErr) {
+                      // 削除失敗は同期全体を失敗にしない（次回同期でまた試行される）。
+                      console.error("[doSync casts stale delete] error:", delErr.message || delErr, delErr.details || "", delErr.hint || "");
+                    } else {
+                      console.log("[doSync casts stale delete] removed rows=" + staleNames.length + " names=" + staleNames.join(","));
+                      setSyncResult((p) => ({ ...(p || {}), deletedCount: staleNames.length }));
+                    }
+                  })
+                  .catch((e) => console.error("[doSync casts stale delete] exception:", e?.message || e));
+              }
+            })
+            .catch((e) => { console.error("[doSync casts upsert] exception:", e?.message || e); setSyncResult((p) => ({ ...(p || {}), upsertError: String(e?.message || e) })); });
+        } catch (e) { console.error("[doSync casts upsert] threw:", e?.message || e); }
+        setSyncResult({ mode: "casts", addedCount, updatedCount, total: dedupedNext.length });
+        setShowTodayOnly(false);
+        // ロスター保存が完了した後、パスワードを埋める。await して「パス取得完了までオーバーレイを出し続ける」。
+        // 今回の同期で取れた最新シフト(data.shifts)を渡して今日出勤を正確に判定。
+        // ロスターは保存済みなので、パス取得が失敗しても同期全体は失敗扱いにしない（自前で catch）。
+        try {
+          await fillMitenePasswords(dedupedNext, data.shifts);
+        } catch (e) {
+          console.warn("mitene password fill failed (roster already saved):", e);
+        }
+      } else {
+        if (!Array.isArray(data.shifts)) throw new Error("出勤データが取得できませんでした");
+        // 同期データの date は "M/D" 形式 → 給料ページ参照用に "YYYY-MM-DD" キーも書く（年跨ぎは mdToYMD が補正）
+        const store = getActiveStoreId();
+        const todayYmd = getBusinessToday();  // 営業日基準の今日（削除は今日以降のみ＝過去実績は消さない）
+        const shiftRows = [];           // Supabase 保存用
+        const seenRow = new Set();      // (store_id,cast_name,date) 重複排除
+        const syncedNames = new Set();  // 今回同期に登場したキャスト名（cleanName済み）
+        const syncedKeys = new Set();   // 今回同期の "cast_name|YYYY-MM-DD" 組
+        setShifts((prev) => {
+          // 名前→M/D配列は「総入れ替え」: 前回同期の残骸（ヘブン側で消えた出勤）が今日出勤に紛れるのを防ぐ。
+          // "名前_YYYY-MM-DD" キー（オブジェクト値）は給料・時間表示用にそのまま保持する。
+          const updated = {};
+          for (const k in prev) { if (!Array.isArray(prev[k])) updated[k] = prev[k]; }
+          data.shifts.forEach(({ name, days }) => {
+            if (!name || !Array.isArray(days)) return;
+            // ボット由来の装飾（🔰/新人/スペース以降）を保存前に除去し、casts側の名前と揃える
+            const cleanName = normalizeName(name);
+            if (!cleanName) return;
+            updated[cleanName] = days; // 今日出勤フィルタ用 (M/D 配列)
+            days.forEach(({ date, start, end }) => {
+              if (!date) return;
+              const ymd = mdToYMD(date);
+              if (!ymd) return;
+              updated[`${cleanName}_${ymd}`] = { startTime: start || "", endTime: end || "" };
+              syncedNames.add(cleanName);            // 今回同期に登場したキャスト
+              syncedKeys.add(`${cleanName}|${ymd}`); // 今回同期の (cast_name,date) 組
+              const rk = `${store}::${cleanName}::${ymd}`;
+              if (!seenRow.has(rk)) {
+                seenRow.add(rk);
+                shiftRows.push({ store_id: store, cast_name: cleanName, date: ymd, start_time: start || "", end_time: end || "" });
+              }
+            });
+          });
+          return updated;
+        });
+        // Supabase へ upsert（出勤同期はこれまでローカルだけだった＝クラウド未保存のバグを修正）。
+        // supabase-js は reject せず {error} を resolve するので必ず error を見る。
+        if (shiftRows.length > 0) {
+          try {
+            supabase.from("shifts").upsert(shiftRows, { onConflict: "store_id,cast_name,date" })
+              .then(async ({ error }) => {
+                if (error) {
+                  console.error("[doSync shifts upsert] error:", error.message || error, error.details || "", error.hint || "");
+                  setSyncResult((p) => ({ ...(p || {}), upsertError: (error.message || String(error)) }));
+                  return; // upsert 失敗時は削除しない（データ保全のため先に消さない）
+                }
+                console.log("[doSync shifts upsert] saved rows=" + shiftRows.length);
+
+                // 順序厳守: upsert 成功後にのみ、取消されたシフトを削除する。
+                // 条件: store_id 一致 / date >= 今日 / 今回同期に登場したキャスト / 今回同期に無い (cast_name,date)。
+                try {
+                  const { data: existing, error: selErr } = await supabase.from("shifts")
+                    .select("cast_name, date")
+                    .eq("store_id", store)
+                    .gte("date", todayYmd);
+                  if (selErr) { console.error("[doSync shifts stale select] error:", selErr.message || selErr); return; }
+                  const staleShifts = (existing || []).filter(
+                    (r) => syncedNames.has(r.cast_name) && !syncedKeys.has(`${r.cast_name}|${r.date}`)
+                  );
+                  if (staleShifts.length === 0) return;
+
+                  // 日付ごとにまとめて削除（(cast_name,date) の組だけを確実に消す）。
+                  const byDate = new Map(); // date -> [cast_name]
+                  staleShifts.forEach((r) => { if (!byDate.has(r.date)) byDate.set(r.date, []); byDate.get(r.date).push(r.cast_name); });
+                  const deletedKeys = new Set(); // 実際に消えた "cast_name_date"
+                  for (const [d, names] of byDate) {
+                    const { error: delErr } = await supabase.from("shifts").delete()
+                      .eq("store_id", store).eq("date", d).in("cast_name", names);
+                    if (delErr) { console.error("[doSync shifts stale delete] error:", delErr.message || delErr, delErr.details || "", delErr.hint || ""); continue; }
+                    names.forEach((n) => deletedKeys.add(`${n}_${d}`));
+                  }
+                  if (deletedKeys.size > 0) {
+                    console.log("[doSync shifts stale delete] removed rows=" + deletedKeys.size);
+                    setSyncResult((p) => ({ ...(p || {}), deletedShiftCount: deletedKeys.size }));
+                    // ローカル state の日別時間キー("名前_YYYY-MM-DD")も、実際に削除した組だけ落とす。
+                    setShifts((prev) => {
+                      const nextS = {};
+                      for (const k in prev) { if (!deletedKeys.has(k)) nextS[k] = prev[k]; }
+                      return nextS;
+                    });
+                  }
+                } catch (e) {
+                  console.error("[doSync shifts stale cleanup] exception:", e?.message || e);
+                }
+              })
+              .catch((e) => { console.error("[doSync shifts upsert] exception:", e?.message || e); setSyncResult((p) => ({ ...(p || {}), upsertError: String(e?.message || e) })); });
+          } catch (e) { console.error("[doSync shifts upsert] threw:", e?.message || e); }
+        }
+        setSyncResult({ mode: "shifts", total: data.shifts.length });
+        setShowTodayOnly(true);
+      }
+    } catch (e) {
+      setSyncResult({ error: e.message });
+    } finally {
+      setSyncLoading(null);
+    }
   }
 
   const castNav = [
@@ -1121,7 +1419,7 @@ function App() {
     { id: "courses",   label: "コース設定", icon: "⏱️" },
     { id: "archives",  label: "アーカイブ", icon: "📦" },
     { id: "settings",  label: "設定",    icon: "⚙️" },
-  ];
+  ].filter((n) => !miteneOnly || n.id === "cast" || n.id === "bulkmitene" || n.id === "settings"); // ミテネ専用モード時はキャスト＋一括ミテネ＋設定のみ表示
 
   const page    = mode === "cast" ? castPage    : adminPage;
   const setPage = mode === "cast" ? setCastPage : setAdminPage;
@@ -1149,7 +1447,7 @@ function App() {
         </div>
 
         <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
-          <ModeBtn active={mode === "cast"} onClick={() => setMode("cast")} label="キャスト" />
+          {!miteneOnly && <ModeBtn active={mode === "cast"} onClick={() => setMode("cast")} label="キャスト" />}
           <ModeBtn active={mode === "admin"} onClick={() => setMode("admin")} label="管理" />
         </div>
       </header>
@@ -1197,9 +1495,11 @@ function App() {
               <Btn onClick={tryUnlock} loading={passLoading} label="ログイン" color={C.accent} />
             </div>
           </div>
-          <button onClick={() => setMode("cast")} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "13px", textAlign: "center" }}>
-            ← キャスト画面に戻る
-          </button>
+          {!miteneOnly && (
+            <button onClick={() => setMode("cast")} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "13px", textAlign: "center" }}>
+              ← キャスト画面に戻る
+            </button>
+          )}
         </div>
 
       ) : (
@@ -1264,13 +1564,13 @@ function App() {
                 {mode === "cast" && !showShindan && page === "myguarantee" && <MyGuaranteePage casts={casts} scores={scores} settings={settings} loggedInCast={loggedInCast} />}
 
                 {mode === "admin" && page === "guarantee" && <GuaranteePage casts={casts} scores={scores} settings={settings} shifts={shifts} cutDays={cutDays} />}
-                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} settings={settings} courses={courses} onRefresh={refreshAllForCastPage} />}
+                {mode === "admin" && page === "cast"      && <CastPage casts={casts} setCasts={setCasts} scores={scores} shifts={shifts} setShifts={setShifts} syncConfig={syncConfig} settings={settings} courses={courses} onRefresh={refreshAllForCastPage} doSync={doSync} syncLoading={syncLoading} syncResult={syncResult} busyOverlay={busyOverlay} setBusyOverlay={setBusyOverlay} showTodayOnly={showTodayOnly} setShowTodayOnly={setShowTodayOnly} miteneOnly={miteneOnly} />}
                 {mode === "admin" && page === "bulkmitene" && <BulkMitenePage casts={casts} shifts={shifts} syncConfig={syncConfig} />}
                 {mode === "admin" && page === "ranking"   && <RankingPage scores={scores} />}
                 {mode === "admin" && page === "title"     && <TitlePage casts={casts} />}
                 {mode === "admin" && page === "courses"   && <CoursesPage courses={courses} setCourses={setCourses} />}
                 {mode === "admin" && page === "archives"  && <ArchivesPage />}
-                {mode === "admin" && page === "settings"  && <SettingsPage settings={settings} setSettings={setSettings} syncConfig={syncConfig} setSyncConfig={setSyncConfig} cutDays={cutDays} setCutDays={setCutDays} />}
+                {mode === "admin" && page === "settings"  && <SettingsPage settings={settings} setSettings={setSettings} syncConfig={syncConfig} setSyncConfig={setSyncConfig} cutDays={cutDays} setCutDays={setCutDays} miteneOnly={miteneOnly} setMiteneOnly={setMiteneOnly} />}
               </div>
             </>
           )}
@@ -3943,7 +4243,7 @@ function IdentityDocsButton({ cast }) {
 // ============================================================
 // キャスト管理
 // ============================================================
-function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, settings, courses = [], onRefresh }) {
+function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, settings, courses = [], onRefresh, doSync, syncLoading, syncResult, busyOverlay, setBusyOverlay, showTodayOnly, setShowTodayOnly, miteneOnly }) {
   const [modal, setModal] = useState(null);
   const [modalId, setModalId] = useState("");
   const [modalPass, setModalPass] = useState("");
@@ -3960,10 +4260,6 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
   const [gSaved, setGSaved] = useState(false);
   const [cutDays] = useLocalStorage("shamenikki_cut_days", initCutDays);
   const [lockRefresh, setLockRefresh] = useState(0);
-  const [syncLoading, setSyncLoading] = useState(null); // null | "casts" | "shifts"
-  const [syncResult, setSyncResult] = useState(null);
-  const [busyOverlay, setBusyOverlay] = useState(null); // 他スタッフ処理中(409 busy)の中央オーバーレイ文言（null=非表示）
-  const [showTodayOnly, setShowTodayOnly] = useState(true);
   const [openCalCell, setOpenCalCell] = useState(null); // { castName, date } | null
   const todayKey = getBusinessTodayKey();
   const todayISO = getBusinessToday();
@@ -4226,285 +4522,6 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
     setTimeout(() => setModal(null), 1000);
     // Supabaseにはheaven_passを送らない（toSupabaseCastが除外する）
     try { supabase.from("casts").upsert(toSupabaseCast({ ...modal, heaven_id: modalId }), { onConflict: "store_id,name" }).then(({ error }) => { if (error) console.error("[saveModal casts upsert]", error.message, error.details, error.hint); }).catch((e) => console.error("[saveModal casts upsert] exception:", e?.message || e)); } catch {}
-  }
-
-  // ミテネ用パスワードを非ブロッキングで取得する。
-  // 今日出勤キャストだけを対象＝件数を絞り Vercel タイムアウト内に収める。失敗してもロスターに影響なし。
-  // heaven_pass の保存はサーバー(mitene-creds)が service_role で casts に直接行う。
-  // クライアントはパスワードに一切触れず、保存件数だけを受け取って表示する。
-  // バックグラウンドで数十秒かかるため、進捗を syncResult.credStatus で画面に出す。
-  async function fillMitenePasswords(castList, shiftData) {
-    try {
-      // 今日出勤の名前集合は「今回の同期で取れた最新シフト(shiftData)」を最優先。無ければ既存stateで判定。
-      const workingNames = new Set();
-      if (Array.isArray(shiftData)) {
-        shiftData.forEach((s) => {
-          if (s && Array.isArray(s.days) && s.days.some((d) => d.date === todayKey)) workingNames.add(normalizeName(s.name));
-        });
-      }
-      // shiftData に載らないキャスト（新人等）対策: アプリの shifts state（出勤同期由来・一括ミテネ画面と同じ情報源）
-      // からも今日出勤の名前を追加して和集合にする。名前キーの M/D 配列（shiftDaysFor が走査する形式）を todayKey で判定。
-      for (const k in shifts) {
-        const d = shifts[k];
-        if (Array.isArray(d) && d.some((s) => s && s.date === todayKey)) workingNames.add(normalizeName(k));
-      }
-      const targets = (castList || []).filter((c) => {
-        if (!c.heaven_id) return false;
-        if (workingNames.size > 0) return workingNames.has(normalizeName(c.name));
-        const d = shiftDaysFor(shifts, c.name);
-        return Array.isArray(d) && d.some((s) => s.date === todayKey);
-      });
-      const memberIds = targets.map((c) => c.heaven_id);
-      if (memberIds.length === 0) { console.log("[fillMitenePasswords] no today-working targets"); return; }
-
-      setSyncResult((p) => ({ ...(p || {}), credStatus: `今日出勤 ${memberIds.length}人のミテネ用パスワード取得中…（数十秒）` }));
-      const res = await apiFetch("/api/mitene-creds", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir, memberIds }),
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        console.error("[fillMitenePasswords] error:", data && data.error);
-        setSyncResult((p) => ({ ...(p || {}), credStatus: "⚠️ パスワード取得に失敗しました（ロスターは保存済み）" }));
-        return;
-      }
-      // heaven_pass の保存はサーバーが service_role で casts に直接行う。
-      // クライアントはパスワードに触れず、件数だけを表示する。
-      const updated = data.updated ?? 0;
-      const notFound = data.notFound ?? 0;
-      console.log("[fillMitenePasswords] updated=" + updated + " notFound=" + notFound + " total=" + (data.total ?? 0));
-      setSyncResult((p) => ({ ...(p || {}), credStatus: `✅ ミテネ用パスワードを保存: ${updated}件（クラウド共有）${notFound > 0 ? ` ／ 台帳に無いID: ${notFound}件` : ""}` }));
-    } catch (e) {
-      console.error("[fillMitenePasswords] exception:", e && e.message);
-      setSyncResult((p) => ({ ...(p || {}), credStatus: "⚠️ パスワード取得に失敗しました（ロスターは保存済み）" }));
-    }
-  }
-
-  async function doSync(mode) {
-    if (!syncConfig?.adminId || !syncConfig?.adminPass || !syncConfig?.shopdir) {
-      setSyncResult({ error: "設定画面で管理者ID・パスワード・shopdirを保存してください" });
-      return;
-    }
-    setSyncLoading(mode);
-    setSyncResult(null);
-    try {
-      const res = await apiFetch("/api/store-sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminId: syncConfig.adminId, adminPass: syncConfig.adminPass, shopdir: syncConfig.shopdir, mode }),
-      });
-      const data = await res.json();
-      // 他のスタッフが同期中（サーバ側ロック）: 専用の中央オーバーレイを出して通常エラー表示はしない
-      if (res.status === 409 && data.error === "busy") {
-        setBusyOverlay("他のスタッフが更新してるよ！少しまってね");
-        setTimeout(() => setBusyOverlay(null), 6000); // 6秒で自動的に消える
-        return;
-      }
-      if (!res.ok || !data.casts) throw new Error(data.message || "同期に失敗しました");
-
-      if (mode === "casts") {
-        // 掲載順の先頭 CAST_SYNC_LIMIT 名 ∪ 出勤データに載っているキャスト（100位以降でも取り込む）
-        const all = data.casts || [];
-        const top = all.slice(0, CAST_SYNC_LIMIT);
-        const shiftNames = new Set();
-        for (const k in shifts) { if (Array.isArray(shifts[k])) shiftNames.add(normalizeName(k)); }
-        const extra = all.slice(CAST_SYNC_LIMIT).filter((c) => shiftNames.has(normalizeName(c.name)));
-        const incoming = [...top, ...extra];
-        let addedCount = 0, updatedCount = 0;
-        const next = [...casts];
-
-        incoming.forEach(({ name: rawName, heavenId }) => {
-          const name = normalizeName(rawName); // 最初のスペースより前だけを保存名にする
-          // heaven_pass はクライアントに保持しない（サーバーが service_role で casts に直接保存する）。
-          // 1. heavenId一致 → name更新
-          const byId = next.findIndex((c) => c.heaven_id && c.heaven_id === heavenId);
-          if (byId !== -1) {
-            next[byId] = { ...next[byId], name };
-            updatedCount++;
-            return;
-          }
-          // 2. name一致（正規化名で照合）→ heaven_id更新＋name正規化
-          const byName = next.findIndex((c) => normalizeName(c.name) === name);
-          if (byName !== -1) {
-            next[byName] = { ...next[byName], heaven_id: heavenId, name };
-            updatedCount++;
-            return;
-          }
-          // 3. 新規追加
-          next.push({ name, is_active: true, work_start: "", strong: "未分析", weak: "未分析", heaven_id: heavenId, heaven_pass: "" });
-          addedCount++;
-        });
-
-        // (store_id, name) の重複排除。normalizeName で飾り(新人/🔰)を除去した結果、
-        // 同名が複数できると Postgres の ON CONFLICT が
-        // "cannot affect row a second time" でバッチ全体を拒否し 0件保存になるため必須。
-        // 空名は除外。重複時は heaven_id を補完して情報を失わない。
-        const dedupedNext = [];
-        const seenName = new Map(); // normalizedName -> index in dedupedNext
-        for (const c of next) {
-          const key = normalizeName(c.name);
-          if (!key) continue; // 名前空は除外（必須カラム違反も防ぐ）
-          if (seenName.has(key)) {
-            const ex = dedupedNext[seenName.get(key)];
-            if (!ex.heaven_id && c.heaven_id) ex.heaven_id = c.heaven_id;
-            continue;
-          }
-          seenName.set(key, dedupedNext.length);
-          dedupedNext.push({ ...c, name: key });
-        }
-
-        setCasts(dedupedNext);
-
-        // 同一 heaven_id の古い装飾名行（例「かすみ☆エ」）を削除対象として割り出す。
-        // survivingByHeavenId: 同期後に生き残る正規化名（heaven_id → name）。
-        const survivingByHeavenId = new Map();
-        dedupedNext.forEach((c) => { if (c.heaven_id) survivingByHeavenId.set(c.heaven_id, c.name); });
-        const survivingNames = new Set(dedupedNext.map((c) => c.name));
-        const staleNames = [];
-        casts.forEach((c) => {
-          if (!c.heaven_id) return;
-          const keepName = survivingByHeavenId.get(c.heaven_id);
-          if (!keepName) return;                   // 同期後も生存している heaven_id の行だけが対象
-          if (c.name === keepName) return;         // 生き残りの正規化名は絶対に消さない
-          if (survivingNames.has(c.name)) return;  // 念のため: 生存中の名前は消さない
-          if (!staleNames.includes(c.name)) staleNames.push(c.name);
-        });
-
-        // Supabase upsert（supabase-js は reject せず {error} を resolve するので必ず error を見る）
-        try {
-          supabase.from("casts").upsert(dedupedNext.map(toSupabaseCast), { onConflict: "store_id,name" })
-            .then(({ error }) => {
-              if (error) {
-                console.error("[doSync casts upsert] error:", error.message || error, error.details || "", error.hint || "");
-                setSyncResult((p) => ({ ...(p || {}), upsertError: (error.message || String(error)) }));
-                return; // upsert 失敗時は削除しない（データ保全のため先に消さない）
-              }
-              console.log("[doSync casts upsert] saved rows=" + dedupedNext.length);
-              // 順序厳守: upsert 成功後にのみ、同一 heaven_id の古い装飾名行を削除する。
-              if (staleNames.length > 0) {
-                supabase.from("casts").delete().eq("store_id", getActiveStoreId()).in("name", staleNames)
-                  .then(({ error: delErr }) => {
-                    if (delErr) {
-                      // 削除失敗は同期全体を失敗にしない（次回同期でまた試行される）。
-                      console.error("[doSync casts stale delete] error:", delErr.message || delErr, delErr.details || "", delErr.hint || "");
-                    } else {
-                      console.log("[doSync casts stale delete] removed rows=" + staleNames.length + " names=" + staleNames.join(","));
-                      setSyncResult((p) => ({ ...(p || {}), deletedCount: staleNames.length }));
-                    }
-                  })
-                  .catch((e) => console.error("[doSync casts stale delete] exception:", e?.message || e));
-              }
-            })
-            .catch((e) => { console.error("[doSync casts upsert] exception:", e?.message || e); setSyncResult((p) => ({ ...(p || {}), upsertError: String(e?.message || e) })); });
-        } catch (e) { console.error("[doSync casts upsert] threw:", e?.message || e); }
-        setSyncResult({ mode: "casts", addedCount, updatedCount, total: dedupedNext.length });
-        setShowTodayOnly(false);
-        // ロスター保存が完了した後、パスワードを埋める。await して「パス取得完了までオーバーレイを出し続ける」。
-        // 今回の同期で取れた最新シフト(data.shifts)を渡して今日出勤を正確に判定。
-        // ロスターは保存済みなので、パス取得が失敗しても同期全体は失敗扱いにしない（自前で catch）。
-        try {
-          await fillMitenePasswords(dedupedNext, data.shifts);
-        } catch (e) {
-          console.warn("mitene password fill failed (roster already saved):", e);
-        }
-      } else {
-        if (!Array.isArray(data.shifts)) throw new Error("出勤データが取得できませんでした");
-        // 同期データの date は "M/D" 形式 → 給料ページ参照用に "YYYY-MM-DD" キーも書く（年跨ぎは mdToYMD が補正）
-        const store = getActiveStoreId();
-        const todayYmd = getBusinessToday();  // 営業日基準の今日（削除は今日以降のみ＝過去実績は消さない）
-        const shiftRows = [];           // Supabase 保存用
-        const seenRow = new Set();      // (store_id,cast_name,date) 重複排除
-        const syncedNames = new Set();  // 今回同期に登場したキャスト名（cleanName済み）
-        const syncedKeys = new Set();   // 今回同期の "cast_name|YYYY-MM-DD" 組
-        setShifts((prev) => {
-          // 名前→M/D配列は「総入れ替え」: 前回同期の残骸（ヘブン側で消えた出勤）が今日出勤に紛れるのを防ぐ。
-          // "名前_YYYY-MM-DD" キー（オブジェクト値）は給料・時間表示用にそのまま保持する。
-          const updated = {};
-          for (const k in prev) { if (!Array.isArray(prev[k])) updated[k] = prev[k]; }
-          data.shifts.forEach(({ name, days }) => {
-            if (!name || !Array.isArray(days)) return;
-            // ボット由来の装飾（🔰/新人/スペース以降）を保存前に除去し、casts側の名前と揃える
-            const cleanName = normalizeName(name);
-            if (!cleanName) return;
-            updated[cleanName] = days; // 今日出勤フィルタ用 (M/D 配列)
-            days.forEach(({ date, start, end }) => {
-              if (!date) return;
-              const ymd = mdToYMD(date);
-              if (!ymd) return;
-              updated[`${cleanName}_${ymd}`] = { startTime: start || "", endTime: end || "" };
-              syncedNames.add(cleanName);            // 今回同期に登場したキャスト
-              syncedKeys.add(`${cleanName}|${ymd}`); // 今回同期の (cast_name,date) 組
-              const rk = `${store}::${cleanName}::${ymd}`;
-              if (!seenRow.has(rk)) {
-                seenRow.add(rk);
-                shiftRows.push({ store_id: store, cast_name: cleanName, date: ymd, start_time: start || "", end_time: end || "" });
-              }
-            });
-          });
-          return updated;
-        });
-        // Supabase へ upsert（出勤同期はこれまでローカルだけだった＝クラウド未保存のバグを修正）。
-        // supabase-js は reject せず {error} を resolve するので必ず error を見る。
-        if (shiftRows.length > 0) {
-          try {
-            supabase.from("shifts").upsert(shiftRows, { onConflict: "store_id,cast_name,date" })
-              .then(async ({ error }) => {
-                if (error) {
-                  console.error("[doSync shifts upsert] error:", error.message || error, error.details || "", error.hint || "");
-                  setSyncResult((p) => ({ ...(p || {}), upsertError: (error.message || String(error)) }));
-                  return; // upsert 失敗時は削除しない（データ保全のため先に消さない）
-                }
-                console.log("[doSync shifts upsert] saved rows=" + shiftRows.length);
-
-                // 順序厳守: upsert 成功後にのみ、取消されたシフトを削除する。
-                // 条件: store_id 一致 / date >= 今日 / 今回同期に登場したキャスト / 今回同期に無い (cast_name,date)。
-                try {
-                  const { data: existing, error: selErr } = await supabase.from("shifts")
-                    .select("cast_name, date")
-                    .eq("store_id", store)
-                    .gte("date", todayYmd);
-                  if (selErr) { console.error("[doSync shifts stale select] error:", selErr.message || selErr); return; }
-                  const staleShifts = (existing || []).filter(
-                    (r) => syncedNames.has(r.cast_name) && !syncedKeys.has(`${r.cast_name}|${r.date}`)
-                  );
-                  if (staleShifts.length === 0) return;
-
-                  // 日付ごとにまとめて削除（(cast_name,date) の組だけを確実に消す）。
-                  const byDate = new Map(); // date -> [cast_name]
-                  staleShifts.forEach((r) => { if (!byDate.has(r.date)) byDate.set(r.date, []); byDate.get(r.date).push(r.cast_name); });
-                  const deletedKeys = new Set(); // 実際に消えた "cast_name_date"
-                  for (const [d, names] of byDate) {
-                    const { error: delErr } = await supabase.from("shifts").delete()
-                      .eq("store_id", store).eq("date", d).in("cast_name", names);
-                    if (delErr) { console.error("[doSync shifts stale delete] error:", delErr.message || delErr, delErr.details || "", delErr.hint || ""); continue; }
-                    names.forEach((n) => deletedKeys.add(`${n}_${d}`));
-                  }
-                  if (deletedKeys.size > 0) {
-                    console.log("[doSync shifts stale delete] removed rows=" + deletedKeys.size);
-                    setSyncResult((p) => ({ ...(p || {}), deletedShiftCount: deletedKeys.size }));
-                    // ローカル state の日別時間キー("名前_YYYY-MM-DD")も、実際に削除した組だけ落とす。
-                    setShifts((prev) => {
-                      const nextS = {};
-                      for (const k in prev) { if (!deletedKeys.has(k)) nextS[k] = prev[k]; }
-                      return nextS;
-                    });
-                  }
-                } catch (e) {
-                  console.error("[doSync shifts stale cleanup] exception:", e?.message || e);
-                }
-              })
-              .catch((e) => { console.error("[doSync shifts upsert] exception:", e?.message || e); setSyncResult((p) => ({ ...(p || {}), upsertError: String(e?.message || e) })); });
-          } catch (e) { console.error("[doSync shifts upsert] threw:", e?.message || e); }
-        }
-        setSyncResult({ mode: "shifts", total: data.shifts.length });
-        setShowTodayOnly(true);
-      }
-    } catch (e) {
-      setSyncResult({ error: e.message });
-    } finally {
-      setSyncLoading(null);
-    }
   }
 
   return (
@@ -4862,15 +4879,17 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                     <span style={{ fontSize: "11px", color: c.is_active ? C.green : C.muted, background: `${c.is_active ? C.green : C.muted}18`, padding: "3px 10px", borderRadius: "20px", fontWeight: "700" }}>{c.is_active ? "在籍中" : "停止中"}</span>
                   </div>
                   <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                    <Tag label={`得意：${c.strong}`} color={C.green} />
-                    <Tag label={`苦手：${c.weak}`} color={C.yellow} />
+                    {/* ミテネ専用モード時は分析系（得意・苦手・タイプ）・保証系タグを隠す（ヘブン✓は残す） */}
+                    {!miteneOnly && <Tag label={`得意：${c.strong}`} color={C.green} />}
+                    {!miteneOnly && <Tag label={`苦手：${c.weak}`} color={C.yellow} />}
                     {c.heaven_id ? <Tag label="ヘブン✓" color={C.accent} /> : <Tag label="ヘブン未設定" color={C.muted} />}
-                    {diagData?.type && <Tag label={`${diagData.type}${isLocked ? " 🔒" : ""}`} color={isLocked ? C.red : C.blue} />}
-                    {guarantee[c.name]?.type && <Tag label={guarantee[c.name].type === "daily" ? "日保証" : "トータル保証"} color={C.yellow} />}
+                    {!miteneOnly && diagData?.type && <Tag label={`${diagData.type}${isLocked ? " 🔒" : ""}`} color={isLocked ? C.red : C.blue} />}
+                    {!miteneOnly && guarantee[c.name]?.type && <Tag label={guarantee[c.name].type === "daily" ? "日保証" : "トータル保証"} color={C.yellow} />}
                   </div>
                   {/* ヘブンID（同期で取得・表示のみ。手動設定は廃止） */}
                   <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", margin: "6px 0 0" }}>ID: {c.heaven_id || "未設定"}</p>
-                  {(() => {
+                  {/* ミテネ専用モード時は保証状況ボックス（残り日数・補填/クリア）を隠す */}
+                  {!miteneOnly && (() => {
                     const g = guarantee[c.name];
                     if (!g?.dailyAmount || !g?.endDate) return null;
                     const gr = calcGuaranteeResult(c.name, guaranteeCtx);
@@ -4914,6 +4933,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
                   <MiteneButton cast={c} />
+                  {/* ミテネ専用モード時は明細UP・個人情報UP・保証設定・過去の給料・帰宅・診断リセットを隠す */}
+                  {!miteneOnly && (<>
                   <StatementUpButton
                     cast={c}
                     courses={courses}
@@ -4959,8 +4980,11 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                       {isLocked ? "診断解除" : "診断リセット"}
                     </button>
                   )}
+                  </>)}
                 </div>
               </div>
+              {/* ミテネ専用モード時は違反カレンダー行（フッター文言含む）を隠す */}
+              {!miteneOnly && (
               <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: `1px solid ${C.border}` }}>
                 {guarantee[c.name]?.startDate && guarantee[c.name]?.endDate ? (
                   <button onClick={() => setCalModal(c.name)} style={{ padding: "7px 13px", borderRadius: "12px", border: `1.5px solid ${C.accent}50`, background: `${C.accent}08`, color: C.accent, fontWeight: "700", cursor: "pointer", fontSize: "11px", whiteSpace: "nowrap" }}>
@@ -4970,6 +4994,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                   <p style={{ fontSize: "11px", color: C.muted, margin: 0 }}>「保証設定」を押すと違反カレンダーが表示されます</p>
                 )}
               </div>
+              )}
             </div>
             );
           })}
@@ -5455,7 +5480,7 @@ function CoursesPage({ courses, setCourses }) {
 // ============================================================
 // 設定
 // ============================================================
-function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDays, setCutDays }) {
+function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDays, setCutDays, miteneOnly, setMiteneOnly }) {
   const [local, setLocal] = useState({ ...settings, show_guarantee: settings.show_guarantee ?? true });
   const [localSync, setLocalSync] = useState({ shopdir: syncConfig?.shopdir || "", adminId: syncConfig?.adminId || "", adminPass: syncConfig?.adminPass || "" });
   const [localCut, setLocalCut] = useState({ diary: cutDays?.diary ?? 1, late: cutDays?.late ?? 1, early: cutDays?.early ?? 1, absent: cutDays?.absent ?? 2, complaint: cutDays?.complaint ?? 1 });
@@ -5513,6 +5538,15 @@ function SettingsPage({ settings, setSettings, syncConfig, setSyncConfig, cutDay
           <Toggle checked={local.show_guarantee} onChange={(v) => setLocal({ ...local, show_guarantee: v })} label="保証確認をキャスト画面に表示する" />
           <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px", paddingLeft: "54px", margin: "6px 0 0 54px" }}>
             OFFにするとキャストは保証状況を確認できません
+          </p>
+        </div>
+
+        {/* ミテネ専用モード: settings（Supabase保存）には入れず localStorage 独立キーで完結。切替は即時反映（保存ボタン不要） */}
+        <div style={{ borderTop: `1.5px solid ${C.border}`, paddingTop: "16px" }}>
+          <p style={{ fontSize: "12px", color: C.muted, marginBottom: "12px", fontWeight: "700" }}>管理画面の表示モード</p>
+          <Toggle checked={!!miteneOnly} onChange={(v) => setMiteneOnly(v)} label="ミテネ専用モード" />
+          <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px", paddingLeft: "54px", margin: "6px 0 0 54px" }}>
+            ONにすると管理画面が一括ミテネと設定だけになります
           </p>
         </div>
 
@@ -5707,6 +5741,60 @@ function ShiftsPage({ casts, shifts, setShifts }) {
 // 共通コンポーネント
 // ============================================================
 // ============================================================
+// ミテネ専用モード用: 一括ミテネ画面の上に出す同期ボタン行。
+// キャスト管理タブの同期ボタン行と同じ見た目・同じ doSync（App へ持ち上げ済み）を使う。
+function MiteneSyncBar({ doSync, syncLoading, syncResult, busyOverlay, setBusyOverlay }) {
+  return (
+    <div style={{ display: "grid", gap: "16px", marginBottom: "16px" }}>
+      {/* 同期中オーバーレイ（キャスト管理タブと同じ見た目） */}
+      {syncLoading !== null && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px" }}>
+          <style>{`@keyframes shamenikkiSpin { to { transform: rotate(360deg); } }`}</style>
+          <div style={{ width: "44px", height: "44px", borderRadius: "50%", border: `4px solid ${C.green}40`, borderTopColor: C.green, animation: "shamenikkiSpin 0.8s linear infinite" }} />
+          <p style={{ color: "white", fontWeight: "700", fontSize: "15px", margin: 0 }}>
+            {syncLoading === "casts" ? "キャスト同期中…" : syncLoading === "shifts" ? "出勤同期中…" : "同期中…"}
+          </p>
+        </div>
+      )}
+
+      {/* 他スタッフ処理中(409 busy)の中央オーバーレイ。文言は busyOverlay の文字列。6秒で自動的に消える＋タップでも消える */}
+      {busyOverlay && (
+        <div
+          onClick={() => setBusyOverlay(null)}
+          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px", cursor: "pointer" }}>
+          <p style={{ color: "white", fontWeight: "700", fontSize: "24px", lineHeight: 1.5, margin: 0, padding: "0 24px", textAlign: "center" }}>
+            {busyOverlay}
+          </p>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
+        <button onClick={() => doSync("casts")} disabled={syncLoading !== null} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.blue}`, background: syncLoading !== null ? `${C.blue}08` : `${C.blue}15`, color: C.blue, fontWeight: "700", cursor: syncLoading !== null ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
+          {syncLoading === "casts" ? "同期中..." : "👥 キャスト同期"}
+        </button>
+        <button onClick={() => doSync("shifts")} disabled={syncLoading !== null} style={{ padding: "8px 18px", borderRadius: "20px", border: `1.5px solid ${C.green}`, background: syncLoading !== null ? `${C.green}08` : `${C.green}15`, color: C.green, fontWeight: "700", cursor: syncLoading !== null ? "default" : "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
+          {syncLoading === "shifts" ? "同期中..." : "🗓 出勤同期"}
+        </button>
+      </div>
+      {syncResult && (
+        <div style={{ padding: "10px 14px", borderRadius: "12px", background: syncResult.error ? `${C.red}12` : `${C.green}12`, border: `1.5px solid ${syncResult.error ? C.red : C.green}40`, fontSize: "13px", color: syncResult.error ? C.red : C.green, fontWeight: "600" }}>
+          {syncResult.error
+            ? `⚠️ ${syncResult.error}`
+            : syncResult.mode === "casts"
+              ? `✅ キャスト${syncResult.total}人を同期（新規${syncResult.addedCount}人 / 更新${syncResult.updatedCount}人${syncResult.deletedCount ? ` / 残骸削除${syncResult.deletedCount}件` : ""}）`
+              : `✅ 出勤${syncResult.total}人を同期${syncResult.deletedShiftCount ? `（取消${syncResult.deletedShiftCount}件を削除）` : ""}`}
+          {syncResult.upsertError && (
+            <span style={{ display: "block", marginTop: "6px", color: C.red, fontWeight: "700" }}>⚠️ クラウド保存エラー: {syncResult.upsertError}</span>
+          )}
+          {syncResult.credStatus && (
+            <span style={{ display: "block", marginTop: "6px", color: C.sub, fontWeight: "700" }}>{syncResult.credStatus}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // 一括ミテネ（今日出勤キャストへ1人ずつ逐次送信）
 // ============================================================
 function BulkMitenePage({ casts, shifts, syncConfig }) {
