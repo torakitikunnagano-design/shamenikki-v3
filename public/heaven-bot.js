@@ -617,8 +617,9 @@ app.post('/mitene-creds', async (req, res) => {
 //  - registComeon クリック等の送信系は一切呼ばない（絶対に送らない）。
 //  - 戻り値: { ok, remaining, usedUp }（remaining=数値 or null、usedUp=boolean）
 // ============================================================
-app.post('/mitene-status', async (req, res) => {
-  const { heavenId, heavenPass } = req.body || {};
+// 残数チェックの本体（/mitene-status ルートと自動送信スケジューラで共用）。
+// registComeon クリック等の送信系は一切呼ばない（絶対に送らない）。
+async function runMiteneStatusCheck(heavenId, heavenPass) {
   const slog = (m) => console.log('[mitene-status] ' + m);
   const result = { ok: false, remaining: null, usedUp: false, error: null };
   let browser;
@@ -639,7 +640,7 @@ app.post('/mitene-status', async (req, res) => {
   try {
     if (!heavenId || !heavenPass) {
       result.error = 'heavenId and heavenPass are required';
-      return res.json(result);
+      return result;
     }
 
     browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'] });
@@ -670,13 +671,18 @@ app.post('/mitene-status', async (req, res) => {
 
     await browser.close();
     result.ok = true;
-    res.json(result);
+    return result;
   } catch (e) {
     slog('ERROR: ' + e.message);
     result.error = e.message;
     if (browser) { try { await browser.close(); } catch (_) {} }
-    res.json(result);
+    return result;
   }
+}
+
+app.post('/mitene-status', async (req, res) => {
+  const { heavenId, heavenPass } = req.body || {};
+  res.json(await runMiteneStatusCheck(heavenId, heavenPass));
 });
 // ============================================================
 // 一括ミテネの店舗まるごとロック（2台目を開始時点で弾く）
@@ -835,13 +841,25 @@ async function runAutoSlot(slot, runDate, shopdir) {
         } else {
           storeLocks.set(castLock, true);
           try {
-            const r = await runMiteneSend(c.heaven_id, c.heaven_pass, maxPerCast);
-            logRow.ok = !!r.ok;
-            logRow.sent_count = r.sent || 0;
-            logRow.remaining_after = (typeof r.remainingAfter === 'number') ? r.remainingAfter : null;
-            logRow.error = r.ok ? null : (r.error || 'unknown');
-            totalSent += logRow.sent_count;
-            console.log(tag + c.name + ': sent=' + logRow.sent_count + (r.ok ? '' : ' error=' + logRow.error));
+            // 送信前に残数を確認し、本日完了（使い切り/残0）ならタブ巡回・送信処理に入らずスキップ。
+            // 判定できない場合（remaining=null やチェック自体の失敗）は従来どおり送信に進む（安全側＝送り漏らさない）。
+            const st = await runMiteneStatusCheck(c.heaven_id, c.heaven_pass);
+            if (st.ok && (st.usedUp || st.remaining === 0)) {
+              // スキップは ok=true のまま error='skipped_used_up' を残し、失敗（ok=false）と区別できるようにする
+              logRow.ok = true;
+              logRow.sent_count = 0;
+              logRow.remaining_after = 0;
+              logRow.error = 'skipped_used_up';
+              console.log(tag + c.name + ': 本日完了のためスキップ');
+            } else {
+              const r = await runMiteneSend(c.heaven_id, c.heaven_pass, maxPerCast);
+              logRow.ok = !!r.ok;
+              logRow.sent_count = r.sent || 0;
+              logRow.remaining_after = (typeof r.remainingAfter === 'number') ? r.remainingAfter : null;
+              logRow.error = r.ok ? null : (r.error || 'unknown');
+              totalSent += logRow.sent_count;
+              console.log(tag + c.name + ': sent=' + logRow.sent_count + (r.ok ? '' : ' error=' + logRow.error));
+            }
           } finally {
             storeLocks.delete(castLock);
           }

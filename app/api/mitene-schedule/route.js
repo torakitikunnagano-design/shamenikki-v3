@@ -44,14 +44,26 @@ export async function POST(request) {
       }
     }
 
+    // ルール強制: 有効スロットのうち send_time が最も遅いものは「残り全部」(send_count=null) に上書きする。
+    // UI側と同じ判定（同時刻は配列の後方を最終回とする。有効スロットが1つならそれが最終回）。
+    // クライアントの実装や古いUIに依存せず、サーバー側で必ず適用する。
+    let lastIdx = -1, lastMin = -1;
+    slots.forEach((s, i) => {
+      if (!s.enabled) return;
+      const [h, m] = s.send_time.split(":").map(Number);
+      const min = h * 60 + m;
+      if (min >= lastMin) { lastMin = min; lastIdx = i; }
+    });
+    const normalizedSlots = slots.map((s, i) => (i === lastIdx ? { ...s, send_count: null } : s));
+
     const supabase = getServiceClient();
     if (!supabase) return NextResponse.json({ ok: false, error: "server_config" }, { status: 500 });
 
     const nowIso = new Date().toISOString();
 
     // 1. スロットを upsert（onConflict: store_id,slot_no）
-    if (slots.length > 0) {
-      const rows = slots.map((s) => ({
+    if (normalizedSlots.length > 0) {
+      const rows = normalizedSlots.map((s) => ({
         store_id: storeId,
         slot_no: s.slot_no,
         enabled: s.enabled,
@@ -68,8 +80,8 @@ export async function POST(request) {
 
     // 2. body に含まれない slot_no の既存行を削除（スロット削除に対応。slots が空なら全削除）
     let delQuery = supabase.from("mitene_schedules").delete().eq("store_id", storeId);
-    if (slots.length > 0) {
-      delQuery = delQuery.not("slot_no", "in", "(" + slots.map((s) => s.slot_no).join(",") + ")");
+    if (normalizedSlots.length > 0) {
+      delQuery = delQuery.not("slot_no", "in", "(" + normalizedSlots.map((s) => s.slot_no).join(",") + ")");
     }
     const { error: delErr } = await delQuery;
     if (delErr) {

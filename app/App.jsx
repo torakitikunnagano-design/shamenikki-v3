@@ -5841,6 +5841,21 @@ function AutoMiteneScheduleSection({ shopdir }) {
   const removeSlot = (i) => setSlots((prev) => prev.filter((_, j) => j !== i));
   const addSlot = () => setSlots((prev) => (prev.length >= 5 ? prev : [...prev, { enabled: true, send_time: "", allRemaining: false, countStr: "5" }]));
 
+  // 有効スロットのうち send_time が最も遅い行（＝最終回）。自動的に「残り全部」として扱う。
+  // 毎レンダーで再計算するため、時刻編集で最遅が入れ替われば表示・保存とも自動で追従する。
+  // 同時刻は後の行を最終回とする（サーバー側 /api/mitene-schedule も同じ判定）。
+  const lastSlotIdx = (() => {
+    let idx = -1, best = -1;
+    slots.forEach((s, i) => {
+      if (!s.enabled) return;
+      const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(s.send_time || "");
+      if (!m) return;
+      const min = (+m[1]) * 60 + (+m[2]);
+      if (min >= best) { best = min; idx = i; }
+    });
+    return idx;
+  })();
+
   async function save() {
     if (saving) return;
     setSaveMsg(null);
@@ -5848,7 +5863,7 @@ function AutoMiteneScheduleSection({ shopdir }) {
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i];
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.send_time)) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 時刻を入力してください` }); return; }
-      if (!s.allRemaining) {
+      if (i !== lastSlotIdx && !s.allRemaining) { // 最終回は自動で「残り全部」になるため件数チェック不要
         const n = parseInt(s.countStr, 10);
         if (!(n >= 1 && n <= 50)) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 送信数は1〜50で入力してください` }); return; }
       }
@@ -5859,7 +5874,8 @@ function AutoMiteneScheduleSection({ shopdir }) {
         autoEnabled,
         shopdir: shopdir || "",
         // slot_no は保存時に 1..N へ振り直す（UIでは行の並びだけ管理し、欠番を作らない）
-        slots: slots.map((s, i) => ({ slot_no: i + 1, enabled: !!s.enabled, send_time: s.send_time, send_count: s.allRemaining ? null : parseInt(s.countStr, 10) })),
+        // 最終回（有効スロット中で最遅）は自動で「残り全部」= null（サーバー側でも同じルールを強制）
+        slots: slots.map((s, i) => ({ slot_no: i + 1, enabled: !!s.enabled, send_time: s.send_time, send_count: (i === lastSlotIdx || s.allRemaining) ? null : parseInt(s.countStr, 10) })),
       };
       const res = await apiFetch("/api/mitene-schedule", {
         method: "POST",
@@ -5897,14 +5913,17 @@ function AutoMiteneScheduleSection({ shopdir }) {
               </label>
               <input type="time" value={s.send_time} onChange={(e) => updateSlot(i, { send_time: e.target.value })}
                 style={{ ...inp, width: "110px", padding: "7px 8px" }} />
-              <input type="number" min={1} max={50} value={s.countStr} disabled={s.allRemaining}
+              <input type="number" min={1} max={50} value={s.countStr} disabled={i === lastSlotIdx || s.allRemaining}
                 onChange={(e) => updateSlot(i, { countStr: e.target.value })}
-                style={{ ...inp, width: "64px", padding: "7px 8px", opacity: s.allRemaining ? 0.5 : 1 }} />
+                style={{ ...inp, width: "64px", padding: "7px 8px", opacity: (i === lastSlotIdx || s.allRemaining) ? 0.5 : 1 }} />
               <span style={{ fontSize: "11px", color: C.muted, whiteSpace: "nowrap" }}>件</span>
-              <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "700", color: C.sub, cursor: "pointer", whiteSpace: "nowrap" }}>
-                <input type="checkbox" checked={s.allRemaining} onChange={(e) => updateSlot(i, { allRemaining: e.target.checked })} />
+              <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "700", color: C.sub, cursor: i === lastSlotIdx ? "default" : "pointer", whiteSpace: "nowrap" }}>
+                <input type="checkbox" checked={i === lastSlotIdx || s.allRemaining} disabled={i === lastSlotIdx} onChange={(e) => updateSlot(i, { allRemaining: e.target.checked })} />
                 残り全部
               </label>
+              {i === lastSlotIdx && (
+                <span style={{ fontSize: "10px", color: C.accent2, fontWeight: "700", whiteSpace: "nowrap" }}>最終回は残り全部で送信されます</span>
+              )}
               <button onClick={() => removeSlot(i)}
                 style={{ marginLeft: "auto", padding: "5px 10px", borderRadius: "10px", border: `1.5px solid ${C.red}50`, background: `${C.red}08`, color: C.red, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
                 削除
