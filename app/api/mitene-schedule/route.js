@@ -9,12 +9,17 @@ import { getServiceClient } from "../../../lib/serviceClient";
 // 書き込みはこのルートが service_role で行う。
 // 店舗はトークン（改ざん不可）から取る。body の storeId は使わない。
 //
-// POST body: { slots: [{ slot_no, enabled, send_time, send_count }], autoEnabled, shopdir? }
+// POST body: { slots: [{ slot_no, enabled, send_time, send_count }], autoEnabled,
+//              shopdir?, autoSyncEnabled?, adminId?, adminPass? }
 //   - slots: 最大5件。send_time は "HH:MM"。send_count は 1〜50 の整数 or null（null=残り全部）
 //   - body に含まれない slot_no の既存行は削除する（スロット削除に対応）
 //   - autoEnabled: settings.auto_mitene_enabled へ保存（店舗ごとのマスターON/OFF）
 //   - shopdir: 非空文字列のときだけ settings.shopdir へ保存（VPSボットが手動一括ミテネとの
 //     相互排他ロックに使う。空なら既存値を上書きしない）
+//   - autoSyncEnabled: boolean のときだけ settings.auto_sync_enabled へ保存（朝6時の自動同期ON/OFF。
+//     未送信＝旧クライアントからの保存では既存値を保持）
+//   - adminId / adminPass: 非空文字列のときだけ settings へ保存（空で既存値を消さない）。
+//     レスポンスには一切含めない（ブラウザに返さない）
 // ============================================================
 export async function POST(request) {
   try {
@@ -26,6 +31,9 @@ export async function POST(request) {
     const slots = body?.slots;
     const autoEnabled = body?.autoEnabled;
     const shopdir = typeof body?.shopdir === "string" ? body.shopdir.trim() : "";
+    const autoSyncEnabled = typeof body?.autoSyncEnabled === "boolean" ? body.autoSyncEnabled : null; // null=未送信（既存値保持）
+    const adminId = typeof body?.adminId === "string" ? body.adminId.trim() : "";
+    const adminPass = typeof body?.adminPass === "string" ? body.adminPass : ""; // パスワードはtrimしない（前後空白が正規の可能性）
 
     // ── バリデーション（不正は 400。DB制約と同じ条件をサーバー側でも検証する）──
     const bad = (msg) => NextResponse.json({ ok: false, error: msg }, { status: 400 });
@@ -89,11 +97,15 @@ export async function POST(request) {
       return NextResponse.json({ ok: false, error: "server_error" }, { status: 500 });
     }
 
-    // 3. settings.auto_mitene_enabled（＋shopdirが非空なら一緒に）を保存。
+    // 3. settings.auto_mitene_enabled（＋条件を満たすカラムだけ一緒に）を保存。
     //    アプリの settings 保存と同じ upsert 規約（onConflict: store_id,id）に合わせる
     //    ＝行が無い新店舗でも作成される（他カラムはDB既定値）。
+    //    shopdir / adminId / adminPass は空のときカラム自体を送らず既存値を保持（空上書き事故防止）。
     const settingsRow = { store_id: storeId, id: 1, auto_mitene_enabled: autoEnabled, updated_at: nowIso };
-    if (shopdir) settingsRow.shopdir = shopdir; // 空のときはカラム自体を送らず既存値を保持
+    if (shopdir) settingsRow.shopdir = shopdir;
+    if (autoSyncEnabled !== null) settingsRow.auto_sync_enabled = autoSyncEnabled;
+    if (adminId) settingsRow.admin_id = adminId;
+    if (adminPass) settingsRow.admin_pass = adminPass;
     const { error: setErr } = await supabase.from("settings").upsert(
       settingsRow,
       { onConflict: "store_id,id" }

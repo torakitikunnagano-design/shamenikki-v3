@@ -578,7 +578,8 @@ function App() {
         }
 
         // ② ①の後にSupabaseから読み込み（デフォルト行でユーザー設定を上書きしない）
-        const { data, error } = await supabase.from("settings").select("*").eq("store_id", getActiveStoreId()).eq("id", 1).single();
+        // admin_id/admin_pass を含む機密カラムをブラウザに降ろさないため、必要カラムだけ列挙する（select("*")禁止）
+        const { data, error } = await supabase.from("settings").select("daily_post_goal, repeat_limit_min, min_text_length, image_required, before_work_min, after_work_min, show_guarantee").eq("store_id", getActiveStoreId()).eq("id", 1).single();
         if (!error && data) {
           setSettings({
             daily_post_goal:  data.daily_post_goal,
@@ -704,7 +705,8 @@ function App() {
   // initSettings の②(517–528)相当。①の seed upsert は呼ばない。.single() は0件で error → return。
   async function refreshSettings() {
     try {
-      const { data, error } = await supabase.from("settings").select("*").eq("store_id", getActiveStoreId()).eq("id", 1).single();
+      // admin_id/admin_pass をブラウザに降ろさないため必要カラムだけ列挙（select("*")禁止）
+      const { data, error } = await supabase.from("settings").select("daily_post_goal, repeat_limit_min, min_text_length, image_required, before_work_min, after_work_min, show_guarantee").eq("store_id", getActiveStoreId()).eq("id", 1).single();
       if (error) { console.error("refreshSettings 取得失敗:", error.message, error.details, error.hint); return; }
       if (!data) return;
       setSettings({
@@ -5797,9 +5799,11 @@ function MiteneSyncBar({ doSync, syncLoading, syncResult, busyOverlay, setBusyOv
 
 // 自動送信スケジュール設定。
 // 読み取りは RLS(SELECT許可) でブラウザから直接、書き込みは /api/mitene-schedule（service_role）経由。
-// shopdir は保存時に settings へ同送する（VPSボットが手動一括ミテネとの相互排他ロックに使う）。
-function AutoMiteneScheduleSection({ shopdir }) {
+// shopdir / adminId / adminPass は保存時に settings へ同送する（VPSボットが朝の自動同期・
+// 手動一括ミテネとの相互排他ロックに使う。空文字はサーバー側で無視され既存値を消さない）。
+function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
   const [autoEnabled, setAutoEnabled] = useState(false);
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false); // 朝6時の自動同期（キャスト＋出勤）
   const [slots, setSlots] = useState([]); // { enabled, send_time("HH:MM"), allRemaining, countStr }
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -5813,7 +5817,7 @@ function AutoMiteneScheduleSection({ shopdir }) {
         const store = getActiveStoreId();
         const [schedRes, setRes] = await Promise.all([
           supabase.from("mitene_schedules").select("slot_no, enabled, send_time, send_count").eq("store_id", store).order("slot_no"),
-          supabase.from("settings").select("auto_mitene_enabled").eq("store_id", store).eq("id", 1),
+          supabase.from("settings").select("auto_mitene_enabled, auto_sync_enabled").eq("store_id", store).eq("id", 1),
         ]);
         if (!active) return;
         if (schedRes.error || setRes.error) {
@@ -5828,6 +5832,7 @@ function AutoMiteneScheduleSection({ shopdir }) {
           countStr: r.send_count == null ? "5" : String(r.send_count),
         })));
         setAutoEnabled(!!(setRes.data && setRes.data[0] && setRes.data[0].auto_mitene_enabled));
+        setAutoSyncEnabled(!!(setRes.data && setRes.data[0] && setRes.data[0].auto_sync_enabled));
       } catch (e) {
         if (active) { console.error("[auto-mitene] 設定読込例外:", e?.message || e); setLoadError(true); }
       } finally {
@@ -5872,7 +5877,11 @@ function AutoMiteneScheduleSection({ shopdir }) {
     try {
       const body = {
         autoEnabled,
+        autoSyncEnabled,
         shopdir: shopdir || "",
+        // syncConfig 未設定の店舗では空文字で送る（サーバー側で無視され既存値は消えない）
+        adminId: adminId || "",
+        adminPass: adminPass || "",
         // slot_no は保存時に 1..N へ振り直す（UIでは行の並びだけ管理し、欠番を作らない）
         // 最終回（有効スロット中で最遅）は自動で「残り全部」= null（サーバー側でも同じルールを強制）
         slots: slots.map((s, i) => ({ slot_no: i + 1, enabled: !!s.enabled, send_time: s.send_time, send_count: (i === lastSlotIdx || s.allRemaining) ? null : parseInt(s.countStr, 10) })),
@@ -5905,6 +5914,12 @@ function AutoMiteneScheduleSection({ shopdir }) {
       ) : (
         <>
           <Toggle checked={autoEnabled} onChange={(v) => setAutoEnabled(v)} label="自動送信を有効にする" />
+          <div>
+            <Toggle checked={autoSyncEnabled} onChange={(v) => setAutoSyncEnabled(v)} label="朝6時に自動同期（キャスト＋出勤）" />
+            <p style={{ fontSize: "11px", color: C.muted, margin: "6px 0 0 54px" }}>
+              ONにすると毎朝6時にキャスト同期と出勤同期を自動実行します
+            </p>
+          </div>
           {slots.map((s, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: "8px 10px", borderRadius: "10px", border: `1px solid ${C.border}`, background: C.surface }}>
               <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "700", color: C.sub, cursor: "pointer", whiteSpace: "nowrap" }}>
@@ -6201,7 +6216,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
       </div>
 
       {/* 自動送信スケジュール設定。ミテネ専用モードのON/OFFに関わらず表示 */}
-      <AutoMiteneScheduleSection shopdir={syncConfig?.shopdir || ""} />
+      <AutoMiteneScheduleSection shopdir={syncConfig?.shopdir || ""} adminId={syncConfig?.adminId || ""} adminPass={syncConfig?.adminPass || ""} />
         </div>
 
         <div style={{ display: "grid", gap: "14px", alignItems: "start" }}>
