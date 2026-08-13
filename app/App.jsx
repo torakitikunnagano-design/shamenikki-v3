@@ -5804,7 +5804,7 @@ function MiteneSyncBar({ doSync, syncLoading, syncResult, busyOverlay, setBusyOv
 function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
   const [autoEnabled, setAutoEnabled] = useState(false);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false); // 朝6時の自動同期（キャスト＋出勤）
-  const [slots, setSlots] = useState([]); // { enabled, send_time("HH:MM"), allRemaining, countStr }
+  const [slots, setSlots] = useState([]); // { enabled, send_time("HH:MM"), countStr }。最終スロットは自動で「残り全部」
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -5828,7 +5828,8 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
         setSlots((schedRes.data || []).map((r) => ({
           enabled: !!r.enabled,
           send_time: String(r.send_time || "").slice(0, 5), // DBのtime型 "HH:MM:SS" → "HH:MM"
-          allRemaining: r.send_count == null,
+          // send_count=null（残り全部）はデフォルト値で表示。最終スロットならどのみち自動で残り全部、
+          // 途中スロットに旧データのnullが残っていた場合は次回保存時に数値として保存される（エラーにしない）
           countStr: r.send_count == null ? "5" : String(r.send_count),
         })));
         setAutoEnabled(!!(setRes.data && setRes.data[0] && setRes.data[0].auto_mitene_enabled));
@@ -5844,7 +5845,7 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
 
   const updateSlot = (i, patch) => setSlots((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const removeSlot = (i) => setSlots((prev) => prev.filter((_, j) => j !== i));
-  const addSlot = () => setSlots((prev) => (prev.length >= 5 ? prev : [...prev, { enabled: true, send_time: "", allRemaining: false, countStr: "5" }]));
+  const addSlot = () => setSlots((prev) => (prev.length >= 5 ? prev : [...prev, { enabled: true, send_time: "", countStr: "5" }]));
 
   // 有効スロットのうち send_time が最も遅い行（＝最終回）。自動的に「残り全部」として扱う。
   // 毎レンダーで再計算するため、時刻編集で最遅が入れ替われば表示・保存とも自動で追従する。
@@ -5868,7 +5869,7 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i];
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.send_time)) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 時刻を入力してください` }); return; }
-      if (i !== lastSlotIdx && !s.allRemaining) { // 最終回は自動で「残り全部」になるため件数チェック不要
+      if (i !== lastSlotIdx) { // 最終回は自動で「残り全部」になるため件数チェック不要
         const n = parseInt(s.countStr, 10);
         if (!(n >= 1 && n <= 50)) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 送信数は1〜50で入力してください` }); return; }
       }
@@ -5884,7 +5885,7 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
         adminPass: adminPass || "",
         // slot_no は保存時に 1..N へ振り直す（UIでは行の並びだけ管理し、欠番を作らない）
         // 最終回（有効スロット中で最遅）は自動で「残り全部」= null（サーバー側でも同じルールを強制）
-        slots: slots.map((s, i) => ({ slot_no: i + 1, enabled: !!s.enabled, send_time: s.send_time, send_count: (i === lastSlotIdx || s.allRemaining) ? null : parseInt(s.countStr, 10) })),
+        slots: slots.map((s, i) => ({ slot_no: i + 1, enabled: !!s.enabled, send_time: s.send_time, send_count: i === lastSlotIdx ? null : parseInt(s.countStr, 10) })),
       };
       const res = await apiFetch("/api/mitene-schedule", {
         method: "POST",
@@ -5928,16 +5929,15 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
               </label>
               <input type="time" value={s.send_time} onChange={(e) => updateSlot(i, { send_time: e.target.value })}
                 style={{ ...inp, width: "110px", padding: "7px 8px" }} />
-              <input type="number" min={1} max={50} value={s.countStr} disabled={i === lastSlotIdx || s.allRemaining}
+              <input type="number" min={1} max={50} value={s.countStr} disabled={i === lastSlotIdx}
                 onChange={(e) => updateSlot(i, { countStr: e.target.value })}
-                style={{ ...inp, width: "64px", padding: "7px 8px", opacity: (i === lastSlotIdx || s.allRemaining) ? 0.5 : 1 }} />
+                style={{ ...inp, width: "64px", padding: "7px 8px", opacity: i === lastSlotIdx ? 0.5 : 1 }} />
               <span style={{ fontSize: "11px", color: C.muted, whiteSpace: "nowrap" }}>件</span>
-              <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "700", color: C.sub, cursor: i === lastSlotIdx ? "default" : "pointer", whiteSpace: "nowrap" }}>
-                <input type="checkbox" checked={i === lastSlotIdx || s.allRemaining} disabled={i === lastSlotIdx} onChange={(e) => updateSlot(i, { allRemaining: e.target.checked })} />
-                残り全部
-              </label>
               {i === lastSlotIdx && (
-                <span style={{ fontSize: "10px", color: C.accent2, fontWeight: "700", whiteSpace: "nowrap" }}>最終回は残り全部で送信されます</span>
+                <>
+                  <span style={{ fontSize: "11px", color: C.accent2, fontWeight: "700", whiteSpace: "nowrap" }}>残り全部（自動）</span>
+                  <span style={{ fontSize: "10px", color: C.accent2, fontWeight: "700", whiteSpace: "nowrap" }}>最終回は残り全部で送信されます</span>
+                </>
               )}
               <button onClick={() => removeSlot(i)}
                 style={{ marginLeft: "auto", padding: "5px 10px", borderRadius: "10px", border: `1.5px solid ${C.red}50`, background: `${C.red}08`, color: C.red, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
