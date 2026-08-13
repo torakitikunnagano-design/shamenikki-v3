@@ -1,3 +1,24 @@
+// ============================================================
+// /opt/heaven-bot/.env の簡易ローダー（依存追加なし・fsで自前実装）
+//  - 既に process.env にある同名キーは上書きしない（インライン指定が優先）
+//  - ファイルが無い/読めない場合は何もせず続行（従来の起動方法と互換）
+//  - #始まりのコメント行・空行はスキップ。値の前後の引用符('/")は除去
+// ============================================================
+try {
+  require('fs').readFileSync('/opt/heaven-bot/.env', 'utf8').split(/\r?\n/).forEach((line) => {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) return;
+    const eq = t.indexOf('=');
+    if (eq <= 0) return; // KEY= の形でない行（=無し/先頭=）はスキップ
+    const key = t.slice(0, eq).trim();
+    let val = t.slice(eq + 1).trim();
+    if (val.length >= 2 && ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")))) {
+      val = val.slice(1, -1);
+    }
+    if (key && process.env[key] === undefined) process.env[key] = val;
+  });
+} catch (_) {} // .env が無い・読めない場合は何もしない
+
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
