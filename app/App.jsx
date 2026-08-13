@@ -4,24 +4,24 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 // ============================================================
-// ポップ女子向け カラーテーマ（ピンク・パープル・ホワイト）
+// ネイビー＆ゴールド カラーテーマ
 // ============================================================
 const C = {
-  bg:      "#fff0f8",
-  surface: "#fff8fc",
+  bg:      "#f2f3f6",
+  surface: "#ffffff",
   card:    "#ffffff",
-  border:  "#ffd6ea",
-  accent:  "#ff6b9d",
-  accent2: "#d946ef",
-  glow:    "#ffb3d1",
-  green:   "#2ec4a9",
-  red:     "#ff5c7a",
-  yellow:  "#ffb347",
-  pink:    "#ff6b9d",
-  blue:    "#7b9eff",
-  text:    "#3d1a4e",
-  sub:     "#7c5a8e",
-  muted:   "#c4a0c8",
+  border:  "#d8dce4",
+  accent:  "#1f2b44",
+  accent2: "#b08d4a",
+  glow:    "#c8cfdd",
+  green:   "#3f7a63",
+  red:     "#b3453f",
+  yellow:  "#a8762a",
+  pink:    "#8a6b30",
+  blue:    "#4a6fa5",
+  text:    "#20293a",
+  sub:     "#5a6478",
+  muted:   "#7c8598",
 };
 
 const card = {
@@ -29,7 +29,7 @@ const card = {
   border: `1.5px solid ${C.border}`,
   borderRadius: "20px",
   padding: "18px 20px",
-  boxShadow: "0 2px 12px rgba(255,107,157,0.10), 0 1px 3px rgba(61,26,78,0.04)",
+  boxShadow: "0 2px 12px rgba(31,43,68,0.10), 0 1px 3px rgba(32,41,58,0.04)",
 };
 
 const inp = {
@@ -37,7 +37,7 @@ const inp = {
   padding: "12px 14px",
   borderRadius: "12px",
   border: `1.5px solid ${C.border}`,
-  background: "#fff8fc",
+  background: "#fafbfc",
   color: C.text,
   fontSize: "16px",      // iOS auto-zoom防止（16px未満だとフォーカス時に拡大される）
   outline: "none",
@@ -1432,7 +1432,7 @@ function App() {
 
       {/* ヘッダー */}
       <header style={{
-        background: "linear-gradient(135deg, #ff6b9d 0%, #d946ef 100%)",
+        background: "#1f2b44",
         borderBottom: "none",
         padding: "0 16px",
         display: "flex",
@@ -1441,7 +1441,7 @@ function App() {
         position: "sticky",
         top: 0,
         zIndex: 100,
-        boxShadow: "0 2px 16px rgba(255,107,157,0.35)",
+        boxShadow: "0 2px 16px rgba(31,43,68,0.35)",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <div style={{ width: "30px", height: "30px", borderRadius: "10px", background: "rgba(255,255,255,0.25)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>💕</div>
@@ -1465,7 +1465,7 @@ function App() {
       {mode === "admin" && !adminUnlocked ? (
         <div style={{ padding: "40px 16px", maxWidth: "400px", margin: "0 auto", display: "grid", gap: "20px" }}>
           <div style={{ textAlign: "center" }}>
-            <div style={{ width: "68px", height: "68px", borderRadius: "22px", background: "linear-gradient(135deg, #ffe0f0, #f0d0ff)", border: `2px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px", margin: "0 auto 16px", boxShadow: "0 4px 16px rgba(255,107,157,0.15)" }}>🔐</div>
+            <div style={{ width: "68px", height: "68px", borderRadius: "22px", background: "linear-gradient(135deg, #ffe0f0, #f0d0ff)", border: `2px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px", margin: "0 auto 16px", boxShadow: "0 4px 16px rgba(31,43,68,0.15)" }}>🔐</div>
             <h2 style={{ fontSize: "20px", fontWeight: "700", color: C.text, margin: "0 0 6px" }}>店舗管理画面</h2>
             <p style={{ color: C.muted, fontSize: "13px", margin: 0 }}>パスワードを入力してください</p>
           </div>
@@ -1660,7 +1660,7 @@ function CastLoginScreen({ casts, onLogin }) {
   return (
     <div style={{ padding: "40px 16px", maxWidth: "400px", margin: "0 auto", display: "grid", gap: "24px" }}>
       <div style={{ textAlign: "center" }}>
-        <div style={{ width: "80px", height: "80px", borderRadius: "28px", background: "linear-gradient(135deg, #ff6b9d, #d946ef)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "34px", margin: "0 auto 16px", boxShadow: "0 6px 24px rgba(255,107,157,0.4)" }}>💕</div>
+        <div style={{ width: "80px", height: "80px", borderRadius: "28px", background: "linear-gradient(135deg, #1f2b44, #b08d4a)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "34px", margin: "0 auto 16px", boxShadow: "0 6px 24px rgba(31,43,68,0.4)" }}>💕</div>
         <h2 style={{ fontSize: "22px", fontWeight: "700", color: C.text, margin: "0 0 6px", letterSpacing: "0.06em" }}>SHAMENIKKI AI</h2>
         <p style={{ color: C.muted, fontSize: "13px", margin: 0 }}>ヘブンネットのID・パスでログイン</p>
       </div>
@@ -1801,10 +1801,10 @@ const QUESTIONS = [
 
 const TYPE_INFO = {
   "清楚系":     { emoji: "🌸", color: "#b39ddb", desc: "育ちの良さ・上品さが武器。知性と清潔感で差をつけられます。" },
-  "エロ系":     { emoji: "🔥", color: "#ff5c7a", desc: "欲求に正直な魅力が最大の武器。大胆さをアピールしましょう。" },
-  "M系":        { emoji: "🎀", color: "#ff6b9d", desc: "尽くす姿勢と従順さが魅力。癒しと奉仕の文章が刺さります。" },
-  "S系":        { emoji: "👑", color: "#ffb347", desc: "支配力とリード感が魅力。主導権を握るキャラで差別化できます。" },
-  "かわいい系": { emoji: "💕", color: "#7b9eff", desc: "見た目の可愛さと自己表現が武器。写真映えするキャラを前面に。" },
+  "エロ系":     { emoji: "🔥", color: "#b3453f", desc: "欲求に正直な魅力が最大の武器。大胆さをアピールしましょう。" },
+  "M系":        { emoji: "🎀", color: "#1f2b44", desc: "尽くす姿勢と従順さが魅力。癒しと奉仕の文章が刺さります。" },
+  "S系":        { emoji: "👑", color: "#a8762a", desc: "支配力とリード感が魅力。主導権を握るキャラで差別化できます。" },
+  "かわいい系": { emoji: "💕", color: "#4a6fa5", desc: "見た目の可愛さと自己表現が武器。写真映えするキャラを前面に。" },
 };
 
 // ============================================================
@@ -1978,7 +1978,7 @@ function ShindanPage({ casts, setCasts, loggedInCast, onComplete }) {
         </div>
 
         <div style={{ height: "6px", background: C.border, borderRadius: "4px", overflow: "hidden" }}>
-          <div style={{ height: "100%", width: `${progress}%`, background: "linear-gradient(90deg, #ff6b9d, #d946ef)", borderRadius: "4px", transition: "width 0.3s" }} />
+          <div style={{ height: "100%", width: `${progress}%`, background: "linear-gradient(90deg, #1f2b44, #b08d4a)", borderRadius: "4px", transition: "width 0.3s" }} />
         </div>
 
         <div style={{ ...card, padding: "28px 20px", textAlign: "center" }}>
@@ -2715,12 +2715,12 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
                     padding: "14px 10px",
                     borderRadius: "14px",
                     border: active ? "none" : `1.5px solid ${C.border}`,
-                    background: active ? "linear-gradient(135deg, #ff6b9d, #d946ef)" : "white",
+                    background: active ? "linear-gradient(135deg, #1f2b44, #b08d4a)" : "white",
                     color: active ? "white" : C.muted,
                     fontWeight: "700",
                     fontSize: "13px",
                     cursor: "pointer",
-                    boxShadow: active ? "0 4px 16px rgba(255,107,157,0.35)" : "none",
+                    boxShadow: active ? "0 4px 16px rgba(31,43,68,0.35)" : "none",
                     transition: "all 0.2s",
                     display: "flex",
                     flexDirection: "column",
@@ -2774,13 +2774,13 @@ function HeavenPostButton({ castName, diary, title, result, casts, postedTime, i
           <p style={{ fontSize: "13px", color: C.muted, marginBottom: "16px" }}>VPSサーバー経由でヘブンに自動投稿します。</p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
             <button onClick={() => setShowConfirm(false)} style={{ padding: "12px", borderRadius: "12px", border: `1.5px solid ${C.border}`, background: "white", color: C.muted, cursor: "pointer", fontWeight: "700" }}>キャンセル</button>
-            <button onClick={handlePost} style={{ padding: "12px", borderRadius: "12px", border: "none", background: "linear-gradient(135deg, #ff6b9d, #d946ef)", color: "white", cursor: "pointer", fontWeight: "700" }}>投稿する</button>
+            <button onClick={handlePost} style={{ padding: "12px", borderRadius: "12px", border: "none", background: "linear-gradient(135deg, #1f2b44, #b08d4a)", color: "white", cursor: "pointer", fontWeight: "700" }}>投稿する</button>
           </div>
         </div>
       )}
 
       {!posted && !showConfirm && (
-        <button onClick={() => setShowConfirm(true)} disabled={posting} style={{ padding: "16px", borderRadius: "16px", border: "none", background: posting ? C.surface : "linear-gradient(135deg, #ff6b9d, #d946ef)", color: posting ? C.muted : "white", fontWeight: "700", fontSize: "15px", cursor: posting ? "not-allowed" : "pointer", boxShadow: posting ? "none" : "0 4px 20px rgba(255,107,157,0.4)" }}>
+        <button onClick={() => setShowConfirm(true)} disabled={posting} style={{ padding: "16px", borderRadius: "16px", border: "none", background: posting ? C.surface : "linear-gradient(135deg, #1f2b44, #b08d4a)", color: posting ? C.muted : "white", fontWeight: "700", fontSize: "15px", cursor: posting ? "not-allowed" : "pointer", boxShadow: posting ? "none" : "0 4px 20px rgba(31,43,68,0.4)" }}>
           ヘブンに投稿する
         </button>
       )}
@@ -3128,7 +3128,7 @@ function SalaryInputForm({ castId, date, courses = [], startTime = "", endTime =
 
       {/* 集計サマリー */}
       {totalHon > 0 && (
-        <div style={{ ...card, background: "linear-gradient(135deg, #fff8fc, #fff0f8)" }}>
+        <div style={{ ...card, background: "linear-gradient(135deg, #fafbfc, #f2f3f6)" }}>
           <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "10px" }}>集計</p>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             <Tag label={`合計 ${totalHon}本`} color={C.accent} />
@@ -3170,7 +3170,7 @@ function SalaryInputForm({ castId, date, courses = [], startTime = "", endTime =
             <input type="number" min="0" value={otherAmt} onChange={(e) => setOtherAmt(e.target.value)} placeholder="0" style={inp} />
           </Field>
         </div>
-        <div style={{ background: "linear-gradient(135deg, #fff0f8, #ffe8f5)", border: `2px solid ${C.accent}40`, borderRadius: "14px", padding: "18px", textAlign: "center", marginBottom: "14px" }}>
+        <div style={{ background: "linear-gradient(135deg, #f2f3f6, #ffe8f5)", border: `2px solid ${C.accent}40`, borderRadius: "14px", padding: "18px", textAlign: "center", marginBottom: "14px" }}>
           <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", marginBottom: "6px" }}>手取り</p>
           <p style={{ fontSize: "32px", fontWeight: "800", color: takeHome >= 0 ? C.text : C.red, margin: 0 }}>{fmtYen(takeHome)}</p>
           <p style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>総支給 {fmtYen(computedGross)} ＋ 交通費 {fmtYen(Number(transport)||0)} − 寮費 {fmtYen(Number(dorm)||0)} − 雑費 {fmtYen(Number(misc)||0)} − その他 {fmtYen(Number(otherAmt)||0)}</p>
@@ -3948,7 +3948,7 @@ function StatementUpButton({ cast, done, onUploaded, onRemoved, stmt, stmtErr, o
         {label}
       </button>
       {open && (
-        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(61,26,78,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(32,41,58,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ ...card, width: "100%", maxWidth: "440px", maxHeight: "85vh", overflowY: "auto", display: "grid", gap: "14px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <p style={{ fontSize: "14px", fontWeight: "700", color: C.text, margin: 0 }}>明細UP — {cast?.name}</p>
@@ -4181,7 +4181,7 @@ function IdentityDocsButton({ cast }) {
         {hasAll ? "個人情報UP ✓済" : "個人情報UP"}
       </button>
       {open && (
-        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(61,26,78,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(32,41,58,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ ...card, width: "100%", maxWidth: "440px", maxHeight: "85vh", overflowY: "auto", display: "grid", gap: "14px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <p style={{ fontSize: "14px", fontWeight: "700", color: C.text, margin: 0 }}>個人情報UP — {cast?.name}</p>
@@ -4532,7 +4532,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
 
       {/* 更新中/同期中オーバーレイ（リロード相当の体感。ログアウトはしない） */}
       {(refreshing || syncLoading !== null) && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px" }}>
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(32,41,58,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px" }}>
           <style>{`@keyframes shamenikkiSpin { to { transform: rotate(360deg); } }`}</style>
           <div style={{ width: "44px", height: "44px", borderRadius: "50%", border: `4px solid ${C.green}40`, borderTopColor: C.green, animation: "shamenikkiSpin 0.8s linear infinite" }} />
           <p style={{ color: "white", fontWeight: "700", fontSize: "15px", margin: 0 }}>
@@ -4545,7 +4545,7 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       {busyOverlay && (
         <div
           onClick={() => setBusyOverlay(null)}
-          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px", cursor: "pointer" }}>
+          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(32,41,58,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px", cursor: "pointer" }}>
           <p style={{ color: "white", fontWeight: "700", fontSize: "24px", lineHeight: 1.5, margin: 0, padding: "0 24px", textAlign: "center" }}>
             {busyOverlay}
           </p>
@@ -4554,14 +4554,14 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
 
       {/* 更新完了トースト（約1.5秒） */}
       {refreshToast && (
-        <div style={{ position: "fixed", top: "20px", left: "50%", transform: "translateX(-50%)", zIndex: 2100, background: C.green, color: "white", padding: "12px 22px", borderRadius: "999px", fontWeight: "700", fontSize: "14px", boxShadow: "0 8px 24px rgba(61,26,78,0.25)" }}>
+        <div style={{ position: "fixed", top: "20px", left: "50%", transform: "translateX(-50%)", zIndex: 2100, background: C.green, color: "white", padding: "12px 22px", borderRadius: "999px", fontWeight: "700", fontSize: "14px", boxShadow: "0 8px 24px rgba(32,41,58,0.25)" }}>
           ✓ 最新の情報に更新しました
         </div>
       )}
 
       {modal && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-          <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(255,107,157,0.2)" }}>
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(32,41,58,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(31,43,68,0.2)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
               <div>
                 <p style={{ fontWeight: "700", fontSize: "18px", color: C.text, margin: "0 0 4px" }}>{modal.name}</p>
@@ -4594,8 +4594,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       {archiveModal && <ArchiveModal cast={archiveModal} onClose={() => setArchiveModal(null)} />}
 
       {gModal && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-          <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(255,107,157,0.2)" }}>
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(32,41,58,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(31,43,68,0.2)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
               <div>
                 <p style={{ fontWeight: "700", fontSize: "18px", color: C.text, margin: "0 0 4px" }}>{gModal}</p>
@@ -4705,8 +4705,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
         const selDate = openCalCell?.castName === c.name ? openCalCell.date : null;
         const extraList = extraWorkdays[c.name] || [];
         return (
-          <div onClick={() => setCalModal(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-            <div onClick={(e) => e.stopPropagation()} style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "720px", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(255,107,157,0.2)" }}>
+          <div onClick={() => setCalModal(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(32,41,58,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "720px", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(31,43,68,0.2)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                 <div>
                   <p style={{ fontWeight: "700", fontSize: "18px", color: C.text, margin: "0 0 4px" }}>{c.name}</p>
@@ -5277,8 +5277,8 @@ function ArchiveModal({ cast, onClose }) {
   const toMD = (ymd) => { if (!ymd) return ""; const [, m, d] = String(ymd).split("-"); return `${Number(m)}/${Number(d)}`; };
 
   return (
-    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-      <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(255,107,157,0.2)", maxHeight: "80vh", overflowY: "auto" }}>
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(32,41,58,0.55)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+      <div style={{ background: "white", border: `1.5px solid ${C.border}`, borderRadius: "24px", padding: "28px", width: "100%", maxWidth: "400px", boxShadow: "0 20px 60px rgba(31,43,68,0.2)", maxHeight: "80vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
           <div>
             <p style={{ fontWeight: "700", fontSize: "18px", color: C.text, margin: "0 0 4px" }}>{cast?.name}</p>
@@ -5750,7 +5750,7 @@ function MiteneSyncBar({ doSync, syncLoading, syncResult, busyOverlay, setBusyOv
     <div style={{ display: "grid", gap: "16px", marginBottom: "16px" }}>
       {/* 同期中オーバーレイ（キャスト管理タブと同じ見た目） */}
       {syncLoading !== null && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px" }}>
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(32,41,58,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px" }}>
           <style>{`@keyframes shamenikkiSpin { to { transform: rotate(360deg); } }`}</style>
           <div style={{ width: "44px", height: "44px", borderRadius: "50%", border: `4px solid ${C.green}40`, borderTopColor: C.green, animation: "shamenikkiSpin 0.8s linear infinite" }} />
           <p style={{ color: "white", fontWeight: "700", fontSize: "15px", margin: 0 }}>
@@ -5763,7 +5763,7 @@ function MiteneSyncBar({ doSync, syncLoading, syncResult, busyOverlay, setBusyOv
       {busyOverlay && (
         <div
           onClick={() => setBusyOverlay(null)}
-          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px", cursor: "pointer" }}>
+          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(32,41,58,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px", cursor: "pointer" }}>
           <p style={{ color: "white", fontWeight: "700", fontSize: "24px", lineHeight: 1.5, margin: 0, padding: "0 24px", textAlign: "center" }}>
             {busyOverlay}
           </p>
@@ -5951,7 +5951,7 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
               ＋ スロットを追加（最大5）
             </button>
           )}
-          <Btn onClick={save} loading={saving} label="スケジュールを保存" color={C.accent2} />
+          <Btn onClick={save} loading={saving} label="スケジュールを保存" color={C.accent} textColor="#e9c982" />
           {saveMsg && (
             <p style={{ fontSize: "12px", color: saveMsg.ok ? C.green : C.red, fontWeight: "700", margin: 0 }}>{saveMsg.text}</p>
           )}
@@ -6158,7 +6158,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
       {busyOverlay && (
         <div
           onClick={() => setBusyOverlay(null)}
-          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(61,26,78,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px", cursor: "pointer" }}>
+          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(32,41,58,0.55)", backdropFilter: "blur(4px)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px", cursor: "pointer" }}>
           <p style={{ color: "white", fontWeight: "700", fontSize: "24px", lineHeight: 1.5, margin: 0, padding: "0 24px", textAlign: "center" }}>
             {busyOverlay}
           </p>
@@ -6194,7 +6194,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
         <button
           onClick={start}
           disabled={startDisabled}
-          style={{ width: "100%", padding: "13px", borderRadius: "14px", border: "none", background: startDisabled ? C.muted : C.accent2, color: "white", fontWeight: "700", fontSize: "14px", cursor: startDisabled ? "not-allowed" : "pointer", opacity: startDisabled ? 0.7 : 1 }}>
+          style={{ width: "100%", padding: "13px", borderRadius: "14px", border: "none", background: startDisabled ? C.muted : C.accent, color: startDisabled ? "white" : "#e9c982", fontWeight: "700", fontSize: "14px", cursor: startDisabled ? "not-allowed" : "pointer", opacity: startDisabled ? 0.7 : 1 }}>
           {running ? "送信中…" : "💌 一括送信スタート"}
         </button>
 
@@ -6282,7 +6282,7 @@ function Field({ label, children }) {
   );
 }
 
-function Btn({ onClick, loading, label, color }) {
+function Btn({ onClick, loading, label, color, textColor = "white" }) {
   const bg = color || C.accent;
   return (
     <button onClick={onClick} disabled={loading} style={{
@@ -6290,7 +6290,7 @@ function Btn({ onClick, loading, label, color }) {
       borderRadius: "14px",
       border: "none",
       background: loading ? C.surface : `linear-gradient(135deg, ${bg}, ${bg}cc)`,
-      color: loading ? C.muted : "white",
+      color: loading ? C.muted : textColor,
       fontWeight: "700",
       fontSize: "14px",
       cursor: loading ? "not-allowed" : "pointer",
@@ -6307,7 +6307,7 @@ function Btn({ onClick, loading, label, color }) {
 function Toggle({ checked, onChange, label }) {
   return (
     <label style={{ display: "flex", alignItems: "center", gap: "12px", cursor: "pointer" }}>
-      <div onClick={() => onChange(!checked)} style={{ width: "44px", height: "26px", borderRadius: "13px", background: checked ? "linear-gradient(135deg, #ff6b9d, #d946ef)" : C.border, display: "flex", alignItems: "center", padding: "3px", transition: "all 0.3s", flexShrink: 0, boxShadow: checked ? "0 2px 8px rgba(255,107,157,0.4)" : "none" }}>
+      <div onClick={() => onChange(!checked)} style={{ width: "44px", height: "26px", borderRadius: "13px", background: checked ? "linear-gradient(135deg, #1f2b44, #b08d4a)" : C.border, display: "flex", alignItems: "center", padding: "3px", transition: "all 0.3s", flexShrink: 0, boxShadow: checked ? "0 2px 8px rgba(31,43,68,0.4)" : "none" }}>
         <div style={{ width: "20px", height: "20px", borderRadius: "50%", background: "white", transform: checked ? "translateX(18px)" : "translateX(0)", transition: "transform 0.3s", boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }} />
       </div>
       <span style={{ fontSize: "14px", color: C.sub }}>{label}</span>
