@@ -5795,6 +5795,139 @@ function MiteneSyncBar({ doSync, syncLoading, syncResult, busyOverlay, setBusyOv
   );
 }
 
+// 自動送信スケジュール設定（段階2: UIと保存のみ。毎分の実行はVPS側=次の段階で対応）。
+// 読み取りは RLS(SELECT許可) でブラウザから直接、書き込みは /api/mitene-schedule（service_role）経由。
+function AutoMiteneScheduleSection() {
+  const [autoEnabled, setAutoEnabled] = useState(false);
+  const [slots, setSlots] = useState([]); // { enabled, send_time("HH:MM"), allRemaining, countStr }
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState(null); // { ok: boolean, text: string } | null
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const store = getActiveStoreId();
+        const [schedRes, setRes] = await Promise.all([
+          supabase.from("mitene_schedules").select("slot_no, enabled, send_time, send_count").eq("store_id", store).order("slot_no"),
+          supabase.from("settings").select("auto_mitene_enabled").eq("store_id", store).eq("id", 1),
+        ]);
+        if (!active) return;
+        if (schedRes.error || setRes.error) {
+          console.error("[auto-mitene] 設定読込失敗:", schedRes.error?.message || "", setRes.error?.message || "");
+          setLoadError(true); // 既存設定を空と誤認したまま保存→全削除を防ぐため、読込失敗時は編集させない
+          return;
+        }
+        setSlots((schedRes.data || []).map((r) => ({
+          enabled: !!r.enabled,
+          send_time: String(r.send_time || "").slice(0, 5), // DBのtime型 "HH:MM:SS" → "HH:MM"
+          allRemaining: r.send_count == null,
+          countStr: r.send_count == null ? "5" : String(r.send_count),
+        })));
+        setAutoEnabled(!!(setRes.data && setRes.data[0] && setRes.data[0].auto_mitene_enabled));
+      } catch (e) {
+        if (active) { console.error("[auto-mitene] 設定読込例外:", e?.message || e); setLoadError(true); }
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  const updateSlot = (i, patch) => setSlots((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  const removeSlot = (i) => setSlots((prev) => prev.filter((_, j) => j !== i));
+  const addSlot = () => setSlots((prev) => (prev.length >= 5 ? prev : [...prev, { enabled: true, send_time: "", allRemaining: false, countStr: "5" }]));
+
+  async function save() {
+    if (saving) return;
+    setSaveMsg(null);
+    // クライアント側の軽い検証（サーバー側でも同じ条件を検証する）
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.send_time)) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 時刻を入力してください` }); return; }
+      if (!s.allRemaining) {
+        const n = parseInt(s.countStr, 10);
+        if (!(n >= 1 && n <= 50)) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 送信数は1〜50で入力してください` }); return; }
+      }
+    }
+    setSaving(true);
+    try {
+      const body = {
+        autoEnabled,
+        // slot_no は保存時に 1..N へ振り直す（UIでは行の並びだけ管理し、欠番を作らない）
+        slots: slots.map((s, i) => ({ slot_no: i + 1, enabled: !!s.enabled, send_time: s.send_time, send_count: s.allRemaining ? null : parseInt(s.countStr, 10) })),
+      };
+      const res = await apiFetch("/api/mitene-schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) setSaveMsg({ ok: true, text: "✅ スケジュールを保存しました" });
+      else setSaveMsg({ ok: false, text: "⚠️ " + (data.error || `保存に失敗しました（${res.status}）`) });
+    } catch (e) {
+      setSaveMsg({ ok: false, text: "⚠️ 通信エラー: " + (e?.message || e) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ ...card, display: "grid", gap: "12px" }}>
+      <p style={{ fontSize: "13px", fontWeight: "700", color: C.text, margin: 0 }}>⏰ 自動送信スケジュール</p>
+      <p style={{ fontSize: "11px", color: C.muted, margin: 0, lineHeight: 1.5 }}>
+        実際の自動送信はVPS側の対応（次の段階）が完了してから動きます
+      </p>
+      {loading ? (
+        <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>読み込み中…</p>
+      ) : loadError ? (
+        <p style={{ fontSize: "12px", color: C.red, fontWeight: "700", margin: 0 }}>設定の読み込みに失敗しました。再読み込みしてください</p>
+      ) : (
+        <>
+          <Toggle checked={autoEnabled} onChange={(v) => setAutoEnabled(v)} label="自動送信を有効にする" />
+          {slots.map((s, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: "8px 10px", borderRadius: "10px", border: `1px solid ${C.border}`, background: C.surface }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "700", color: C.sub, cursor: "pointer", whiteSpace: "nowrap" }}>
+                <input type="checkbox" checked={s.enabled} onChange={(e) => updateSlot(i, { enabled: e.target.checked })} />
+                有効
+              </label>
+              <input type="time" value={s.send_time} onChange={(e) => updateSlot(i, { send_time: e.target.value })}
+                style={{ ...inp, width: "110px", padding: "7px 8px" }} />
+              <input type="number" min={1} max={50} value={s.countStr} disabled={s.allRemaining}
+                onChange={(e) => updateSlot(i, { countStr: e.target.value })}
+                style={{ ...inp, width: "64px", padding: "7px 8px", opacity: s.allRemaining ? 0.5 : 1 }} />
+              <span style={{ fontSize: "11px", color: C.muted, whiteSpace: "nowrap" }}>件</span>
+              <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "700", color: C.sub, cursor: "pointer", whiteSpace: "nowrap" }}>
+                <input type="checkbox" checked={s.allRemaining} onChange={(e) => updateSlot(i, { allRemaining: e.target.checked })} />
+                残り全部
+              </label>
+              <button onClick={() => removeSlot(i)}
+                style={{ marginLeft: "auto", padding: "5px 10px", borderRadius: "10px", border: `1.5px solid ${C.red}50`, background: `${C.red}08`, color: C.red, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                削除
+              </button>
+            </div>
+          ))}
+          {slots.length === 0 && (
+            <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>スロットがありません。「スロットを追加」で設定してください</p>
+          )}
+          {slots.length < 5 && (
+            <button onClick={addSlot}
+              style={{ padding: "9px", borderRadius: "12px", border: `1.5px dashed ${C.accent2}55`, background: "transparent", color: C.accent2, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+              ＋ スロットを追加（最大5）
+            </button>
+          )}
+          <Btn onClick={save} loading={saving} label="スケジュールを保存" color={C.accent2} />
+          {saveMsg && (
+            <p style={{ fontSize: "12px", color: saveMsg.ok ? C.green : C.red, fontWeight: "700", margin: 0 }}>{saveMsg.text}</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // 一括ミテネ（今日出勤キャストへ1人ずつ逐次送信）
 // ============================================================
 function BulkMitenePage({ casts, shifts, syncConfig }) {
@@ -6080,6 +6213,9 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
           )}
         </div>
       )}
+
+      {/* 自動送信スケジュール設定（段階2）。ミテネ専用モードのON/OFFに関わらず表示 */}
+      <AutoMiteneScheduleSection />
     </div>
   );
 }
