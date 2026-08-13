@@ -5795,9 +5795,10 @@ function MiteneSyncBar({ doSync, syncLoading, syncResult, busyOverlay, setBusyOv
   );
 }
 
-// 自動送信スケジュール設定（段階2: UIと保存のみ。毎分の実行はVPS側=次の段階で対応）。
+// 自動送信スケジュール設定。
 // 読み取りは RLS(SELECT許可) でブラウザから直接、書き込みは /api/mitene-schedule（service_role）経由。
-function AutoMiteneScheduleSection() {
+// shopdir は保存時に settings へ同送する（VPSボットが手動一括ミテネとの相互排他ロックに使う）。
+function AutoMiteneScheduleSection({ shopdir }) {
   const [autoEnabled, setAutoEnabled] = useState(false);
   const [slots, setSlots] = useState([]); // { enabled, send_time("HH:MM"), allRemaining, countStr }
   const [loading, setLoading] = useState(true);
@@ -5856,6 +5857,7 @@ function AutoMiteneScheduleSection() {
     try {
       const body = {
         autoEnabled,
+        shopdir: shopdir || "",
         // slot_no は保存時に 1..N へ振り直す（UIでは行の並びだけ管理し、欠番を作らない）
         slots: slots.map((s, i) => ({ slot_no: i + 1, enabled: !!s.enabled, send_time: s.send_time, send_count: s.allRemaining ? null : parseInt(s.countStr, 10) })),
       };
@@ -6214,8 +6216,8 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
         </div>
       )}
 
-      {/* 自動送信スケジュール設定（段階2）。ミテネ専用モードのON/OFFに関わらず表示 */}
-      <AutoMiteneScheduleSection />
+      {/* 自動送信スケジュール設定。ミテネ専用モードのON/OFFに関わらず表示 */}
+      <AutoMiteneScheduleSection shopdir={syncConfig?.shopdir || ""} />
     </div>
   );
 }
