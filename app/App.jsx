@@ -5808,40 +5808,101 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [flagSaving, setFlagSaving] = useState(false); // トグル切替の即保存中（両トグルを操作不可にする）
   const [saveMsg, setSaveMsg] = useState(null); // { ok: boolean, text: string } | null
 
   useEffect(() => {
     let active = true;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     (async () => {
       try {
-        const store = getActiveStoreId();
-        const [schedRes, setRes] = await Promise.all([
-          supabase.from("mitene_schedules").select("slot_no, enabled, send_time, send_count").eq("store_id", store).order("slot_no"),
-          supabase.from("settings").select("auto_mitene_enabled, auto_sync_enabled").eq("store_id", store).eq("id", 1),
-        ]);
+        // 【根治】セッション確立を待ってから読む。
+        // F5直後はセッション復元とSELECTがレースし、未認証クエリがRLSに絞られて
+        // 「エラーなし・0行」→トグルOFF誤表示になるため、先にセッションを確認する。
+        let session = (await supabase.auth.getSession())?.data?.session;
+        if (!session) {
+          await sleep(500);
+          if (!active) return;
+          session = (await supabase.auth.getSession())?.data?.session;
+        }
         if (!active) return;
-        if (schedRes.error || setRes.error) {
-          console.error("[auto-mitene] 設定読込失敗:", schedRes.error?.message || "", setRes.error?.message || "");
-          setLoadError(true); // 既存設定を空と誤認したまま保存→全削除を防ぐため、読込失敗時は編集させない
+        if (!session) {
+          console.error("[auto-mitene] セッション未確立のため設定読込を中止");
+          setLoadError(true);
           return;
         }
-        setSlots((schedRes.data || []).map((r) => ({
-          enabled: !!r.enabled,
-          send_time: String(r.send_time || "").slice(0, 5), // DBのtime型 "HH:MM:SS" → "HH:MM"
-          // send_count=null（残り全部）はデフォルト値で表示。最終スロットならどのみち自動で残り全部、
-          // 途中スロットに旧データのnullが残っていた場合は次回保存時に数値として保存される（エラーにしない）
-          countStr: r.send_count == null ? "5" : String(r.send_count),
-        })));
-        setAutoEnabled(!!(setRes.data && setRes.data[0] && setRes.data[0].auto_mitene_enabled));
-        setAutoSyncEnabled(!!(setRes.data && setRes.data[0] && setRes.data[0].auto_sync_enabled));
+
+        const store = getActiveStoreId();
+        // 【フェイルセーフ】settingsが「成功なのに0行」はOFFと解釈しない。
+        // 全店舗にsettings行が存在する運用のため、0行＝未認証クエリ等の異常とみなし
+        // 最大2回リトライ→それでも0行なら読込失敗扱い（編集ブロック）にして
+        // 「OFF表示のまま保存→falseで上書き」の二次被害を構造的に防ぐ。
+        for (let attempt = 0; ; attempt++) {
+          const [schedRes, setRes] = await Promise.all([
+            supabase.from("mitene_schedules").select("slot_no, enabled, send_time, send_count").eq("store_id", store).order("slot_no"),
+            supabase.from("settings").select("auto_mitene_enabled, auto_sync_enabled").eq("store_id", store).eq("id", 1),
+          ]);
+          if (!active) return;
+          if (schedRes.error || setRes.error) {
+            console.error("[auto-mitene] 設定読込失敗:", schedRes.error?.message || "", setRes.error?.message || "");
+            setLoadError(true); // 既存設定を空と誤認したまま保存→全削除を防ぐため、読込失敗時は編集させない
+            return;
+          }
+          if (!setRes.data || setRes.data.length === 0) {
+            if (attempt >= 2) {
+              console.error("[auto-mitene] settingsが0行のまま（リトライ上限）→ 読込失敗扱い");
+              setLoadError(true);
+              return;
+            }
+            await sleep(500 * (attempt + 1));
+            if (!active) return;
+            continue;
+          }
+          setSlots((schedRes.data || []).map((r) => ({
+            enabled: !!r.enabled,
+            send_time: String(r.send_time || "").slice(0, 5), // DBのtime型 "HH:MM:SS" → "HH:MM"
+            // send_count=null（残り全部）はデフォルト値で表示。最終スロットならどのみち自動で残り全部、
+            // 途中スロットに旧データのnullが残っていた場合は次回保存時に数値として保存される（エラーにしない）
+            countStr: r.send_count == null ? "5" : String(r.send_count),
+          })));
+          setAutoEnabled(!!setRes.data[0].auto_mitene_enabled);
+          setAutoSyncEnabled(!!setRes.data[0].auto_sync_enabled);
+          return;
+        }
       } catch (e) {
         if (active) { console.error("[auto-mitene] 設定読込例外:", e?.message || e); setLoadError(true); }
       } finally {
+        // loading解除は「データ確定 or loadError」後にのみ到達する（＝初期値falseのトグルを見せない）
         if (active) setLoading(false);
       }
     })();
     return () => { active = false; };
   }, []);
+
+  // トグルの切替即保存: slots を省略してフラグだけPOSTする（サーバー側はスロットに触らない）。
+  // 失敗時はトグル表示を元に戻してエラーを出す（保存し忘れでON/OFFが失われる問題の対策）。
+  async function saveFlag(which, value) {
+    if (flagSaving) return;
+    setFlagSaving(true);
+    setSaveMsg(null);
+    const prev = which === "mitene" ? autoEnabled : autoSyncEnabled;
+    if (which === "mitene") setAutoEnabled(value); else setAutoSyncEnabled(value); // 楽観的に即反映
+    try {
+      const body = which === "mitene" ? { autoEnabled: value } : { autoSyncEnabled: value };
+      const res = await apiFetch("/api/mitene-schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!(res.ok && data.ok)) throw new Error(data.error || `保存に失敗しました（${res.status}）`);
+    } catch (e) {
+      if (which === "mitene") setAutoEnabled(prev); else setAutoSyncEnabled(prev); // 失敗: 元に戻す
+      setSaveMsg({ ok: false, text: "⚠️ " + (e?.message || e) });
+    } finally {
+      setFlagSaving(false);
+    }
+  }
 
   const updateSlot = (i, patch) => setSlots((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const removeSlot = (i) => setSlots((prev) => prev.filter((_, j) => j !== i));
@@ -5872,6 +5933,8 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
       // ヘブン側のミテネ残数は毎朝9:00更新のため、9:05より前のスロットは無意味（サーバー側でも同じ検証をする）
       const [hh, mm] = s.send_time.split(":").map(Number);
       if (hh * 60 + mm < 9 * 60 + 5) { setSaveMsg({ ok: false, text: `スロット${i + 1}: スロットは9:05以降に設定してください（ヘブン側のミテネ更新が朝9:00のため）` }); return; }
+      // 分は5分刻み（step=300はタイプ入力を防げないためここでも検証）
+      if (mm % 5 !== 0) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 時刻の分は5分刻み（00/05/10…）で設定してください` }); return; }
       if (i !== lastSlotIdx) { // 最終回は自動で「残り全部」になるため件数チェック不要
         const n = parseInt(s.countStr, 10);
         if (!(n >= 1 && n <= 50)) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 送信数は1〜50で入力してください` }); return; }
@@ -5920,34 +5983,71 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
         <p style={{ fontSize: "12px", color: C.red, fontWeight: "700", margin: 0 }}>設定の読み込みに失敗しました。再読み込みしてください</p>
       ) : (
         <>
-          <Toggle checked={autoEnabled} onChange={(v) => setAutoEnabled(v)} label="自動送信を有効にする" />
-          <div>
-            <Toggle checked={autoSyncEnabled} onChange={(v) => setAutoSyncEnabled(v)} label="朝6時に自動同期（キャスト＋出勤）" />
-            <p style={{ fontSize: "11px", color: C.muted, margin: "6px 0 0 54px" }}>
-              ONにすると毎朝6時にキャスト同期と出勤同期を自動実行します
+          <div style={{ display: "grid", gap: "12px", opacity: flagSaving ? 0.6 : 1, pointerEvents: flagSaving ? "none" : "auto" }}>
+            <Toggle checked={autoEnabled} onChange={(v) => saveFlag("mitene", v)} label="自動送信を有効にする" />
+            <div>
+              <Toggle checked={autoSyncEnabled} onChange={(v) => saveFlag("sync", v)} label="朝6時に自動同期（キャスト＋出勤）" />
+              <p style={{ fontSize: "11px", color: C.muted, margin: "6px 0 0 54px" }}>
+                ONにすると毎朝6時にキャスト同期と出勤同期を自動実行します
+              </p>
+            </div>
+            <p style={{ fontSize: "10px", color: C.muted, margin: "-6px 0 0 54px" }}>
+              切替は即保存されます{flagSaving ? "（保存中…）" : ""}
             </p>
           </div>
-          {slots.map((s, i) => (
+          {slots.map((s, i) => {
+            // send_time("HH:MM")を時・分に分解して2つのselectで編集する（片方のみ選択中は "09:" / ":30" の部分文字列で保持
+            // → 保存時の形式チェックに落ちて従来の「時刻を入力してください」エラーに乗る。検証・API側は不変更）
+            const [selH = "", selM = ""] = (s.send_time || "").split(":");
+            return (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", padding: "8px 10px", borderRadius: "10px", border: `1px solid ${C.border}`, background: C.surface }}>
               <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "700", color: C.sub, cursor: "pointer", whiteSpace: "nowrap" }}>
                 <input type="checkbox" checked={s.enabled} onChange={(e) => updateSlot(i, { enabled: e.target.checked })} />
                 有効
               </label>
-              <input type="time" min="09:05" value={s.send_time} onChange={(e) => updateSlot(i, { send_time: e.target.value })}
-                style={{ ...inp, width: "110px", padding: "7px 8px" }} />
-              <input type="number" min={1} max={50} value={s.countStr} disabled={i === lastSlotIdx}
+              {/* Chromeのtimeピッカーはstep=300を無視して1分刻みが選べてしまうため、時・分の2つのselectにする。
+                  時は09〜23のみ（8時台まではヘブンのミテネ更新前で無意味）。9時のときは分00を選択不可（最速9:05） */}
+              <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                <select value={selH}
+                  onChange={(e) => {
+                    const h = e.target.value;
+                    let m = selM;
+                    if (h === "09" && m === "00") m = "05"; // 9:00はNGのため自動で05に補正
+                    updateSlot(i, { send_time: (h || m) ? h + ":" + m : "" });
+                  }}
+                  style={{ ...inp, width: "58px", padding: "7px 4px", cursor: "pointer" }}>
+                  <option value="" disabled>--</option>
+                  {Array.from({ length: 15 }, (_, k) => String(k + 9).padStart(2, "0")).map((h) => (
+                    <option key={h} value={h}>{h}</option>
+                  ))}
+                </select>
+                <span style={{ fontSize: "13px", color: C.sub, fontWeight: "700" }}>:</span>
+                <select value={selM}
+                  onChange={(e) => {
+                    const m = e.target.value;
+                    updateSlot(i, { send_time: (selH || m) ? selH + ":" + m : "" });
+                  }}
+                  style={{ ...inp, width: "58px", padding: "7px 4px", cursor: "pointer" }}>
+                  <option value="" disabled>--</option>
+                  {["00", "05", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55"].map((m) => (
+                    <option key={m} value={m} disabled={selH === "09" && m === "00"}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              <input type="number" min={1} max={50} value={s.countStr}
                 onChange={(e) => updateSlot(i, { countStr: e.target.value })}
-                style={{ ...inp, width: "64px", padding: "7px 8px", opacity: i === lastSlotIdx ? 0.5 : 1 }} />
+                style={{ ...inp, width: "64px", padding: "7px 8px" }} />
               <span style={{ fontSize: "11px", color: C.muted, whiteSpace: "nowrap" }}>件</span>
               {i === lastSlotIdx && (
-                <span style={{ fontSize: "10px", color: C.accent2, fontWeight: "700", whiteSpace: "nowrap" }}>最終スロットは残りすべて自動で送信されます</span>
+                <span style={{ fontSize: "10px", color: C.accent2, fontWeight: "700", whiteSpace: "nowrap" }}>最終スロットは件数に関わらず残りすべて送信されます</span>
               )}
               <button onClick={() => removeSlot(i)}
                 style={{ marginLeft: "auto", padding: "5px 10px", borderRadius: "10px", border: `1.5px solid ${C.red}50`, background: `${C.red}08`, color: C.red, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
                 削除
               </button>
             </div>
-          ))}
+            );
+          })}
           {slots.length === 0 && (
             <p style={{ fontSize: "12px", color: C.muted, margin: 0 }}>スロットがありません。「スロットを追加」で設定してください</p>
           )}

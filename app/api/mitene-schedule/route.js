@@ -9,10 +9,12 @@ import { getServiceClient } from "../../../lib/serviceClient";
 // 書き込みはこのルートが service_role で行う。
 // 店舗はトークン（改ざん不可）から取る。body の storeId は使わない。
 //
-// POST body: { slots: [{ slot_no, enabled, send_time, send_count }], autoEnabled,
+// POST body: { slots?: [{ slot_no, enabled, send_time, send_count }], autoEnabled?,
 //              shopdir?, autoSyncEnabled?, adminId?, adminPass? }
-//   - slots: 最大5件。send_time は "HH:MM"。send_count は 1〜50 の整数 or null（null=残り全部）
-//   - body に含まれない slot_no の既存行は削除する（スロット削除に対応）
+//   - slots: 最大5件。send_time は "HH:MM"。send_count は 1〜50 の整数 or null（null=残り全部）。
+//     slots を省略した場合はスロットに一切触らず、フラグ等だけを更新する（トグルの切替即保存用）。
+//     slots を送る場合（フル保存）は autoEnabled も必須（従来どおり）
+//   - slots 送信時、body に含まれない slot_no の既存行は削除する（スロット削除に対応）
 //   - autoEnabled: settings.auto_mitene_enabled へ保存（店舗ごとのマスターON/OFF）
 //   - shopdir: 非空文字列のときだけ settings.shopdir へ保存（VPSボットが手動一括ミテネとの
 //     相互排他ロックに使う。空なら既存値を上書きしない）
@@ -29,7 +31,8 @@ export async function POST(request) {
 
     const body = await request.json();
     const slots = body?.slots;
-    const autoEnabled = body?.autoEnabled;
+    const hasSlots = slots !== undefined; // slots 省略時はスロットに一切触らずフラグだけ更新（トグルの切替即保存用）
+    const autoEnabled = typeof body?.autoEnabled === "boolean" ? body.autoEnabled : null;         // null=未送信（既存値保持）
     const shopdir = typeof body?.shopdir === "string" ? body.shopdir.trim() : "";
     const autoSyncEnabled = typeof body?.autoSyncEnabled === "boolean" ? body.autoSyncEnabled : null; // null=未送信（既存値保持）
     const adminId = typeof body?.adminId === "string" ? body.adminId.trim() : "";
@@ -37,10 +40,13 @@ export async function POST(request) {
 
     // ── バリデーション（不正は 400。DB制約と同じ条件をサーバー側でも検証する）──
     const bad = (msg) => NextResponse.json({ ok: false, error: msg }, { status: 400 });
-    if (typeof autoEnabled !== "boolean") return bad("autoEnabled が不正です");
-    if (!Array.isArray(slots) || slots.length > 5) return bad("slots は最大5件の配列で指定してください");
+    if (hasSlots && typeof body?.autoEnabled !== "boolean") return bad("autoEnabled が不正です"); // フル保存時は従来どおり必須
+    if (!hasSlots && autoEnabled === null && autoSyncEnabled === null && !shopdir && !adminId && !adminPass) {
+      return bad("更新内容がありません");
+    }
+    if (hasSlots && (!Array.isArray(slots) || slots.length > 5)) return bad("slots は最大5件の配列で指定してください");
     const seenSlotNo = new Set();
-    for (const s of slots) {
+    for (const s of (hasSlots ? slots : [])) {
       if (!s || typeof s !== "object") return bad("slots の要素が不正です");
       if (!Number.isInteger(s.slot_no) || s.slot_no < 1 || s.slot_no > 5) return bad("slot_no は 1〜5 の整数で指定してください");
       if (seenSlotNo.has(s.slot_no)) return bad("slot_no が重複しています");
@@ -50,6 +56,8 @@ export async function POST(request) {
       // ヘブン側のミテネ残数は毎朝9:00更新のため、9:05より前のスロットは受け付けない（UI側と同じ検証）
       const [sh, sm] = s.send_time.split(":").map(Number);
       if (sh * 60 + sm < 9 * 60 + 5) return bad("スロットは9:05以降に設定してください（ヘブン側のミテネ更新が朝9:00のため）");
+      // 分は5分刻み（UI側と同じ検証）
+      if (sm % 5 !== 0) return bad("時刻の分は5分刻み（00/05/10…）で設定してください");
       if (s.send_count !== null && (!Number.isInteger(s.send_count) || s.send_count < 1 || s.send_count > 50)) {
         return bad("send_count は 1〜50 の整数 または null（残り全部）で指定してください");
       }
@@ -59,21 +67,21 @@ export async function POST(request) {
     // UI側と同じ判定（同時刻は配列の後方を最終回とする。有効スロットが1つならそれが最終回）。
     // クライアントの実装や古いUIに依存せず、サーバー側で必ず適用する。
     let lastIdx = -1, lastMin = -1;
-    slots.forEach((s, i) => {
+    (hasSlots ? slots : []).forEach((s, i) => {
       if (!s.enabled) return;
       const [h, m] = s.send_time.split(":").map(Number);
       const min = h * 60 + m;
       if (min >= lastMin) { lastMin = min; lastIdx = i; }
     });
-    const normalizedSlots = slots.map((s, i) => (i === lastIdx ? { ...s, send_count: null } : s));
+    const normalizedSlots = hasSlots ? slots.map((s, i) => (i === lastIdx ? { ...s, send_count: null } : s)) : [];
 
     const supabase = getServiceClient();
     if (!supabase) return NextResponse.json({ ok: false, error: "server_config" }, { status: 500 });
 
     const nowIso = new Date().toISOString();
 
-    // 1. スロットを upsert（onConflict: store_id,slot_no）
-    if (normalizedSlots.length > 0) {
+    // 1. スロットを upsert（onConflict: store_id,slot_no）。slots 省略時はスキップ
+    if (hasSlots && normalizedSlots.length > 0) {
       const rows = normalizedSlots.map((s) => ({
         store_id: storeId,
         slot_no: s.slot_no,
@@ -89,22 +97,26 @@ export async function POST(request) {
       }
     }
 
-    // 2. body に含まれない slot_no の既存行を削除（スロット削除に対応。slots が空なら全削除）
-    let delQuery = supabase.from("mitene_schedules").delete().eq("store_id", storeId);
-    if (normalizedSlots.length > 0) {
-      delQuery = delQuery.not("slot_no", "in", "(" + normalizedSlots.map((s) => s.slot_no).join(",") + ")");
-    }
-    const { error: delErr } = await delQuery;
-    if (delErr) {
-      console.error("[mitene-schedule] delete error:", delErr.message, delErr.details || "", delErr.hint || "");
-      return NextResponse.json({ ok: false, error: "server_error" }, { status: 500 });
+    // 2. body に含まれない slot_no の既存行を削除（スロット削除に対応。slots が空配列なら全削除）。
+    //    slots 省略（フラグのみ更新）時はスロットに一切触らない
+    if (hasSlots) {
+      let delQuery = supabase.from("mitene_schedules").delete().eq("store_id", storeId);
+      if (normalizedSlots.length > 0) {
+        delQuery = delQuery.not("slot_no", "in", "(" + normalizedSlots.map((s) => s.slot_no).join(",") + ")");
+      }
+      const { error: delErr } = await delQuery;
+      if (delErr) {
+        console.error("[mitene-schedule] delete error:", delErr.message, delErr.details || "", delErr.hint || "");
+        return NextResponse.json({ ok: false, error: "server_error" }, { status: 500 });
+      }
     }
 
     // 3. settings.auto_mitene_enabled（＋条件を満たすカラムだけ一緒に）を保存。
     //    アプリの settings 保存と同じ upsert 規約（onConflict: store_id,id）に合わせる
     //    ＝行が無い新店舗でも作成される（他カラムはDB既定値）。
     //    shopdir / adminId / adminPass は空のときカラム自体を送らず既存値を保持（空上書き事故防止）。
-    const settingsRow = { store_id: storeId, id: 1, auto_mitene_enabled: autoEnabled, updated_at: nowIso };
+    const settingsRow = { store_id: storeId, id: 1, updated_at: nowIso };
+    if (autoEnabled !== null) settingsRow.auto_mitene_enabled = autoEnabled;
     if (shopdir) settingsRow.shopdir = shopdir;
     if (autoSyncEnabled !== null) settingsRow.auto_sync_enabled = autoSyncEnabled;
     if (adminId) settingsRow.admin_id = adminId;
