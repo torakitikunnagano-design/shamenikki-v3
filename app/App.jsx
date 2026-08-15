@@ -6120,6 +6120,9 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
   // 「非空かどうか」だけをサーバー側フィルタ(neq)で取得する（パスワード本体はブラウザに来ない）。
   // null=未取得（取得失敗時もnullのままにして「全員PW未取得」の誤表示を避ける）
   const [pwSetNames, setPwSetNames] = useState(null);
+  // 先出勤カラムのアコーディオン: 21人以上のとき最初の20人だけ表示し、残りは展開ボタンで開閉する
+  const PRE_COLLAPSE_LIMIT = 20;
+  const [preExpanded, setPreExpanded] = useState(false);
   useEffect(() => {
     let active = true;
     (async () => {
@@ -6457,7 +6460,7 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
           ) : (
             <div style={{ ...card, display: "grid", gap: "8px" }}>
               <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, margin: "0 0 4px" }}>先出勤（{preMitene.days}日後以内・{preRangeLabel}） {preCasts.length}人</p>
-              {preCasts.map(({ cast: c, dateKey }) => (
+              {(preExpanded ? preCasts : preCasts.slice(0, PRE_COLLAPSE_LIMIT)).map(({ cast: c, dateKey }) => (
                 <div key={c.name} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "10px", border: `1px solid ${C.border}`, background: C.surface }}>
                   <span style={{ fontWeight: "700", fontSize: "13px", color: C.text, minWidth: "64px" }}>{c.name}</span>
                   <span style={{ fontSize: "11px", color: C.sub, fontWeight: "700", whiteSpace: "nowrap" }}>{dateKey}</span>
@@ -6467,6 +6470,12 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
                   )}
                 </div>
               ))}
+              {preCasts.length > PRE_COLLAPSE_LIMIT && (
+                <button onClick={() => setPreExpanded((v) => !v)}
+                  style={{ padding: "9px", borderRadius: "12px", border: `1.5px dashed ${C.accent2}55`, background: "transparent", color: C.accent2, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                  {preExpanded ? "折りたたむ ▲" : `残り${preCasts.length - PRE_COLLAPSE_LIMIT}人を表示 ▼`}
+                </button>
+              )}
             </div>
           )}
         </div>
