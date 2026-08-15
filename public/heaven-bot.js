@@ -762,8 +762,9 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 //  - 環境変数 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY が無い、または
 //    @supabase/supabase-js が未インストールならスケジューラだけ無効（既存機能は影響なし）。
 //  - 二重実行防止（3段構え）:
-//      1) mitene_auto_runs の UNIQUE(store_id, run_date, slot_no) を INSERT でクレーム（再起動・多重プロセスに耐える）
-//      2) schedulerRunning フラグ（前の分の処理が長引いたら次の分はスキップ）
+//      1) mitene_auto_runs の UNIQUE(store_id, run_date, slot_no) を INSERT でクレーム（再起動・多重プロセスに耐える。これが真の排他）
+//      2) runningStores（実行中店舗のSet）: 同一店舗の多重起動を防ぐ。店舗間は並列（最大3店舗）で、
+//         長時間かかる店舗が他店舗のグレース窓を潰さない
 //      3) 手動一括ミテネと同じ 'bulkmitene:'+shopdir ロック＋キャスト単位 'heaven:' ロック
 // ============================================================
 let supabaseAdmin = null;
@@ -781,7 +782,7 @@ try {
   console.warn('[auto-mitene] @supabase/supabase-js が読み込めないためスケジューラ無効（npm i @supabase/supabase-js で有効化）: ' + e.message);
 }
 
-const AUTO_MITENE_GRACE_MIN = 10; // グレース窓: send_time から10分以内なら実行（bot停止からの復帰で拾う）
+const AUTO_MITENE_GRACE_MIN = 20; // グレース窓: send_time から20分以内なら実行（bot停止・他店舗の長時間実行からの復帰で拾う）
 
 const pad2 = (n) => String(n).padStart(2, '0');
 // "HH:MM(:SS)" → 0〜1439 分
@@ -1098,8 +1099,21 @@ async function runAutoSync(store, runDate) {
 }
 
 // 1スロットぶんの実行（クレーム→ロック→対象抽出→逐次送信→ログ→クローズ）
-async function runAutoSlot(slot, runDate, shopdir) {
+async function runAutoSlot(slot, runDate, shopdir, isFinalSlot) {
   const tag = '[auto-mitene] ' + slot.store_id + ' slot' + slot.slot_no + ' (' + runDate + ') ';
+
+  // 0. busy時はクレームを消費しない: 手動一括ミテネのロック状態を先に確認し、busyならクレームせずreturn。
+  //    クレーム行が残らないため、グレース窓内の次のtickで自然に再試行される（手動終了後に自動が拾える）。
+  //    真の二重実行防止は下のクレーム(UNIQUE制約)が担うので、この事前チェックは順序の最適化にすぎない。
+  let lockKey = null;
+  if (shopdir) {
+    lockKey = 'bulkmitene:' + shopdir;
+    const peekAt = storeLocks.get(lockKey);
+    if (typeof peekAt === 'number' && (Date.now() - peekAt) < BULK_MITENE_TTL_MS) {
+      console.log(tag + '手動一括ミテネが実行中(busy) → クレームせずスキップ（窓内の次tickで再試行）');
+      return;
+    }
+  }
 
   // a. クレーム: UNIQUE(store_id, run_date, slot_no) への INSERT が通った者だけが実行する。
   //    重複エラー(23505)＝この営業日は実行済み/実行中 → 静かにスキップ。
@@ -1113,7 +1127,7 @@ async function runAutoSlot(slot, runDate, shopdir) {
   }
   const runId = claimed && claimed[0] && claimed[0].id;
   if (!runId) return;
-  console.log(tag + '開始 runId=' + runId + ' send_count=' + (slot.send_count == null ? '残り全部(max50)' : slot.send_count));
+  console.log(tag + '開始 runId=' + runId + ' send_count=' + ((isFinalSlot || slot.send_count == null) ? '残り全部(max50)' + (isFinalSlot ? '/最終スロット' : '') : slot.send_count));
 
   const closeRun = async (patch) => {
     const { error } = await supabaseAdmin.from('mitene_auto_runs')
@@ -1122,11 +1136,10 @@ async function runAutoSlot(slot, runDate, shopdir) {
     if (error) console.error(tag + 'run更新失敗: ' + error.message);
   };
 
-  // c. 手動一括ミテネと同じ店舗ロック（'bulkmitene:'+shopdir、TTL方式）。
-  //    手動が実行中なら status='error'/'busy' で閉じて今回はスキップ（次のスロットで再挑戦される）。
-  let lockKey = null;
-  if (shopdir) {
-    lockKey = 'bulkmitene:' + shopdir;
+  // c. 手動一括ミテネと同じ店舗ロック（'bulkmitene:'+shopdir、TTL方式）を取得。
+  //    冒頭のpeek後〜クレームの間に手動acquireが割り込んだ稀なケースのみ、ここで検出して
+  //    従来どおり busy で閉じる（このケースだけはクレームが消費されるが、相互排他は維持される）。
+  if (lockKey) {
     const acquiredAt = storeLocks.get(lockKey);
     if (typeof acquiredAt === 'number' && (Date.now() - acquiredAt) < BULK_MITENE_TTL_MS) {
       console.log(tag + '手動一括ミテネが実行中(busy) → スキップ');
@@ -1161,13 +1174,15 @@ async function runAutoSlot(slot, runDate, shopdir) {
     const mdParts = runDate.split('-');
     const mdLabel = (+mdParts[1]) + '/' + (+mdParts[2]);
     console.log('[auto-mitene] ' + slot.store_id + ' slot' + slot.slot_no + ' 開始: 営業日=' + runDate + '(6時切替) 対象=' + totalCasts + '人(' + mdLabel + '出勤)');
-    const maxPerCast = (slot.send_count == null) ? 50 : slot.send_count; // NULL=残り全部（姫デコの日次上限50で頭打ち）
+    // 時刻上の最終スロットは send_count に関わらず残り全部（姫デコの日次上限50で頭打ち）。
+    // NULL=残り全部の分岐は既存データ（旧仕様でnull保存済みの行）の移行期互換として必ず残す
+    const maxPerCast = (isFinalSlot || slot.send_count == null) ? 50 : slot.send_count;
 
     // e/f. 1人ずつ逐次送信し、1人ごとにログを残す
     for (const c of targets) {
       const logRow = {
         run_id: runId, store_id: slot.store_id, run_date: runDate, slot_no: slot.slot_no,
-        cast_name: c.name, heaven_id: c.heaven_id || '', requested_count: slot.send_count,
+        cast_name: c.name, heaven_id: c.heaven_id || '', requested_count: (isFinalSlot || slot.send_count == null) ? null : slot.send_count, // null=残り全部（最終スロットは件数に関わらず全部送るためnullで記録）
         sent_count: 0, remaining_after: null, ok: false, error: null,
       };
       if (!c.heaven_id || !c.heaven_pass) {
@@ -1221,37 +1236,47 @@ async function runAutoSlot(slot, runDate, shopdir) {
 }
 
 // 毎分チェック本体。例外はここで握りつぶし、bot本体を絶対に落とさない。
-let schedulerRunning = false;
+// 旧 schedulerRunning（グローバル1本の直列化）は廃止: 1店舗の長時間実行が他店舗のグレース窓を
+// 潰していたため、「実行中店舗のSet」に置き換え、tickは毎分必ず走らせて実行中でない店舗だけを起動する。
+const runningStores = new Set();         // 自動送信を実行中の store_id（同一店舗の多重起動防止）
+const AUTO_MITENE_STORE_CONCURRENCY = 3; // 同時に実行する店舗数の上限（VPSメモリ2GB考慮。超過分は空き待ちで順次処理）
+let syncRunning = false;                 // 朝の自動同期の直列実行ガード（同期は従来どおり1本ずつ直列を維持）
+
 async function autoMiteneTick() {
   if (!supabaseAdmin) return;
-  if (schedulerRunning) { console.log('[auto-mitene] 前の分の処理が実行中 → この分はスキップ'); return; }
-  schedulerRunning = true;
   try {
     const nowMs = Date.now();
     const nowJst = new Date(nowMs + 9 * 3600 * 1000); // JSTを明示計算（VPSのOSタイムゾーンに依存しない）
     const nowMin = nowJst.getUTCHours() * 60 + nowJst.getUTCMinutes();
 
-    // ── 朝の自動同期（JST 06:00〜06:10 のグレース窓）──
-    // ミテネ送信スロットの処理より必ず先に実行する: 6:00 に送信スロットがある店でも
-    // 同一分内で「同期 → 送信」の順になる（awaitで直列。クレームにより二重実行はしない）。
+    // ── 朝の自動同期（JST 06:00〜 グレース窓）──
+    // 同期は従来どおり「1本ずつ直列」を維持する: グローバル直列の廃止に伴い、毎分のtickが
+    // 同期を多重起動するとPuppeteerが店舗数ぶん並走してメモリを食い潰すため、専用フラグで直列化。
+    // 二重実行自体はクレーム(slot_no=0)でも防がれるので、このフラグは多重Puppeteer防止のためだけにある。
+    // 6:00台は送信スロット（9:05以降）と時間帯が離れており、直列でも9時までに余裕で完了する。
     const syncDiff = (nowMin - AUTO_SYNC_MIN + 1440) % 1440;
-    if (syncDiff < AUTO_MITENE_GRACE_MIN) {
-      const { data: syncStores, error: ssErr } = await supabaseAdmin.from('settings')
-        .select('store_id, shopdir, admin_id, admin_pass')
-        .eq('auto_sync_enabled', true);
-      if (ssErr) {
-        console.error('[auto-sync] settings取得失敗: ' + ssErr.message);
-      } else {
-        // run_date は発火予定時刻(6:00)の営業日で固定（送信スロットと同じ考え方）
-        const syncRunDate = bizDateOf(nowMs - syncDiff * 60 * 1000);
-        for (const st of (syncStores || [])) {
-          // admin_id / admin_pass / shopdir が全て非空の店舗だけ実行
-          if (!st.admin_id || !st.admin_pass || !st.shopdir) {
-            console.warn('[auto-sync] ' + st.store_id + ': admin_id/admin_pass/shopdir 未設定のためスキップ（一括ミテネ画面でスケジュールを保存すると解消）');
-            continue;
+    if (syncDiff < AUTO_MITENE_GRACE_MIN && !syncRunning) {
+      syncRunning = true;
+      try {
+        const { data: syncStores, error: ssErr } = await supabaseAdmin.from('settings')
+          .select('store_id, shopdir, admin_id, admin_pass')
+          .eq('auto_sync_enabled', true);
+        if (ssErr) {
+          console.error('[auto-sync] settings取得失敗: ' + ssErr.message);
+        } else {
+          // run_date は発火予定時刻(6:00)の営業日で固定（送信スロットと同じ考え方）
+          const syncRunDate = bizDateOf(nowMs - syncDiff * 60 * 1000);
+          for (const st of (syncStores || [])) {
+            // admin_id / admin_pass / shopdir が全て非空の店舗だけ実行
+            if (!st.admin_id || !st.admin_pass || !st.shopdir) {
+              console.warn('[auto-sync] ' + st.store_id + ': admin_id/admin_pass/shopdir 未設定のためスキップ（一括ミテネ画面でスケジュールを保存すると解消）');
+              continue;
+            }
+            await runAutoSync(st, syncRunDate); // 店舗ごとに逐次
           }
-          await runAutoSync(st, syncRunDate); // 店舗ごとに逐次
         }
+      } finally {
+        syncRunning = false;
       }
     }
 
@@ -1269,21 +1294,67 @@ async function autoMiteneTick() {
       .in('store_id', stores.map((s) => s.store_id));
     if (schErr) { console.error('[auto-mitene] schedules取得失敗: ' + schErr.message); return; }
 
+    // 店舗ごとの有効スロットの最遅時刻(分)。時刻上の最終スロットは send_count に関わらず「残り全部」で送る
+    // （スロット取得は時刻で絞っていないため、その日の全有効スロットからここで最遅を計算できる）
+    const latestMinByStore = new Map(); // store_id → 最遅 hmToMin
+    (slots || []).forEach((s) => {
+      const m = hmToMin(s.send_time);
+      if (m == null) return;
+      const cur = latestMinByStore.has(s.store_id) ? latestMinByStore.get(s.store_id) : -1;
+      if (m >= cur) latestMinByStore.set(s.store_id, m);
+    });
+
+    // 発火対象スロットを店舗ごとにグループ化（店舗間は並列・店舗内は時刻順に直列）
+    const dueByStore = new Map(); // store_id → [{ slot, runDate, isFinalSlot, slotMin }]
     for (const slot of (slots || [])) {
       const slotMin = hmToMin(slot.send_time);
       if (slotMin == null) continue;
+      const isFinalSlot = slotMin === latestMinByStore.get(slot.store_id); // 同時刻タイは両方「最終」扱い（先行が使い切れば後続は本日完了スキップ）
       // 日跨ぎ対応の経過分数（例: スロット23:58を00:03に評価→diff=5）。グレース窓内だけ実行
       const diff = (nowMin - slotMin + 1440) % 1440;
       if (diff >= AUTO_MITENE_GRACE_MIN) continue;
       // run_date は「今回の発火時刻」の営業日で固定（現在時刻の営業日にすると
       // 05:5x のスロットを06:00過ぎに拾ったとき別営業日扱い＝二重実行になるため）
       const runDate = bizDateOf(nowMs - diff * 60 * 1000);
-      await runAutoSlot(slot, runDate, shopdirByStore.get(slot.store_id) || '');
+      if (!dueByStore.has(slot.store_id)) dueByStore.set(slot.store_id, []);
+      dueByStore.get(slot.store_id).push({ slot, runDate, isFinalSlot, slotMin });
     }
+    if (dueByStore.size === 0) return;
+
+    // 実行中の店舗は「その店舗の分だけ」スキップ。busy時はクレームを消費しない設計（runAutoSlot冒頭のpeek）
+    // なので、窓内なら次のtickで自然に再試行される。起動する店舗はこの場で同期的に runningStores へ登録し、
+    // 次のtickとの二重エントリを防ぐ（登録解除は各ワーカーのfinallyで必ず行われる）。
+    const queue = [];
+    for (const [storeId, jobs] of dueByStore) {
+      if (runningStores.has(storeId)) {
+        console.log('[auto-mitene] ' + storeId + ': 前の処理が実行中 → この分はスキップ');
+        continue;
+      }
+      jobs.sort((a, b) => a.slotMin - b.slotMin); // 店舗内は時刻順に直列
+      runningStores.add(storeId);
+      queue.push({ storeId, jobs });
+    }
+    if (queue.length === 0) return;
+
+    // 店舗間は最大 AUTO_MITENE_STORE_CONCURRENCY 店舗ずつ並列実行（ワーカープール方式）
+    let qi = 0;
+    const worker = async () => {
+      while (qi < queue.length) {
+        const { storeId, jobs } = queue[qi++];
+        try {
+          for (const job of jobs) {
+            await runAutoSlot(job.slot, job.runDate, shopdirByStore.get(storeId) || '', job.isFinalSlot);
+          }
+        } catch (e) {
+          console.error('[auto-mitene] ' + storeId + ' 実行例外: ' + ((e && e.message) || e));
+        } finally {
+          runningStores.delete(storeId); // 例外時も必ず解放（解放漏れ＝その店舗が永久スキップになるのを防ぐ）
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(AUTO_MITENE_STORE_CONCURRENCY, queue.length) }, () => worker()));
   } catch (e) {
     console.error('[auto-mitene] tick例外: ' + ((e && e.message) || e));
-  } finally {
-    schedulerRunning = false;
   }
 }
 if (supabaseAdmin) setInterval(autoMiteneTick, 60 * 1000);
