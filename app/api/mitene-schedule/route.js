@@ -63,17 +63,10 @@ export async function POST(request) {
       }
     }
 
-    // ルール強制: 有効スロットのうち send_time が最も遅いものは「残り全部」(send_count=null) に上書きする。
-    // UI側と同じ判定（同時刻は配列の後方を最終回とする。有効スロットが1つならそれが最終回）。
-    // クライアントの実装や古いUIに依存せず、サーバー側で必ず適用する。
-    let lastIdx = -1, lastMin = -1;
-    (hasSlots ? slots : []).forEach((s, i) => {
-      if (!s.enabled) return;
-      const [h, m] = s.send_time.split(":").map(Number);
-      const min = h * 60 + m;
-      if (min >= lastMin) { lastMin = min; lastIdx = i; }
-    });
-    const normalizedSlots = hasSlots ? slots.map((s, i) => (i === lastIdx ? { ...s, send_count: null } : s)) : [];
+    // 最終スロットの「残り全部」はbot側が実行時に時刻で判定するため、send_count はユーザーの
+    // 入力値をそのまま保存する（旧仕様の「最遅スロットを null に強制上書き」は廃止。
+    // null は引き続き有効値＝残り全部として受け付ける: 旧データ・旧クライアント互換）。
+    const saveSlots = hasSlots ? slots : [];
 
     const supabase = getServiceClient();
     if (!supabase) return NextResponse.json({ ok: false, error: "server_config" }, { status: 500 });
@@ -81,8 +74,8 @@ export async function POST(request) {
     const nowIso = new Date().toISOString();
 
     // 1. スロットを upsert（onConflict: store_id,slot_no）。slots 省略時はスキップ
-    if (hasSlots && normalizedSlots.length > 0) {
-      const rows = normalizedSlots.map((s) => ({
+    if (hasSlots && saveSlots.length > 0) {
+      const rows = saveSlots.map((s) => ({
         store_id: storeId,
         slot_no: s.slot_no,
         enabled: s.enabled,
@@ -101,8 +94,8 @@ export async function POST(request) {
     //    slots 省略（フラグのみ更新）時はスロットに一切触らない
     if (hasSlots) {
       let delQuery = supabase.from("mitene_schedules").delete().eq("store_id", storeId);
-      if (normalizedSlots.length > 0) {
-        delQuery = delQuery.not("slot_no", "in", "(" + normalizedSlots.map((s) => s.slot_no).join(",") + ")");
+      if (saveSlots.length > 0) {
+        delQuery = delQuery.not("slot_no", "in", "(" + saveSlots.map((s) => s.slot_no).join(",") + ")");
       }
       const { error: delErr } = await delQuery;
       if (delErr) {

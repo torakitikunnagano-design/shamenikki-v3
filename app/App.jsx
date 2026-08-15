@@ -5908,9 +5908,9 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
   const removeSlot = (i) => setSlots((prev) => prev.filter((_, j) => j !== i));
   const addSlot = () => setSlots((prev) => (prev.length >= 5 ? prev : [...prev, { enabled: true, send_time: "", countStr: "5" }]));
 
-  // 有効スロットのうち send_time が最も遅い行（＝最終回）。自動的に「残り全部」として扱う。
-  // 毎レンダーで再計算するため、時刻編集で最遅が入れ替われば表示・保存とも自動で追従する。
-  // 同時刻は後の行を最終回とする（サーバー側 /api/mitene-schedule も同じ判定）。
+  // 有効スロットのうち send_time が最も遅い行（＝最終回）。注釈「残数を全部送信します」の表示にのみ使う
+  // （実際の「残り全部」判定はbot側が実行時に時刻で行う。保存値はユーザー入力の数値のまま）。
+  // 毎レンダーで再計算するため、時刻編集で最遅が入れ替われば表示も自動で追従する。同時刻は後の行を最終回とする。
   const lastSlotIdx = (() => {
     let idx = -1, best = -1;
     slots.forEach((s, i) => {
@@ -5935,10 +5935,9 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
       if (hh * 60 + mm < 9 * 60 + 5) { setSaveMsg({ ok: false, text: `スロット${i + 1}: スロットは9:05以降に設定してください（ヘブン側のミテネ更新が朝9:00のため）` }); return; }
       // 分は5分刻み（step=300はタイプ入力を防げないためここでも検証）
       if (mm % 5 !== 0) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 時刻の分は5分刻み（00/05/10…）で設定してください` }); return; }
-      if (i !== lastSlotIdx) { // 最終回は自動で「残り全部」になるため件数チェック不要
-        const n = parseInt(s.countStr, 10);
-        if (!(n >= 1 && n <= 50)) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 送信数は1〜50で入力してください` }); return; }
-      }
+      // 件数は全行必須（最終スロットも数値で保存する。「残り全部」はbot側が実行時に時刻で判定）
+      const n = parseInt(s.countStr, 10);
+      if (!(n >= 1 && n <= 50)) { setSaveMsg({ ok: false, text: `スロット${i + 1}: 送信数は1〜50で入力してください` }); return; }
     }
     setSaving(true);
     try {
@@ -5950,8 +5949,8 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
         adminId: adminId || "",
         adminPass: adminPass || "",
         // slot_no は保存時に 1..N へ振り直す（UIでは行の並びだけ管理し、欠番を作らない）
-        // 最終回（有効スロット中で最遅）は自動で「残り全部」= null（サーバー側でも同じルールを強制）
-        slots: slots.map((s, i) => ({ slot_no: i + 1, enabled: !!s.enabled, send_time: s.send_time, send_count: i === lastSlotIdx ? null : parseInt(s.countStr, 10) })),
+        // send_count は全行とも入力値をそのまま保存（最終スロットの「残り全部」はbot側が実行時に時刻で判定）
+        slots: slots.map((s, i) => ({ slot_no: i + 1, enabled: !!s.enabled, send_time: s.send_time, send_count: parseInt(s.countStr, 10) })),
       };
       const res = await apiFetch("/api/mitene-schedule", {
         method: "POST",
@@ -6039,7 +6038,7 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
                 style={{ ...inp, width: "64px", padding: "7px 8px" }} />
               <span style={{ fontSize: "11px", color: C.muted, whiteSpace: "nowrap" }}>件</span>
               {i === lastSlotIdx && (
-                <span style={{ fontSize: "10px", color: C.accent2, fontWeight: "700", whiteSpace: "nowrap" }}>最終スロットは件数に関わらず残りすべて送信されます</span>
+                <span style={{ fontSize: "10px", color: C.accent2, fontWeight: "700", whiteSpace: "nowrap" }}>最終スロットは残数を全部送信します</span>
               )}
               <button onClick={() => removeSlot(i)}
                 style={{ marginLeft: "auto", padding: "5px 10px", borderRadius: "10px", border: `1.5px solid ${C.red}50`, background: `${C.red}08`, color: C.red, fontWeight: "700", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }}>
