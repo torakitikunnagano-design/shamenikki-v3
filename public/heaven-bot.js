@@ -795,6 +795,12 @@ function bizDateOf(msUtc) {
   const d = new Date(msUtc + 3 * 3600 * 1000);
   return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
 }
+// "YYYY-MM-DD" に n 日加算した "YYYY-MM-DD"（先出勤ミテネの対象日計算用）
+function addDaysYmd(ymd, n) {
+  const d = new Date(ymd + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
+}
 
 // ============================================================
 // 朝の自動同期用: App.jsx から移植したヘルパー群
@@ -846,6 +852,12 @@ function getBusinessTodayKeyMD() {
   const d = new Date(Date.now() + 3 * 3600000);
   return (d.getUTCMonth() + 1) + '/' + d.getUTCDate();
 }
+// 営業日基準で n 日後の "M/D"（ゼロ埋めなし。getBusinessTodayKeyMD と同方式。先出勤PW取得の対象日計算用）
+function getBusinessKeyMDAfter(n) {
+  const d = new Date(Date.now() + 3 * 3600000);
+  d.setUTCDate(d.getUTCDate() + n);
+  return (d.getUTCMonth() + 1) + '/' + d.getUTCDate();
+}
 
 // App.jsx:393-406 toSupabaseCast の忠実移植（store_id は引数で受ける。heaven_pass は含めない
 // ＝upsertペイロードに無いカラムはDBの既存値が保持される）
@@ -873,6 +885,16 @@ function toSupabaseCastRow(storeId, c) {
 // ============================================================
 const SYNC_SLOT_NO = 0;            // mitene_auto_runs の slot_no=0 は朝の自動同期用に予約
 const AUTO_SYNC_MIN = 6 * 60;      // JST 06:00（グレース窓は AUTO_MITENE_GRACE_MIN と共通の10分）
+
+// ============================================================
+// 先出勤ミテネ（明日〜pre_mitene_days日後以内に出勤予定のキャストへ昼に送る）
+//  - slot_no の帯域分離: 0=朝の自動同期 / 1〜5=通常スロット / 90=先出勤ミテネ。
+//    通常スロットを将来6個以上に拡張しても衝突しないよう、離れた番号を予約する。
+// ============================================================
+const PRE_MITENE_SLOT_NO = 90;     // mitene_auto_runs / mitene_auto_logs の slot_no=90 は先出勤ミテネ用に予約
+const PRE_MITENE_MIN = 12 * 60;    // JST 12:00 発火（グレース窓は AUTO_MITENE_GRACE_MIN と共通）
+// 1人あたりの送信件数は「残り全部」に変更済み（旧 PRE_MITENE_COUNT=5 の固定値は廃止）。
+// maxPerCast=50 は最終スロットと同じ「残り全部（姫デコの日次上限50で頭打ち。実際はヘブンの上限20で頭打ち）」の扱い。
 
 async function runAutoSync(store, runDate) {
   const tag = '[auto-sync] ' + store.store_id + ' (' + runDate + ') ';
@@ -1046,12 +1068,18 @@ async function runAutoSync(store, runDate) {
     // ── ミテネPW取得（App.jsx fillMitenePasswords App.jsx:1134-1160 相当）──
     // App.jsx:1137-1148: 今日出勤の名前集合。App.jsx は今回同期の shifts と既存 state の和集合だが、
     // bot には state が無いため今回スクレイプの shifts のみで判定（同じ最新情報源）。
-    const todayKeyMD = getBusinessTodayKeyMD();
+    // 先出勤ミテネON（pre_mitene_enabled）の店舗は、昼12時の先出勤送信までにPWが揃うよう
+    // 「明日〜pre_mitene_days日後以内」の出勤予定者も対象に加える（OFFの店舗は従来どおり今日出勤のみ）。
+    const targetKeys = new Set([getBusinessTodayKeyMD()]);
+    if (store.pre_mitene_enabled) {
+      const preDays = (Number.isInteger(store.pre_mitene_days) && store.pre_mitene_days >= 1 && store.pre_mitene_days <= 7) ? store.pre_mitene_days : 3; // DB既定値(3)と同じフォールバック
+      for (let i = 1; i <= preDays; i++) targetKeys.add(getBusinessKeyMDAfter(i));
+    }
     const workingNames = new Set();
     (data.shifts || []).forEach((s) => {
-      if (s && Array.isArray(s.days) && s.days.some((dd) => dd.date === todayKeyMD)) workingNames.add(normalizeName(s.name)); // App.jsx:1139-1141
+      if (s && Array.isArray(s.days) && s.days.some((dd) => targetKeys.has(dd.date))) workingNames.add(normalizeName(s.name)); // App.jsx:1139-1141 の対象日を集合化した版
     });
-    // App.jsx:1150-1155: heaven_id ありかつ今日出勤だけを対象にする
+    // App.jsx:1150-1155: heaven_id ありかつ対象日（今日＋先出勤範囲）に出勤だけを対象にする
     const targets = dedupedNext.filter((c) => c.heaven_id && workingNames.has(normalizeName(c.name)));
     const memberIds = targets.map((c) => c.heaven_id);                 // App.jsx:1155
     if (memberIds.length > 0) {
@@ -1075,7 +1103,7 @@ async function runAutoSync(store, runDate) {
         console.error(tag + 'ミテネPW取得失敗（ロスターは保存済み）: ' + (credRes.error || 'unknown'));
       }
     } else {
-      console.log(tag + '今日出勤のPW取得対象なし');
+      console.log(tag + 'PW取得対象なし（今日＋先出勤範囲）');
     }
 
     // e. クローズ（total_casts=同期キャスト数 / total_sent=保存shift行数 として流用）
@@ -1096,6 +1124,76 @@ async function runAutoSync(store, runDate) {
     const { error: logErr } = await supabaseAdmin.from('mitene_auto_logs').insert(logRow);
     if (logErr) console.error(tag + 'ログ保存失敗: ' + logErr.message);
   }
+}
+
+// ============================================================
+// 通常スロット（runAutoSlot）と先出勤ジョブ（runPreMitene）で共用するヘルパー
+// ============================================================
+// 対象日リスト（YYYY-MM-DD配列）に出勤予定の cast_name を重複なしで抽出し、casts と照合して
+// heaven_id / heaven_pass 付きで返す（runAutoSlot の対象抽出を対象日パラメータ化して括り出したもの）
+async function fetchShiftCasts(storeId, dates) {
+  const { data: shiftRows, error: shErr } = await supabaseAdmin.from('shifts')
+    .select('cast_name').eq('store_id', storeId).in('date', dates);
+  if (shErr) throw new Error('shifts取得失敗: ' + shErr.message);
+  const names = Array.from(new Set((shiftRows || []).map((r) => r.cast_name).filter(Boolean)));
+  if (names.length === 0) return [];
+  const { data: castRows, error: caErr } = await supabaseAdmin.from('casts')
+    .select('name, heaven_id, heaven_pass').eq('store_id', storeId).in('name', names);
+  if (caErr) throw new Error('casts取得失敗: ' + caErr.message);
+  return castRows || [];
+}
+
+// 対象キャストへ1人ずつ逐次送信し、1人ごとに mitene_auto_logs へ記録する（runAutoSlot の e/f を括り出したもの）。
+//  - heaven_pass未登録スキップ / キャスト単位 'heaven:' ロック / 送信前の残数チェック→使い切りスキップ、の骨格は従来どおり
+//  - requestedCount: ログの requested_count に入れる値（null=残り全部）
+//  - 戻り値: 送信合計数
+async function sendMiteneToTargets({ tag, runId, storeId, runDate, slotNo, targets, maxPerCast, requestedCount }) {
+  let totalSent = 0;
+  for (const c of targets) {
+    const logRow = {
+      run_id: runId, store_id: storeId, run_date: runDate, slot_no: slotNo,
+      cast_name: c.name, heaven_id: c.heaven_id || '', requested_count: requestedCount,
+      sent_count: 0, remaining_after: null, ok: false, error: null,
+    };
+    if (!c.heaven_id || !c.heaven_pass) {
+      logRow.error = 'no_heaven_pass';
+      console.log(tag + c.name + ': PW未登録 → スキップ');
+    } else {
+      const castLock = 'heaven:' + c.heaven_id; // 手動の個別送信(/mitene)と同じキャスト単位ロック
+      if (storeLocks.has(castLock)) {
+        logRow.error = 'busy';
+        console.log(tag + c.name + ': 個別送信が実行中(busy) → スキップ');
+      } else {
+        storeLocks.set(castLock, true);
+        try {
+          // 送信前に残数を確認し、本日完了（使い切り/残0）ならタブ巡回・送信処理に入らずスキップ。
+          // 判定できない場合（remaining=null やチェック自体の失敗）は従来どおり送信に進む（安全側＝送り漏らさない）。
+          const st = await runMiteneStatusCheck(c.heaven_id, c.heaven_pass);
+          if (st.ok && (st.usedUp || st.remaining === 0)) {
+            // スキップは ok=true のまま error='skipped_used_up' を残し、失敗（ok=false）と区別できるようにする
+            logRow.ok = true;
+            logRow.sent_count = 0;
+            logRow.remaining_after = 0;
+            logRow.error = 'skipped_used_up';
+            console.log(tag + c.name + ': 本日完了のためスキップ');
+          } else {
+            const r = await runMiteneSend(c.heaven_id, c.heaven_pass, maxPerCast);
+            logRow.ok = !!r.ok;
+            logRow.sent_count = r.sent || 0;
+            logRow.remaining_after = (typeof r.remainingAfter === 'number') ? r.remainingAfter : null;
+            logRow.error = r.ok ? null : (r.error || 'unknown');
+            totalSent += logRow.sent_count;
+            console.log(tag + c.name + ': sent=' + logRow.sent_count + (r.ok ? '' : ' error=' + logRow.error));
+          }
+        } finally {
+          storeLocks.delete(castLock);
+        }
+      }
+    }
+    const { error: logErr } = await supabaseAdmin.from('mitene_auto_logs').insert(logRow);
+    if (logErr) console.error(tag + 'ログ保存失敗(' + c.name + '): ' + logErr.message);
+  }
+  return totalSent;
 }
 
 // 1スロットぶんの実行（クレーム→ロック→対象抽出→逐次送信→ログ→クローズ）
@@ -1154,21 +1252,13 @@ async function runAutoSlot(slot, runDate, shopdir, isFinalSlot) {
 
   let totalCasts = 0, totalSent = 0;
   try {
-    // d. 対象キャスト抽出: shifts（store_id × 営業日）→ casts（heaven_id / heaven_pass あり）
-    const { data: shiftRows, error: shErr } = await supabaseAdmin.from('shifts')
-      .select('cast_name').eq('store_id', slot.store_id).eq('date', runDate);
-    if (shErr) throw new Error('shifts取得失敗: ' + shErr.message);
-    const names = Array.from(new Set((shiftRows || []).map((r) => r.cast_name).filter(Boolean)));
-    if (names.length === 0) {
+    // d. 対象キャスト抽出: shifts（store_id × 営業日）→ casts（heaven_id / heaven_pass あり）（共通関数）
+    const targets = await fetchShiftCasts(slot.store_id, [runDate]);
+    if (targets.length === 0) {
       console.log(tag + '営業日=' + runDate + ' の出勤者0人のためスキップ');
       await closeRun({ status: 'done', total_casts: 0, total_sent: 0 });
       return;
     }
-    const { data: castRows, error: caErr } = await supabaseAdmin.from('casts')
-      .select('name, heaven_id, heaven_pass').eq('store_id', slot.store_id).in('name', names);
-    if (caErr) throw new Error('casts取得失敗: ' + caErr.message);
-
-    const targets = castRows || [];
     totalCasts = targets.length;
     // 実行開始ログ: 営業日（6時切替）と対象人数の根拠を1行で明示（例: 営業日=2026-08-13(6時切替) 対象=15人(8/13出勤)）
     const mdParts = runDate.split('-');
@@ -1178,51 +1268,118 @@ async function runAutoSlot(slot, runDate, shopdir, isFinalSlot) {
     // NULL=残り全部の分岐は既存データ（旧仕様でnull保存済みの行）の移行期互換として必ず残す
     const maxPerCast = (isFinalSlot || slot.send_count == null) ? 50 : slot.send_count;
 
-    // e/f. 1人ずつ逐次送信し、1人ごとにログを残す
-    for (const c of targets) {
-      const logRow = {
-        run_id: runId, store_id: slot.store_id, run_date: runDate, slot_no: slot.slot_no,
-        cast_name: c.name, heaven_id: c.heaven_id || '', requested_count: (isFinalSlot || slot.send_count == null) ? null : slot.send_count, // null=残り全部（最終スロットは件数に関わらず全部送るためnullで記録）
-        sent_count: 0, remaining_after: null, ok: false, error: null,
-      };
-      if (!c.heaven_id || !c.heaven_pass) {
-        logRow.error = 'no_heaven_pass';
-        console.log(tag + c.name + ': PW未登録 → スキップ');
-      } else {
-        const castLock = 'heaven:' + c.heaven_id; // 手動の個別送信(/mitene)と同じキャスト単位ロック
-        if (storeLocks.has(castLock)) {
-          logRow.error = 'busy';
-          console.log(tag + c.name + ': 個別送信が実行中(busy) → スキップ');
-        } else {
-          storeLocks.set(castLock, true);
-          try {
-            // 送信前に残数を確認し、本日完了（使い切り/残0）ならタブ巡回・送信処理に入らずスキップ。
-            // 判定できない場合（remaining=null やチェック自体の失敗）は従来どおり送信に進む（安全側＝送り漏らさない）。
-            const st = await runMiteneStatusCheck(c.heaven_id, c.heaven_pass);
-            if (st.ok && (st.usedUp || st.remaining === 0)) {
-              // スキップは ok=true のまま error='skipped_used_up' を残し、失敗（ok=false）と区別できるようにする
-              logRow.ok = true;
-              logRow.sent_count = 0;
-              logRow.remaining_after = 0;
-              logRow.error = 'skipped_used_up';
-              console.log(tag + c.name + ': 本日完了のためスキップ');
-            } else {
-              const r = await runMiteneSend(c.heaven_id, c.heaven_pass, maxPerCast);
-              logRow.ok = !!r.ok;
-              logRow.sent_count = r.sent || 0;
-              logRow.remaining_after = (typeof r.remainingAfter === 'number') ? r.remainingAfter : null;
-              logRow.error = r.ok ? null : (r.error || 'unknown');
-              totalSent += logRow.sent_count;
-              console.log(tag + c.name + ': sent=' + logRow.sent_count + (r.ok ? '' : ' error=' + logRow.error));
-            }
-          } finally {
-            storeLocks.delete(castLock);
-          }
-        }
-      }
-      const { error: logErr } = await supabaseAdmin.from('mitene_auto_logs').insert(logRow);
-      if (logErr) console.error(tag + 'ログ保存失敗(' + c.name + '): ' + logErr.message);
+    // e/f. 1人ずつ逐次送信し、1人ごとにログを残す（共通関数）
+    totalSent = await sendMiteneToTargets({
+      tag, runId, storeId: slot.store_id, runDate, slotNo: slot.slot_no, targets, maxPerCast,
+      requestedCount: (isFinalSlot || slot.send_count == null) ? null : slot.send_count, // null=残り全部（最終スロットは件数に関わらず全部送るためnullで記録）
+    });
+
+    // g. クローズ
+    await closeRun({ status: 'done', total_casts: totalCasts, total_sent: totalSent });
+    console.log(tag + '完了 total_casts=' + totalCasts + ' total_sent=' + totalSent);
+  } catch (e) {
+    console.error(tag + 'エラー: ' + ((e && e.message) || e));
+    await closeRun({ status: 'error', error: String((e && e.message) || e), total_casts: totalCasts, total_sent: totalSent });
+  } finally {
+    if (lockKey) storeLocks.delete(lockKey);
+  }
+}
+
+// ============================================================
+// 先出勤ミテネ 1店舗ぶんの実行（毎日 JST 12:00 発火・グレース窓は通常スロットと共通）
+//  - 「明日〜pre_mitene_days日後以内」（営業日基準）に出勤予定のキャストへ残数全部を送る（maxPerCast=50）。
+//    当日（runDate）に出勤している子は対象外: 当日分の残数は当日の最終スロット（残り全部）が使うため、
+//    昼の先出勤が先に使い切ると夕方の送信分が無くなる。
+//  - 二重実行防止: mitene_auto_runs の UNIQUE(store_id, run_date, slot_no) を slot_no=90 でクレーム
+//    （帯域分離: 0=朝の自動同期 / 1〜5=通常スロット / 90=先出勤ミテネ）
+//  - 手動一括ミテネとの排他: runAutoSlot と同じ 'bulkmitene:'+shopdir ロック
+//    （busy時はクレームを消費せずスキップ→グレース窓内の次tickで再試行）
+//  - 骨格（クレーム→ロック→対象抽出→逐次送信→ログ→クローズ）は runAutoSlot と同一。
+//    対象抽出と送信ループは共通関数 fetchShiftCasts / sendMiteneToTargets を使う。
+// ============================================================
+async function runPreMitene(store, runDate, shopdir) {
+  const tag = '[pre-mitene] ' + store.store_id + ' (' + runDate + ') ';
+  // 日数は settings.pre_mitene_days（1〜7）。想定外の値はDB既定値(3)と同じフォールバック
+  const days = (Number.isInteger(store.pre_mitene_days) && store.pre_mitene_days >= 1 && store.pre_mitene_days <= 7) ? store.pre_mitene_days : 3;
+
+  // 0. busy時はクレームを消費しない（runAutoSlot と同じ順序最適化。真の排他は下のクレームが担う）
+  let lockKey = null;
+  if (shopdir) {
+    lockKey = 'bulkmitene:' + shopdir;
+    const peekAt = storeLocks.get(lockKey);
+    if (typeof peekAt === 'number' && (Date.now() - peekAt) < BULK_MITENE_TTL_MS) {
+      console.log(tag + '手動一括ミテネが実行中(busy) → クレームせずスキップ（窓内の次tickで再試行）');
+      return;
     }
+  }
+
+  // a. クレーム: slot_no=90 への INSERT が通った者だけが実行する（重複エラー23505＝この営業日は実行済み → 静かにスキップ）
+  //    send_count=null は「残り全部」の意味（通常スロットの旧仕様・最終スロットと同じ規約）
+  const { data: claimed, error: claimErr } = await supabaseAdmin
+    .from('mitene_auto_runs')
+    .insert({ store_id: store.store_id, run_date: runDate, slot_no: PRE_MITENE_SLOT_NO, send_count: null })
+    .select('id');
+  if (claimErr) {
+    if (claimErr.code !== '23505') console.error(tag + 'クレーム失敗: ' + claimErr.message);
+    return;
+  }
+  const runId = claimed && claimed[0] && claimed[0].id;
+  if (!runId) return;
+  console.log(tag + '先出勤ミテネ 開始 runId=' + runId + ' 対象=明日〜' + days + '日後 件数/人=残り全部');
+
+  const closeRun = async (patch) => {
+    const { error } = await supabaseAdmin.from('mitene_auto_runs')
+      .update({ ...patch, finished_at: new Date().toISOString() })
+      .eq('id', runId);
+    if (error) console.error(tag + 'run更新失敗: ' + error.message);
+  };
+
+  // c. 手動一括ミテネと同じ店舗ロック（'bulkmitene:'+shopdir、TTL方式）を取得。
+  //    冒頭のpeek後〜クレームの間に手動acquireが割り込んだ稀なケースのみ、ここで検出して busy で閉じる。
+  if (lockKey) {
+    const acquiredAt = storeLocks.get(lockKey);
+    if (typeof acquiredAt === 'number' && (Date.now() - acquiredAt) < BULK_MITENE_TTL_MS) {
+      console.log(tag + '手動一括ミテネが実行中(busy) → スキップ');
+      await closeRun({ status: 'error', error: 'busy' });
+      return;
+    }
+    storeLocks.set(lockKey, Date.now());
+  } else {
+    console.warn(tag + 'shopdir未設定のため店舗ロックなしで実行（設定画面でスケジュールを保存し直すと解消）');
+  }
+
+  let totalCasts = 0, totalSent = 0;
+  try {
+    // d. 対象キャスト抽出: 明日〜N日後（営業日基準）の shifts → casts（共通関数）
+    const targetDates = Array.from({ length: days }, (_, i) => addDaysYmd(runDate, i + 1)); // i=0 が明日
+    const rangeLabel = targetDates[0] + '〜' + targetDates[targetDates.length - 1];
+    const rangeTargets = await fetchShiftCasts(store.store_id, targetDates);
+
+    // 今日（runDate当日）に出勤している子は除外する。
+    // 理由: 当日出勤の子の残数は当日の最終スロット（残り全部）が使うため、
+    // 昼の先出勤が先に残数を使い切ると夕方の送信分が無くなる。
+    const { data: todayRows, error: tdErr } = await supabaseAdmin.from('shifts')
+      .select('cast_name').eq('store_id', store.store_id).eq('date', runDate);
+    if (tdErr) throw new Error('shifts取得失敗(当日分): ' + tdErr.message);
+    const todayNames = new Set((todayRows || []).map((r) => r.cast_name).filter(Boolean));
+    const targets = rangeTargets.filter((c) => !todayNames.has(c.name));
+    const excluded = rangeTargets.length - targets.length;
+    if (excluded > 0) console.log(tag + '今日出勤の' + excluded + '人を除外（当日分は最終スロットが担当）');
+
+    if (targets.length === 0) {
+      console.log(tag + rangeLabel + ' の出勤予定者（今日出勤を除く）0人のためスキップ');
+      await closeRun({ status: 'done', total_casts: 0, total_sent: 0 });
+      return;
+    }
+    totalCasts = targets.length;
+    console.log(tag + '対象=' + totalCasts + '人(' + rangeLabel + '出勤予定・今日出勤除く)');
+
+    // e/f. 1人ずつ逐次送信し、1人ごとにログを残す（slot_no=90 で記録）。
+    // maxPerCast=50 は最終スロットと同じ「残り全部」扱い（requested_count=null で記録）
+    totalSent = await sendMiteneToTargets({
+      tag, runId, storeId: store.store_id, runDate, slotNo: PRE_MITENE_SLOT_NO, targets,
+      maxPerCast: 50, requestedCount: null,
+    });
 
     // g. クローズ
     await closeRun({ status: 'done', total_casts: totalCasts, total_sent: totalSent });
@@ -1259,7 +1416,7 @@ async function autoMiteneTick() {
       syncRunning = true;
       try {
         const { data: syncStores, error: ssErr } = await supabaseAdmin.from('settings')
-          .select('store_id, shopdir, admin_id, admin_pass')
+          .select('store_id, shopdir, admin_id, admin_pass, pre_mitene_enabled, pre_mitene_days') // 先出勤ONの店舗はPW取得対象を明日以降にも広げる
           .eq('auto_sync_enabled', true);
         if (ssErr) {
           console.error('[auto-sync] settings取得失敗: ' + ssErr.message);
@@ -1280,48 +1437,77 @@ async function autoMiteneTick() {
       }
     }
 
-    // 自動送信ONの店舗（shopdirも同時に取得。settings.shopdir 列が無い場合はここでエラーになる
-    // → ALTER TABLE settings ADD COLUMN shopdir ... の適用が必要）
+    // 発火対象ジョブを店舗ごとにグループ化（店舗間は並列・店舗内は時刻順に直列）。
+    // job = { kind:'slot', slot, runDate, isFinalSlot, slotMin, shopdir }（通常スロット）または
+    //       { kind:'pre', store, runDate, slotMin, shopdir }（先出勤ミテネ）。
+    // 同一店舗が昼12時に通常スロットと先出勤の両方を持っていても、同じ店舗キューに入るため直列に実行される。
+    const dueByStore = new Map(); // store_id → job[]
+    const addJob = (storeId, job) => {
+      if (!dueByStore.has(storeId)) dueByStore.set(storeId, []);
+      dueByStore.get(storeId).push(job);
+    };
+
+    // ── 通常スロット: 自動送信ONの店舗（shopdirも同時に取得。settings.shopdir 列が無い場合はここでエラーになる
+    // → ALTER TABLE settings ADD COLUMN shopdir ... の適用が必要）──
     const { data: stores, error: setErr } = await supabaseAdmin.from('settings')
       .select('store_id, shopdir').eq('auto_mitene_enabled', true);
-    if (setErr) { console.error('[auto-mitene] settings取得失敗: ' + setErr.message); return; }
-    if (!stores || stores.length === 0) return; // ONの店舗なし（ログも出さず静かに終了）
+    if (setErr) {
+      console.error('[auto-mitene] settings取得失敗: ' + setErr.message); // 通常スロットだけ諦め、先出勤の判定は続行
+    } else if (stores && stores.length > 0) {
+      const shopdirByStore = new Map(stores.map((s) => [s.store_id, s.shopdir || '']));
+      const { data: slots, error: schErr } = await supabaseAdmin.from('mitene_schedules')
+        .select('store_id, slot_no, send_time, send_count')
+        .eq('enabled', true)
+        .in('store_id', stores.map((s) => s.store_id));
+      if (schErr) {
+        console.error('[auto-mitene] schedules取得失敗: ' + schErr.message);
+      } else {
+        // 店舗ごとの有効スロットの最遅時刻(分)。時刻上の最終スロットは send_count に関わらず「残り全部」で送る
+        // （スロット取得は時刻で絞っていないため、その日の全有効スロットからここで最遅を計算できる）
+        const latestMinByStore = new Map(); // store_id → 最遅 hmToMin
+        (slots || []).forEach((s) => {
+          const m = hmToMin(s.send_time);
+          if (m == null) return;
+          const cur = latestMinByStore.has(s.store_id) ? latestMinByStore.get(s.store_id) : -1;
+          if (m >= cur) latestMinByStore.set(s.store_id, m);
+        });
 
-    const shopdirByStore = new Map(stores.map((s) => [s.store_id, s.shopdir || '']));
-    const { data: slots, error: schErr } = await supabaseAdmin.from('mitene_schedules')
-      .select('store_id, slot_no, send_time, send_count')
-      .eq('enabled', true)
-      .in('store_id', stores.map((s) => s.store_id));
-    if (schErr) { console.error('[auto-mitene] schedules取得失敗: ' + schErr.message); return; }
-
-    // 店舗ごとの有効スロットの最遅時刻(分)。時刻上の最終スロットは send_count に関わらず「残り全部」で送る
-    // （スロット取得は時刻で絞っていないため、その日の全有効スロットからここで最遅を計算できる）
-    const latestMinByStore = new Map(); // store_id → 最遅 hmToMin
-    (slots || []).forEach((s) => {
-      const m = hmToMin(s.send_time);
-      if (m == null) return;
-      const cur = latestMinByStore.has(s.store_id) ? latestMinByStore.get(s.store_id) : -1;
-      if (m >= cur) latestMinByStore.set(s.store_id, m);
-    });
-
-    // 発火対象スロットを店舗ごとにグループ化（店舗間は並列・店舗内は時刻順に直列）
-    const dueByStore = new Map(); // store_id → [{ slot, runDate, isFinalSlot, slotMin }]
-    for (const slot of (slots || [])) {
-      const slotMin = hmToMin(slot.send_time);
-      if (slotMin == null) continue;
-      const isFinalSlot = slotMin === latestMinByStore.get(slot.store_id); // 同時刻タイは両方「最終」扱い（先行が使い切れば後続は本日完了スキップ）
-      // 日跨ぎ対応の経過分数（例: スロット23:58を00:03に評価→diff=5）。グレース窓内だけ実行
-      const diff = (nowMin - slotMin + 1440) % 1440;
-      if (diff >= AUTO_MITENE_GRACE_MIN) continue;
-      // run_date は「今回の発火時刻」の営業日で固定（現在時刻の営業日にすると
-      // 05:5x のスロットを06:00過ぎに拾ったとき別営業日扱い＝二重実行になるため）
-      const runDate = bizDateOf(nowMs - diff * 60 * 1000);
-      if (!dueByStore.has(slot.store_id)) dueByStore.set(slot.store_id, []);
-      dueByStore.get(slot.store_id).push({ slot, runDate, isFinalSlot, slotMin });
+        for (const slot of (slots || [])) {
+          const slotMin = hmToMin(slot.send_time);
+          if (slotMin == null) continue;
+          const isFinalSlot = slotMin === latestMinByStore.get(slot.store_id); // 同時刻タイは両方「最終」扱い（先行が使い切れば後続は本日完了スキップ）
+          // 日跨ぎ対応の経過分数（例: スロット23:58を00:03に評価→diff=5）。グレース窓内だけ実行
+          const diff = (nowMin - slotMin + 1440) % 1440;
+          if (diff >= AUTO_MITENE_GRACE_MIN) continue;
+          // run_date は「今回の発火時刻」の営業日で固定（現在時刻の営業日にすると
+          // 05:5x のスロットを06:00過ぎに拾ったとき別営業日扱い＝二重実行になるため）
+          const runDate = bizDateOf(nowMs - diff * 60 * 1000);
+          addJob(slot.store_id, { kind: 'slot', slot, runDate, isFinalSlot, slotMin, shopdir: shopdirByStore.get(slot.store_id) || '' });
+        }
+      }
     }
+
+    // ── 先出勤ミテネ: pre_mitene_enabled=true の店舗（JST 12:00 発火・グレース窓は通常スロットと共通）──
+    // auto_mitene_enabled（通常スロットのマスターON/OFF）とは独立したトグル。
+    // settings 取得に失敗しても通常スロット側には影響させない（逆も同様）。
+    const preDiff = (nowMin - PRE_MITENE_MIN + 1440) % 1440;
+    if (preDiff < AUTO_MITENE_GRACE_MIN) {
+      const { data: preStores, error: preErr } = await supabaseAdmin.from('settings')
+        .select('store_id, shopdir, pre_mitene_days').eq('pre_mitene_enabled', true);
+      if (preErr) {
+        console.error('[pre-mitene] settings取得失敗: ' + preErr.message);
+      } else {
+        // run_date は発火予定時刻(12:00)の営業日で固定（通常スロットと同じ考え方）
+        const preRunDate = bizDateOf(nowMs - preDiff * 60 * 1000);
+        for (const st of (preStores || [])) {
+          addJob(st.store_id, { kind: 'pre', store: st, runDate: preRunDate, slotMin: PRE_MITENE_MIN, shopdir: st.shopdir || '' });
+        }
+      }
+    }
+
     if (dueByStore.size === 0) return;
 
-    // 実行中の店舗は「その店舗の分だけ」スキップ。busy時はクレームを消費しない設計（runAutoSlot冒頭のpeek）
+    // 実行中の店舗は「その店舗の分だけ」スキップ。busy時はクレームを消費しない設計（runAutoSlot/runPreMitene冒頭のpeek）
     // なので、窓内なら次のtickで自然に再試行される。起動する店舗はこの場で同期的に runningStores へ登録し、
     // 次のtickとの二重エントリを防ぐ（登録解除は各ワーカーのfinallyで必ず行われる）。
     const queue = [];
@@ -1330,7 +1516,7 @@ async function autoMiteneTick() {
         console.log('[auto-mitene] ' + storeId + ': 前の処理が実行中 → この分はスキップ');
         continue;
       }
-      jobs.sort((a, b) => a.slotMin - b.slotMin); // 店舗内は時刻順に直列
+      jobs.sort((a, b) => a.slotMin - b.slotMin); // 店舗内は時刻順に直列（同時刻タイは通常スロット→先出勤の順＝挿入順を維持）
       runningStores.add(storeId);
       queue.push({ storeId, jobs });
     }
@@ -1343,7 +1529,8 @@ async function autoMiteneTick() {
         const { storeId, jobs } = queue[qi++];
         try {
           for (const job of jobs) {
-            await runAutoSlot(job.slot, job.runDate, shopdirByStore.get(storeId) || '', job.isFinalSlot);
+            if (job.kind === 'pre') await runPreMitene(job.store, job.runDate, job.shopdir);
+            else await runAutoSlot(job.slot, job.runDate, job.shopdir, job.isFinalSlot);
           }
         } catch (e) {
           console.error('[auto-mitene] ' + storeId + ' 実行例外: ' + ((e && e.message) || e));

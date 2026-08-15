@@ -6023,7 +6023,7 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
                 <span style={{ fontSize: "12px", color: C.sub, whiteSpace: "nowrap" }}>以内に出勤するキャストに送る</span>
               </div>
               <p style={{ fontSize: "11px", color: C.muted, margin: "6px 0 0 54px" }}>
-                ONにすると毎日昼ごろ、明日から{preMiteneDays}日後までに出勤予定のキャストへミテネを送ります（bot対応は準備中）
+                ONにすると毎日昼ごろ、明日から{preMiteneDays}日後までに出勤予定のキャスト（今日出勤の子は除く）へ残数全部のミテネを送ります
               </p>
             </div>
             <p style={{ fontSize: "10px", color: C.muted, margin: "-6px 0 0 54px" }}>
