@@ -5804,6 +5804,8 @@ function MiteneSyncBar({ doSync, syncLoading, syncResult, busyOverlay, setBusyOv
 function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
   const [autoEnabled, setAutoEnabled] = useState(false);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false); // 朝6時の自動同期（キャスト＋出勤）
+  const [preMiteneEnabled, setPreMiteneEnabled] = useState(false); // 先出勤キャストへのミテネ（昼12時ごろ）
+  const [preMiteneDays, setPreMiteneDays] = useState(3); // 何日後の出勤者に送るか（1〜7）
   const [slots, setSlots] = useState([]); // { enabled, send_time("HH:MM"), countStr }。最終スロットは自動で「残り全部」
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -5840,7 +5842,7 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
         for (let attempt = 0; ; attempt++) {
           const [schedRes, setRes] = await Promise.all([
             supabase.from("mitene_schedules").select("slot_no, enabled, send_time, send_count").eq("store_id", store).order("slot_no"),
-            supabase.from("settings").select("auto_mitene_enabled, auto_sync_enabled").eq("store_id", store).eq("id", 1),
+            supabase.from("settings").select("auto_mitene_enabled, auto_sync_enabled, pre_mitene_enabled, pre_mitene_days").eq("store_id", store).eq("id", 1),
           ]);
           if (!active) return;
           if (schedRes.error || setRes.error) {
@@ -5867,6 +5869,10 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
           })));
           setAutoEnabled(!!setRes.data[0].auto_mitene_enabled);
           setAutoSyncEnabled(!!setRes.data[0].auto_sync_enabled);
+          setPreMiteneEnabled(!!setRes.data[0].pre_mitene_enabled);
+          // DBは NOT NULL default 3 だが、想定外の値でもUIが壊れないよう 1〜7 以外はデフォルト3にフォールバック
+          const pd = setRes.data[0].pre_mitene_days;
+          setPreMiteneDays(Number.isInteger(pd) && pd >= 1 && pd <= 7 ? pd : 3);
           return;
         }
       } catch (e) {
@@ -5879,16 +5885,29 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
     return () => { active = false; };
   }, []);
 
-  // トグルの切替即保存: slots を省略してフラグだけPOSTする（サーバー側はスロットに触らない）。
-  // 失敗時はトグル表示を元に戻してエラーを出す（保存し忘れでON/OFFが失われる問題の対策）。
+  // トグル・日数selectの切替即保存: slots を省略して該当フラグだけPOSTする（サーバー側はスロットに触らない）。
+  // 失敗時は表示を元に戻してエラーを出す（保存し忘れでON/OFFが失われる問題の対策）。
+  // which: "mitene"=自動送信 / "sync"=朝6時同期 / "pre"=先出勤ミテネON/OFF / "preDays"=先出勤の日数(1〜7)
   async function saveFlag(which, value) {
     if (flagSaving) return;
     setFlagSaving(true);
     setSaveMsg(null);
-    const prev = which === "mitene" ? autoEnabled : autoSyncEnabled;
-    if (which === "mitene") setAutoEnabled(value); else setAutoSyncEnabled(value); // 楽観的に即反映
+    const prev =
+      which === "mitene" ? autoEnabled :
+      which === "sync" ? autoSyncEnabled :
+      which === "pre" ? preMiteneEnabled : preMiteneDays;
+    const apply = (v) => {
+      if (which === "mitene") setAutoEnabled(v);
+      else if (which === "sync") setAutoSyncEnabled(v);
+      else if (which === "pre") setPreMiteneEnabled(v);
+      else setPreMiteneDays(v);
+    };
+    apply(value); // 楽観的に即反映
     try {
-      const body = which === "mitene" ? { autoEnabled: value } : { autoSyncEnabled: value };
+      const body =
+        which === "mitene" ? { autoEnabled: value } :
+        which === "sync" ? { autoSyncEnabled: value } :
+        which === "pre" ? { preMiteneEnabled: value } : { preMiteneDays: value };
       const res = await apiFetch("/api/mitene-schedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -5897,7 +5916,7 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
       const data = await res.json().catch(() => ({}));
       if (!(res.ok && data.ok)) throw new Error(data.error || `保存に失敗しました（${res.status}）`);
     } catch (e) {
-      if (which === "mitene") setAutoEnabled(prev); else setAutoSyncEnabled(prev); // 失敗: 元に戻す
+      apply(prev); // 失敗: 元に戻す
       setSaveMsg({ ok: false, text: "⚠️ " + (e?.message || e) });
     } finally {
       setFlagSaving(false);
@@ -5990,6 +6009,23 @@ function AutoMiteneScheduleSection({ shopdir, adminId, adminPass }) {
                 ONにすると毎朝6時にキャスト同期と出勤同期を自動実行します
               </p>
             </div>
+            <div>
+              <Toggle checked={preMiteneEnabled} onChange={(v) => saveFlag("pre", v)} label="先出勤キャストにミテネ（昼12時ごろ自動送信）" />
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", margin: "8px 0 0 54px" }}>
+                <select
+                  value={preMiteneDays}
+                  onChange={(e) => saveFlag("preDays", parseInt(e.target.value, 10))}
+                  style={{ ...inp, width: "84px", padding: "7px 8px", cursor: "pointer" }}>
+                  {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+                    <option key={n} value={n}>{n}日後</option>
+                  ))}
+                </select>
+                <span style={{ fontSize: "12px", color: C.sub, whiteSpace: "nowrap" }}>以内に出勤するキャストに送る</span>
+              </div>
+              <p style={{ fontSize: "11px", color: C.muted, margin: "6px 0 0 54px" }}>
+                ONにすると毎日昼ごろ、明日から{preMiteneDays}日後までに出勤予定のキャストへミテネを送ります（bot対応は準備中）
+              </p>
+            </div>
             <p style={{ fontSize: "10px", color: C.muted, margin: "-6px 0 0 54px" }}>
               切替は即保存されます{flagSaving ? "（保存中…）" : ""}
             </p>
@@ -6076,6 +6112,69 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
     return Array.isArray(d) && d.some((s) => s.date === todayKey);
   });
   const storeLabel = syncConfig?.shopdir || "店舗（未設定）";
+
+  // 先出勤ミテネ設定（表示専用）。null=読み込み中、error=true は読込失敗。
+  // スケジュールカード側で切り替えても本カラムには即反映されない（再読み込みで反映）。
+  const [preMitene, setPreMitene] = useState(null); // { enabled, days } | { error: true } | null
+  // heaven_pass 設定済みキャスト名の集合。クライアントは heaven_pass の値を保持しない設計のため、
+  // 「非空かどうか」だけをサーバー側フィルタ(neq)で取得する（パスワード本体はブラウザに来ない）。
+  // null=未取得（取得失敗時もnullのままにして「全員PW未取得」の誤表示を避ける）
+  const [pwSetNames, setPwSetNames] = useState(null);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const store = getActiveStoreId();
+      try {
+        const [setRes, pwRes] = await Promise.all([
+          supabase.from("settings").select("pre_mitene_enabled, pre_mitene_days").eq("store_id", store).eq("id", 1),
+          supabase.from("casts").select("name").eq("store_id", store).neq("heaven_pass", ""),
+        ]);
+        if (!active) return;
+        if (setRes.error || !setRes.data || setRes.data.length === 0) {
+          console.error("[bulk-mitene] 先出勤設定の読込失敗:", setRes.error?.message || "0行");
+          setPreMitene({ error: true });
+        } else {
+          const pd = setRes.data[0].pre_mitene_days;
+          setPreMitene({
+            enabled: !!setRes.data[0].pre_mitene_enabled,
+            days: Number.isInteger(pd) && pd >= 1 && pd <= 7 ? pd : 3,
+          });
+        }
+        if (pwRes.error) console.error("[bulk-mitene] PW設定状況の読込失敗:", pwRes.error.message);
+        else setPwSetNames(new Set((pwRes.data || []).map((r) => r.name)));
+      } catch (e) {
+        if (active) { console.error("[bulk-mitene] 先出勤設定の読込例外:", e?.message || e); setPreMitene({ error: true }); }
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  // 先出勤の対象日キー "M/D" の範囲: 明日〜今日+N日（営業日基準＝getBusinessTodayKey と同じ +3h 方式）。
+  // 今日は含まない（当日分は既存の自動送信スロットが担当するため）
+  const preDays = preMitene && !preMitene.error ? preMitene.days : null;
+  const preRangeKeys = (() => {
+    if (preDays == null) return null;
+    return Array.from({ length: preDays }, (_, i) => {
+      const d = new Date(Date.now() + 3 * 3600000);
+      d.setUTCDate(d.getUTCDate() + i + 1); // i=0 が明日
+      return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+    });
+  })();
+  // 範囲の表示ラベル（例 "8/16〜8/18"。1日だけなら "8/16"）
+  const preRangeLabel = preRangeKeys == null ? "" :
+    preRangeKeys.length > 1 ? `${preRangeKeys[0]}〜${preRangeKeys[preRangeKeys.length - 1]}` : preRangeKeys[0];
+  // 範囲内に出勤予定のキャスト（重複なし。今日出勤と同じ正規化名照合）。
+  // 各キャストは最も近い出勤日を持たせ、出勤日が近い順に並べる（同日内は casts の並び＝掲載順を維持）
+  const preCasts = preRangeKeys == null ? [] : casts
+    .map((c) => {
+      const d = shiftDaysFor(shifts, c.name);
+      if (!Array.isArray(d)) return null;
+      const offset = preRangeKeys.findIndex((key) => d.some((s) => s.date === key));
+      if (offset === -1) return null;
+      return { cast: c, dateKey: preRangeKeys[offset], offset };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.offset - b.offset);
 
   const [perMax, setPerMax] = useState(5);
   const [running, setRunning] = useState(false);
@@ -6276,8 +6375,8 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
         </p>
       </div>
 
-      {/* 2カラム: 左=送信操作＋自動送信スケジュール / 右=今日出勤一覧。
-          repeat(auto-fit, minmax(320px, 1fr)) により狭い画面（スマホ）では自動で1カラムに落ちる */}
+      {/* 3カラム: 左=送信操作＋自動送信スケジュール / 中=今日出勤一覧 / 右=先出勤（N日後）一覧。
+          repeat(auto-fit, minmax(320px, 1fr)) により狭い画面（スマホ）では自動で縦積みに落ちる */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "14px", alignItems: "start" }}>
         <div style={{ display: "grid", gap: "14px", alignItems: "start" }}>
       <div style={card}>
@@ -6343,6 +6442,33 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
           })}
         </div>
       )}
+        </div>
+
+        {/* 先出勤（N日後）カラム: pre_mitene_days 日後に出勤予定のキャスト一覧（表示専用。bot対応は次の段階） */}
+        <div style={{ display: "grid", gap: "14px", alignItems: "start" }}>
+          {preMitene == null ? (
+            <div style={{ ...card, textAlign: "center", padding: "30px", color: C.muted }}>先出勤設定を読み込み中…</div>
+          ) : preMitene.error ? (
+            <div style={{ ...card, textAlign: "center", padding: "30px", color: C.red, fontWeight: "700", fontSize: "12px" }}>先出勤設定の読み込みに失敗しました。再読み込みしてください</div>
+          ) : !preMitene.enabled ? (
+            <div style={{ ...card, textAlign: "center", padding: "30px", color: C.muted, fontSize: "13px" }}>先出勤ミテネはOFFです（スケジュール設定でONにできます）</div>
+          ) : preCasts.length === 0 ? (
+            <div style={{ ...card, textAlign: "center", padding: "30px", color: C.muted }}>{preRangeLabel} に出勤予定のキャストがいません</div>
+          ) : (
+            <div style={{ ...card, display: "grid", gap: "8px" }}>
+              <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, margin: "0 0 4px" }}>先出勤（{preMitene.days}日後以内・{preRangeLabel}） {preCasts.length}人</p>
+              {preCasts.map(({ cast: c, dateKey }) => (
+                <div key={c.name} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "10px", border: `1px solid ${C.border}`, background: C.surface }}>
+                  <span style={{ fontWeight: "700", fontSize: "13px", color: C.text, minWidth: "64px" }}>{c.name}</span>
+                  <span style={{ fontSize: "11px", color: C.sub, fontWeight: "700", whiteSpace: "nowrap" }}>{dateKey}</span>
+                  {/* pwSetNames 未取得(null)の間は判定できないため表示しない（全員未取得の誤表示を避ける） */}
+                  {pwSetNames && !pwSetNames.has(c.name) && (
+                    <span style={{ fontSize: "10px", color: C.muted, fontWeight: "700", whiteSpace: "nowrap" }}>PW未取得</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

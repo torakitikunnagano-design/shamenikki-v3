@@ -20,6 +20,10 @@ import { getServiceClient } from "../../../lib/serviceClient";
 //     相互排他ロックに使う。空なら既存値を上書きしない）
 //   - autoSyncEnabled: boolean のときだけ settings.auto_sync_enabled へ保存（朝6時の自動同期ON/OFF。
 //     未送信＝旧クライアントからの保存では既存値を保持）
+//   - preMiteneEnabled: boolean のときだけ settings.pre_mitene_enabled へ保存（先出勤ミテネON/OFF。
+//     未送信では既存値を保持）
+//   - preMiteneDays: 1〜7 の整数のときだけ settings.pre_mitene_days へ保存（何日後の出勤者に送るか。
+//     未送信では既存値を保持。範囲外・整数以外は 400）
 //   - adminId / adminPass: 非空文字列のときだけ settings へ保存（空で既存値を消さない）。
 //     レスポンスには一切含めない（ブラウザに返さない）
 // ============================================================
@@ -35,13 +39,19 @@ export async function POST(request) {
     const autoEnabled = typeof body?.autoEnabled === "boolean" ? body.autoEnabled : null;         // null=未送信（既存値保持）
     const shopdir = typeof body?.shopdir === "string" ? body.shopdir.trim() : "";
     const autoSyncEnabled = typeof body?.autoSyncEnabled === "boolean" ? body.autoSyncEnabled : null; // null=未送信（既存値保持）
+    const preMiteneEnabled = typeof body?.preMiteneEnabled === "boolean" ? body.preMiteneEnabled : null; // null=未送信（既存値保持）
+    const preMiteneDaysRaw = body?.preMiteneDays; // undefined=未送信（既存値保持）。値がある場合は下で 1〜7 の整数を検証
     const adminId = typeof body?.adminId === "string" ? body.adminId.trim() : "";
     const adminPass = typeof body?.adminPass === "string" ? body.adminPass : ""; // パスワードはtrimしない（前後空白が正規の可能性）
 
     // ── バリデーション（不正は 400。DB制約と同じ条件をサーバー側でも検証する）──
     const bad = (msg) => NextResponse.json({ ok: false, error: msg }, { status: 400 });
     if (hasSlots && typeof body?.autoEnabled !== "boolean") return bad("autoEnabled が不正です"); // フル保存時は従来どおり必須
-    if (!hasSlots && autoEnabled === null && autoSyncEnabled === null && !shopdir && !adminId && !adminPass) {
+    if (preMiteneDaysRaw !== undefined && (!Number.isInteger(preMiteneDaysRaw) || preMiteneDaysRaw < 1 || preMiteneDaysRaw > 7)) {
+      return bad("preMiteneDays は 1〜7 の整数で指定してください");
+    }
+    const preMiteneDays = preMiteneDaysRaw !== undefined ? preMiteneDaysRaw : null; // null=未送信（既存値保持）
+    if (!hasSlots && autoEnabled === null && autoSyncEnabled === null && preMiteneEnabled === null && preMiteneDays === null && !shopdir && !adminId && !adminPass) {
       return bad("更新内容がありません");
     }
     if (hasSlots && (!Array.isArray(slots) || slots.length > 5)) return bad("slots は最大5件の配列で指定してください");
@@ -112,6 +122,8 @@ export async function POST(request) {
     if (autoEnabled !== null) settingsRow.auto_mitene_enabled = autoEnabled;
     if (shopdir) settingsRow.shopdir = shopdir;
     if (autoSyncEnabled !== null) settingsRow.auto_sync_enabled = autoSyncEnabled;
+    if (preMiteneEnabled !== null) settingsRow.pre_mitene_enabled = preMiteneEnabled;
+    if (preMiteneDays !== null) settingsRow.pre_mitene_days = preMiteneDays;
     if (adminId) settingsRow.admin_id = adminId;
     if (adminPass) settingsRow.admin_pass = adminPass;
     const { error: setErr } = await supabase.from("settings").upsert(
