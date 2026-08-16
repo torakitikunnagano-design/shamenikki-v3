@@ -6176,6 +6176,60 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
     return () => { active = false; };
   }, []);
 
+  // 前回の先出勤ミテネ（bot の slot_no=90）の実行結果（表示専用・クライアント→Supabase直読み）。
+  // UNIQUE(store_id, run_date, slot_no) により slot_no=90 は1日1件なので run_date 降順の1件が前回run。
+  // ログの select に heaven_pass は含めない（そもそも mitene_auto_logs に heaven_pass カラムはない）。
+  // null=読み込み中 / {error:true}=読込失敗 / {none:true}=未実行 / {run, logs: Map(cast_name → 行)}
+  const [preRun, setPreRun] = useState(null);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const store = getActiveStoreId();
+      try {
+        const runRes = await supabase.from("mitene_auto_runs")
+          .select("id, run_date, status, error, total_casts, total_sent, finished_at")
+          .eq("store_id", store).eq("slot_no", 90)
+          .order("run_date", { ascending: false }).limit(1);
+        if (!active) return;
+        if (runRes.error) { console.error("[bulk-mitene] 先出勤run読込失敗:", runRes.error.message); setPreRun({ error: true }); return; }
+        const run = (runRes.data || [])[0];
+        if (!run) { setPreRun({ none: true }); return; }
+        const logRes = await supabase.from("mitene_auto_logs")
+          .select("cast_name, sent_count, ok, error")
+          .eq("run_id", run.id);
+        if (!active) return;
+        if (logRes.error) { console.error("[bulk-mitene] 先出勤ログ読込失敗:", logRes.error.message); setPreRun({ error: true }); return; }
+        setPreRun({ run, logs: new Map((logRes.data || []).map((r) => [r.cast_name, r])) });
+      } catch (e) {
+        if (active) { console.error("[bulk-mitene] 先出勤結果の読込例外:", e?.message || e); setPreRun({ error: true }); }
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  // 前回runの時刻表示 "M/D HH:MM"。finished_at 未設定（実行中・途中終了）は run_date から "M/D" のみ
+  const preRunTimeLabel = (() => {
+    const r = preRun?.run;
+    if (!r) return "";
+    if (r.finished_at) {
+      const d = new Date(r.finished_at);
+      return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    }
+    const m = /^\d{4}-0?(\d+)-0?(\d+)$/.exec(r.run_date || "");
+    return m ? `${m[1]}/${m[2]}` : (r.run_date || "");
+  })();
+
+  // 先出勤リストの各キャスト行に出す前回結果の小表示。前回ログに無い子（新しくシフトに入った子）は表示なし。
+  // no_heaven_pass は既存の「PW未取得」表示に任せて重複させない
+  function preLogResult(name) {
+    const lg = preRun && preRun.logs ? preRun.logs.get(name) : null;
+    if (!lg || lg.error === "no_heaven_pass") return null;
+    if (lg.ok && lg.sent_count > 0) return { text: `✅ ${lg.sent_count}件`, color: C.green };
+    if (lg.error === "skipped_used_up") return { text: "使い切りスキップ", color: C.muted };
+    if (!lg.ok) return { text: "送信エラー", color: C.red };
+    return null;
+  }
+
   // 先出勤の対象日キー "M/D" の範囲: 明日〜今日+N日（営業日基準＝getBusinessTodayKey と同じ +3h 方式）。
   // 今日は含まない（当日分は既存の自動送信スロットが担当するため）
   const preDays = preMitene && !preMitene.error ? preMitene.days : null;
@@ -6474,6 +6528,24 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
 
         {/* 先出勤（N日後）カラム: pre_mitene_days 日後に出勤予定のキャスト一覧（表示専用。bot対応は次の段階） */}
         <div style={{ display: "grid", gap: "14px", alignItems: "start" }}>
+          {/* 前回の先出勤ミテネ実行結果サマリ（読込失敗でもキャスト一覧は従来どおり表示する） */}
+          {preMitene && !preMitene.error && preMitene.enabled && (
+            <div style={{ ...card, padding: "10px 14px" }}>
+              {preRun == null ? (
+                <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", margin: 0 }}>前回の送信結果を読み込み中…</p>
+              ) : preRun.error ? (
+                <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: 0 }}>結果の読み込みに失敗しました</p>
+              ) : preRun.none ? (
+                <p style={{ fontSize: "11px", color: C.muted, fontWeight: "700", margin: 0 }}>まだ実行されていません（毎日昼12時ごろ送信）</p>
+              ) : preRun.run.status === "error" ? (
+                <p style={{ fontSize: "11px", color: C.red, fontWeight: "700", margin: 0 }}>前回: {preRunTimeLabel} ／ 前回はエラーで終了しました</p>
+              ) : (
+                <p style={{ fontSize: "11px", color: C.sub, fontWeight: "700", margin: 0 }}>
+                  前回: {preRunTimeLabel} ／ 対象{preRun.run.total_casts ?? "-"}人・送信{preRun.run.total_sent ?? "-"}件
+                </p>
+              )}
+            </div>
+          )}
           {preMitene == null ? (
             <div style={{ ...card, textAlign: "center", padding: "30px", color: C.muted }}>先出勤設定を読み込み中…</div>
           ) : preMitene.error ? (
@@ -6485,7 +6557,9 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
           ) : (
             <div style={{ ...card, display: "grid", gap: "8px" }}>
               <p style={{ fontSize: "11px", fontWeight: "700", color: C.muted, margin: "0 0 4px" }}>先出勤（{preMitene.days}日後以内・{preRangeLabel}） {preCasts.length}人</p>
-              {(preExpanded ? preCasts : preCasts.slice(0, PRE_COLLAPSE_LIMIT)).map(({ cast: c, dateKey }) => (
+              {(preExpanded ? preCasts : preCasts.slice(0, PRE_COLLAPSE_LIMIT)).map(({ cast: c, dateKey }) => {
+                const preResult = preLogResult(c.name);
+                return (
                 <div key={c.name} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "10px", border: `1px solid ${C.border}`, background: C.surface }}>
                   <span style={{ fontWeight: "700", fontSize: "13px", color: C.text, minWidth: "64px" }}>{c.name}</span>
                   <span style={{ fontSize: "11px", color: C.sub, fontWeight: "700", whiteSpace: "nowrap" }}>{dateKey}</span>
@@ -6495,8 +6569,13 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
                   {pwSetNames && !pwSetNames.has(c.name) && (
                     <span style={{ fontSize: "10px", color: C.muted, fontWeight: "700", whiteSpace: "nowrap" }}>PW未取得</span>
                   )}
+                  {/* 前回の先出勤ミテネでの結果（前回ログに無い子は表示なし） */}
+                  {preResult && (
+                    <span style={{ fontSize: "10px", color: preResult.color, fontWeight: "700", whiteSpace: "nowrap" }}>{preResult.text}</span>
+                  )}
                 </div>
-              ))}
+                );
+              })}
               {preCasts.length > PRE_COLLAPSE_LIMIT && (
                 <button onClick={() => setPreExpanded((v) => !v)}
                   style={{ padding: "9px", borderRadius: "12px", border: `1.5px dashed ${C.accent2}55`, background: "transparent", color: C.accent2, fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
