@@ -6245,11 +6245,14 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
   const preRangeLabel = preRangeKeys == null ? "" :
     preRangeKeys.length > 1 ? `${preRangeKeys[0]}〜${preRangeKeys[preRangeKeys.length - 1]}` : preRangeKeys[0];
   // 範囲内に出勤予定のキャスト（重複なし。今日出勤と同じ正規化名照合）。
-  // 各キャストは最も近い出勤日を持たせ、出勤日が近い順に並べる（同日内は casts の並び＝掲載順を維持）
+  // 各キャストは最も近い出勤日を持たせ、出勤日が近い順に並べる（同日内は casts の並び＝掲載順を維持）。
+  // 今日（営業日基準）に出勤している子は bot側（runPreMitene の当日除外）と同じ基準で除外する
+  // （当日の残数は当日の最終スロットが使うため、先出勤では実際に送られない）
   const preCasts = preRangeKeys == null ? [] : casts
     .map((c) => {
       const d = shiftDaysFor(shifts, c.name);
       if (!Array.isArray(d)) return null;
+      if (d.some((s) => s.date === todayKey)) return null; // 今日出勤 → bot が送信対象から外すので表示からも外す
       const offset = preRangeKeys.findIndex((key) => d.some((s) => s.date === key));
       if (offset === -1) return null;
       return { cast: c, dateKey: preRangeKeys[offset], offset };
