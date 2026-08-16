@@ -600,7 +600,7 @@ function App() {
   useEffect(() => {
     async function initCasts() {
       try {
-        const { data, error } = await supabase.from("casts").select("id, name, is_active, work_start, strong, weak, heaven_id, type, disclose, shindan_note, created_at, store_id").eq("store_id", getActiveStoreId());
+        const { data, error } = await supabase.from("casts").select("id, name, is_active, work_start, strong, weak, heaven_id, type, disclose, shindan_note, auto_mitene_skip, created_at, store_id").eq("store_id", getActiveStoreId());
         if (error) throw error;
 
         if (data.length === 0) {
@@ -643,6 +643,7 @@ function App() {
                 type:         sc.type         ?? undefined,
                 disclose:     sc.disclose     ?? undefined,
                 shindan_note: sc.shindan_note ?? undefined,
+                auto_mitene_skip: !!sc.auto_mitene_skip, // 自動ミテネ除外フラグ（保存は toggleAutoMitene の単独updateのみ）
               };
             });
             setCasts(merged);
@@ -657,7 +658,7 @@ function App() {
   // データ形は initCasts の「Supabaseにデータあり」分岐と同じ（heaven_pass はクライアントに保持しない）。
   async function refreshCasts() {
     try {
-      const { data, error } = await supabase.from("casts").select("id, name, is_active, work_start, strong, weak, heaven_id, type, disclose, shindan_note, created_at, store_id").eq("store_id", getActiveStoreId());
+      const { data, error } = await supabase.from("casts").select("id, name, is_active, work_start, strong, weak, heaven_id, type, disclose, shindan_note, auto_mitene_skip, created_at, store_id").eq("store_id", getActiveStoreId());
       if (error) { console.error("refreshCasts 取得失敗:", error.message, error.details, error.hint); return; }
       if (!Array.isArray(data) || data.length === 0) return; // 空読みではキャスト一覧を壊さない
       const stored = localStorage.getItem(skey("shamenikki_casts"));
@@ -676,6 +677,7 @@ function App() {
           type:         sc.type         ?? undefined,
           disclose:     sc.disclose     ?? undefined,
           shindan_note: sc.shindan_note ?? undefined,
+          auto_mitene_skip: !!sc.auto_mitene_skip, // 自動ミテネ除外フラグ（保存は toggleAutoMitene の単独updateのみ）
         };
       });
       setCasts(merged);
@@ -4470,6 +4472,17 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
       try { supabase.from("casts").upsert(toSupabaseCast(toggled), { onConflict: "store_id,name" }).then(({ error }) => { if (error) console.error("[toggle casts upsert]", error.message, error.details, error.hint); }).catch((e) => console.error("[toggle casts upsert] exception:", e?.message || e)); } catch {}
     }
   }
+  // 「自動ミテネ」トグルの切替即保存。DBの auto_mitene_skip とはトグルの論理が逆（トグルON=対象=skip false）。
+  // toSupabaseCast には含めない（同期・診断等のupsertでフラグが巻き戻らないよう、保存経路はこの単独updateのみ）。
+  // 認証はRLS（既存のクライアント直接書き込みと同じ方針）。
+  function toggleAutoMitene(name) {
+    const updated = casts.map((c) => c.name === name ? { ...c, auto_mitene_skip: !c.auto_mitene_skip } : c);
+    setCasts(updated);
+    const t = updated.find((c) => c.name === name);
+    if (t) {
+      try { supabase.from("casts").update({ auto_mitene_skip: !!t.auto_mitene_skip }).eq("store_id", getActiveStoreId()).eq("name", name).then(({ error }) => { if (error) console.error("[autoMitene casts update]", error.message, error.details, error.hint); }).catch((e) => console.error("[autoMitene casts update] exception:", e?.message || e)); } catch {}
+    }
+  }
   function openGuaranteeModal(castName) {
     const ex = guarantee[castName] || {};
     // shifts[castName] の "M/D" 配列から開始日・終了日を自動算出（保存済み優先）
@@ -4885,6 +4898,8 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                     {!miteneOnly && <Tag label={`得意：${c.strong}`} color={C.green} />}
                     {!miteneOnly && <Tag label={`苦手：${c.weak}`} color={C.yellow} />}
                     {c.heaven_id ? <Tag label="ヘブン✓" color={C.accent} /> : <Tag label="ヘブン未設定" color={C.muted} />}
+                    {/* 自動ミテネOFFの見分け用バッジ（ミテネ専用モードでも表示） */}
+                    {c.auto_mitene_skip && <Tag label="自動ミテネOFF" color={C.muted} />}
                     {!miteneOnly && diagData?.type && <Tag label={`${diagData.type}${isLocked ? " 🔒" : ""}`} color={isLocked ? C.red : C.blue} />}
                     {!miteneOnly && guarantee[c.name]?.type && <Tag label={guarantee[c.name].type === "daily" ? "日保証" : "トータル保証"} color={C.yellow} />}
                   </div>
@@ -4935,6 +4950,15 @@ function CastPage({ casts, setCasts, scores, shifts, setShifts, syncConfig, sett
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginLeft: "10px" }}>
                   <MiteneButton cast={c} />
+                  {/* 自動ミテネ対象のON/OFF（切替即保存。OFF=自動送信・一括送信からスキップ。個別送信ボタンは従来どおり使える）。
+                      ミテネ専用モードでも表示する */}
+                  <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", whiteSpace: "nowrap" }}
+                    onClick={() => toggleAutoMitene(c.name)}>
+                    <div style={{ width: "34px", height: "20px", borderRadius: "10px", background: !c.auto_mitene_skip ? "#1f2b44" : C.border, display: "flex", alignItems: "center", padding: "2px", transition: "all 0.3s", flexShrink: 0 }}>
+                      <div style={{ width: "16px", height: "16px", borderRadius: "50%", background: "white", transform: !c.auto_mitene_skip ? "translateX(14px)" : "translateX(0)", transition: "transform 0.3s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+                    </div>
+                    <span style={{ fontSize: "11px", color: C.sub, fontWeight: "700" }}>自動ミテネ</span>
+                  </label>
                   {/* ミテネ専用モード時は明細UP・個人情報UP・保証設定・過去の給料・帰宅・診断リセットを隠す */}
                   {!miteneOnly && (<>
                   <StatementUpButton
@@ -6227,15 +6251,15 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
     }
 
     try {
-      // 全行を初期化（送信不可は最初からスキップ表示）
+      // 全行を初期化（送信不可は最初からスキップ表示。自動ミテネOFFの子も一括送信の対象外）
       const init = todayCasts.map((c) => {
-        const sendable = !!c.heaven_id;
-        return { name: c.name, sendable, status: sendable ? "pending" : "skip", msg: sendable ? "" : "スキップ（要ID設定）" };
+        const sendable = !!c.heaven_id && !c.auto_mitene_skip;
+        return { name: c.name, sendable, status: sendable ? "pending" : "skip", msg: sendable ? "" : (c.auto_mitene_skip ? "スキップ（自動ミテネOFF）" : "スキップ（要ID設定）") };
       });
       setRows(init);
 
-      // 「送信可」だけを上から順に1人ずつ直列で呼ぶ
-      const sendable = todayCasts.filter((c) => c.heaven_id);
+      // 「送信可」だけを上から順に1人ずつ直列で呼ぶ（自動ミテネOFFは除外）
+      const sendable = todayCasts.filter((c) => c.heaven_id && !c.auto_mitene_skip);
       let totalSent = 0;
       let successCount = 0;
       const errors = [];
@@ -6351,8 +6375,8 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
   const displayRows = rows.length
     ? rows
     : todayCasts.map((c) => {
-        const sendable = !!c.heaven_id;
-        return { name: c.name, sendable, status: sendable ? "pending" : "skip", msg: sendable ? "" : "要ID設定（スキップ）" };
+        const sendable = !!c.heaven_id && !c.auto_mitene_skip;
+        return { name: c.name, sendable, status: sendable ? "pending" : "skip", msg: sendable ? "" : (c.auto_mitene_skip ? "" : "要ID設定（スキップ）") };
       });
 
   const startDisabled = running || todayCasts.length === 0;
@@ -6437,7 +6461,8 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
             return (
             <div key={r.name} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "10px", border: `1px solid ${C.border}`, background: C.surface }}>
               <span style={{ fontWeight: "700", fontSize: "13px", color: C.text, minWidth: "64px" }}>{r.name}</span>
-              {r.sendable ? badge("送信可", C.green) : badge("要ID設定（スキップ）", C.muted)}
+              {/* 自動ミテネOFFの子は「自動OFF」表示（リストからは消さず、スキップされることが分かる形） */}
+              {r.sendable ? badge("送信可", C.green) : rc?.auto_mitene_skip ? badge("自動OFF", C.muted) : badge("要ID設定（スキップ）", C.muted)}
               {rem && <span style={{ fontSize: "10px", color: remDone ? C.red : C.muted, fontWeight: "700", whiteSpace: "nowrap" }}>{miteneRemainingLabel(rem)}</span>}
               {r.msg && <span style={{ fontSize: "11px", color: statusColor[r.status] || C.muted, lineHeight: 1.35, flex: 1 }}>{r.msg}</span>}
             </div>
@@ -6464,6 +6489,8 @@ function BulkMitenePage({ casts, shifts, syncConfig }) {
                 <div key={c.name} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "10px", border: `1px solid ${C.border}`, background: C.surface }}>
                   <span style={{ fontWeight: "700", fontSize: "13px", color: C.text, minWidth: "64px" }}>{c.name}</span>
                   <span style={{ fontSize: "11px", color: C.sub, fontWeight: "700", whiteSpace: "nowrap" }}>{dateKey}</span>
+                  {/* 自動ミテネOFFの子はbot側でスキップされることが分かるよう表示（リストからは消さない） */}
+                  {c.auto_mitene_skip && <span style={{ fontSize: "10px", color: C.muted, fontWeight: "700", whiteSpace: "nowrap" }}>自動OFF</span>}
                   {/* pwSetNames 未取得(null)の間は判定できないため表示しない（全員未取得の誤表示を避ける） */}
                   {pwSetNames && !pwSetNames.has(c.name) && (
                     <span style={{ fontSize: "10px", color: C.muted, fontWeight: "700", whiteSpace: "nowrap" }}>PW未取得</span>

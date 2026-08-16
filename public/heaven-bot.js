@@ -1130,7 +1130,8 @@ async function runAutoSync(store, runDate) {
 // 通常スロット（runAutoSlot）と先出勤ジョブ（runPreMitene）で共用するヘルパー
 // ============================================================
 // 対象日リスト（YYYY-MM-DD配列）に出勤予定の cast_name を重複なしで抽出し、casts と照合して
-// heaven_id / heaven_pass 付きで返す（runAutoSlot の対象抽出を対象日パラメータ化して括り出したもの）
+// heaven_id / heaven_pass 付きで返す（runAutoSlot の対象抽出を対象日パラメータ化して括り出したもの）。
+// auto_mitene_skip=true のキャスト（個別に自動ミテネOFF）はここで除外する＝当日スロットと先出勤の両方に効く。
 async function fetchShiftCasts(storeId, dates) {
   const { data: shiftRows, error: shErr } = await supabaseAdmin.from('shifts')
     .select('cast_name').eq('store_id', storeId).in('date', dates);
@@ -1138,9 +1139,13 @@ async function fetchShiftCasts(storeId, dates) {
   const names = Array.from(new Set((shiftRows || []).map((r) => r.cast_name).filter(Boolean)));
   if (names.length === 0) return [];
   const { data: castRows, error: caErr } = await supabaseAdmin.from('casts')
-    .select('name, heaven_id, heaven_pass').eq('store_id', storeId).in('name', names);
+    .select('name, heaven_id, heaven_pass, auto_mitene_skip').eq('store_id', storeId).in('name', names);
   if (caErr) throw new Error('casts取得失敗: ' + caErr.message);
-  return castRows || [];
+  const all = castRows || [];
+  const targets = all.filter((c) => !c.auto_mitene_skip);
+  const excluded = all.length - targets.length;
+  if (excluded > 0) console.log('[auto-mitene] ' + storeId + ': 自動OFFの' + excluded + '人を除外');
+  return targets;
 }
 
 // 対象キャストへ1人ずつ逐次送信し、1人ごとに mitene_auto_logs へ記録する（runAutoSlot の e/f を括り出したもの）。
