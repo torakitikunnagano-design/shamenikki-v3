@@ -224,6 +224,7 @@ const DEFAULT_STORES = [
   { id: "club_audition_saku",      name: "クラブオーディション佐久" },
   { id: "club_audition_matsumoto", name: "クラブオーディション松本" },
   { id: "viking",                  name: "バイキング" },
+  { id: "refrain",                 name: "リフレイン" },
 ];
 
 // キャスト同期で保存する上位N名（ヘブン掲載順の先頭から）。退店者が大量に残る店舗対策。
